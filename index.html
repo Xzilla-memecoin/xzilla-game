@@ -16,7 +16,10 @@
   *{ box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
   html,body{ margin:0; padding:0; width:100%; height:100%; overflow:hidden; background:#000;
     overscroll-behavior:none; touch-action:none; user-select:none; -webkit-user-select:none; }
-  #game{ position:fixed; inset:0; }
+  
+  /* --- container now sized by JS to match visual viewport --- */
+  #game{ position:fixed; top:0; left:0; /* width/height set by JS */ }
+  
   #fatal{ position:fixed; top:0; left:0; right:0; z-index:999; display:none;
     background:#1a0008; color:#ff6b81; font:12px/1.5 ui-monospace,monospace; padding:14px;
     white-space:pre-wrap; border-bottom:2px solid #ff3b5c; }
@@ -583,6 +586,9 @@ function getViewportSize(){
 }
 window.getViewportSize = getViewportSize;
 function resize(){ const {w,h}=getViewportSize();
+  // --- FIX: set container size to match the visual viewport to prevent canvas cut-off ---
+  container.style.width = w + 'px';
+  container.style.height = h + 'px';
   renderer.setSize(w,h,true); camera.aspect=w/h; camera.updateProjectionMatrix();
   const dist=CAM.z-PLAYER_Z, visH=2*Math.tan(THREE.MathUtils.degToRad(camera.fov)/2)*dist;
   playHalfWidth=(visH*camera.aspect)/2*0.86; placeCamera(); }
@@ -2129,7 +2135,7 @@ document.getElementById("bestScore").textContent=state.best;
         if(prevFrame) prevFrame(dt);
         const t = nowS();
 
-        // animate every live enemy: pop-in -> idle breathe + squash & stretch
+        // animate every live enemy: pop-in -> idle breathe & squash & stretch
         for(const a of active){
           const s=a.sprite; if(!s||!s.visible) continue;
           if(a._bs===undefined){ a._bs=s.scale.x; a._ph=Math.random()*TAU; a._born=t; }
