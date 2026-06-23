@@ -82,8 +82,8 @@
     width:46px; height:46px; border-radius:50%; border:1px solid rgba(255,255,255,.25);
     background:rgba(10,6,19,.6); color:#fff; font-size:18px; pointer-events:auto; cursor:pointer; }
   #tiltBtn{ position:fixed; z-index:25; right:14px; bottom:calc(68px + env(safe-area-inset-bottom));
-    border-radius:20px; border:1px solid rgba(255,255,255,.25); background:rgba(10,6,19,.6); color:#fff;
-    font-family:'Press Start 2P'; font-size:9px; padding:9px 12px; pointer-events:auto; cursor:pointer; white-space:nowrap; }
+    width:46px; height:46px; border-radius:50%; border:1px solid rgba(255,255,255,.25);
+    background:rgba(10,6,19,.6); color:#fff; font-size:18px; pointer-events:auto; cursor:pointer; }
   #tiltBtn.on{ border-color:var(--toxic); color:var(--toxic); box-shadow:0 0 12px rgba(57,255,122,.4); }
   #pauseBtn{ position:fixed; z-index:25; top:calc(10px + env(safe-area-inset-top)); left:50%; transform:translateX(-50%);
     width:38px; height:38px; border-radius:50%; border:1px solid rgba(255,255,255,.25);
@@ -185,7 +185,7 @@
   <div id="popups"></div>
   <div id="banner"></div>
   <button id="soundBtn" class="hidden">🔊</button>
-  <button id="tiltBtn" class="hidden">🎮 TILT: OFF</button>
+  <button id="tiltBtn" class="hidden">📱⇄</button>
   <button id="pauseBtn" class="hidden">⏸</button>
 
   <div id="tabbar" class="hidden">
@@ -313,6 +313,25 @@ function audioInit(){
     if(actx.state==="suspended") actx.resume();
   }catch(e){}
 }
+/* Some mobile browsers/WebViews (notably first playback in a fresh page) have a
+ * noticeable "cold start" latency the very first time real audio output begins —
+ * it can take a few seconds before sound is actually audible. Creating + resuming
+ * the AudioContext on the very first tap anywhere (start screen, wallet button,
+ * whatever) — rather than waiting until Start is pressed — lets that warm-up
+ * latency happen quietly in the background while the player is still reading the
+ * start screen, instead of being heard as "no sound for the first few seconds". */
+(function warmupAudio(){
+  let done=false;
+  function go(){ if(done) return; done=true; audioInit();
+    try{ blip(440,0.05,"sine",0.0001); }catch(e){}   // forces real audio output to actually begin now
+    document.removeEventListener("pointerdown",go,true);
+    document.removeEventListener("touchstart",go,true);
+    document.removeEventListener("keydown",go,true);
+  }
+  document.addEventListener("pointerdown",go,true);
+  document.addEventListener("touchstart",go,true);
+  document.addEventListener("keydown",go,true);
+})();
 /* ---- V2 (V-twin) engine: looping uneven-fire exhaust pulses ---- */
 let engine=null;
 function buildVTwinBuffer(){
@@ -554,13 +573,28 @@ function spawn(){ const e=getEntity(), r=Math.random();
   e.sprite.position.set((Math.random()*2-1)*playHalfWidth, 0.9, SPAWN_Z); e.prevZ=SPAWN_Z; active.push(e); }
 
 /* ============================================================ RESIZE */
-function resize(){ const w=window.innerWidth, h=(tg&&tg.viewportHeight)?tg.viewportHeight:window.innerHeight;
+function getViewportSize(){
+  const vv = window.visualViewport;
+  const w = (vv && vv.width) || window.innerWidth;
+  // prefer Telegram's own settled viewport height; visualViewport next (tracks on-screen
+  // keyboard / mobile browser chrome show-hide better than window.innerHeight); innerHeight last
+  const h = (tg && (tg.viewportStableHeight||tg.viewportHeight)) || (vv && vv.height) || window.innerHeight;
+  return {w,h};
+}
+window.getViewportSize = getViewportSize;
+function resize(){ const {w,h}=getViewportSize();
   renderer.setSize(w,h,true); camera.aspect=w/h; camera.updateProjectionMatrix();
   const dist=CAM.z-PLAYER_Z, visH=2*Math.tan(THREE.MathUtils.degToRad(camera.fov)/2)*dist;
   playHalfWidth=(visH*camera.aspect)/2*0.86; placeCamera(); }
 window.addEventListener("resize",resize);
+if(window.visualViewport) window.visualViewport.addEventListener("resize",resize);
 if(tg&&tg.onEvent){ try{ tg.onEvent("viewportChanged",resize); }catch(e){} }
 resize();
+// Telegram's WebView (and some Android browser chrome) can settle to its final
+// height a moment after load, without firing another resize/viewportChanged
+// event — re-measure a few times early on to catch that, which is what was
+// leaving part of the canvas cut off on some Android devices.
+[60,250,600,1200].forEach(ms=>setTimeout(resize,ms));
 
 /* ============================================================ INPUT */
 function pointerToWorldX(clientX){ const nx=(clientX/window.innerWidth)*2-1; return THREE.MathUtils.clamp(nx*playHalfWidth,-playHalfWidth,playHalfWidth); }
@@ -571,10 +605,15 @@ function onUp(){ dragging=false; }
 renderer.domElement.addEventListener("touchstart",e=>{ e.preventDefault(); onDown(e.touches[0].clientX); },{passive:false});
 renderer.domElement.addEventListener("touchmove", e=>{ e.preventDefault(); onMove(e.touches[0].clientX); },{passive:false});
 renderer.domElement.addEventListener("touchend",  e=>{ e.preventDefault(); onUp(); },{passive:false});
-renderer.domElement.addEventListener("mousedown",e=>onDown(e.clientX));
-window.addEventListener("mouseup",onUp);
-// desktop: the cursor itself steers — no click-and-hold required
-window.addEventListener("mousemove",e=>{ if(!state.running) return; state.playerTargetX=pointerToWorldX(e.clientX); });
+// desktop: relative mouse movement steers (no click-and-hold). Using the cursor's
+// ABSOLUTE position used to "freeze" the ship whenever the mouse reached the edge
+// of the browser viewport (or strayed outside it entirely) — no more mousemove
+// events fire out there, so the target position simply stopped updating. Tracking
+// movementX deltas instead means tiny wiggles near the middle of the screen are
+// enough; the cursor never needs to approach the edge in the first place.
+const MOUSE_SENSITIVITY = 0.022;
+window.addEventListener("mousemove",e=>{ if(!state.running) return;
+  state.playerTargetX = THREE.MathUtils.clamp(state.playerTargetX + (e.movementX||0)*MOUSE_SENSITIVITY, -playHalfWidth, playHalfWidth); });
 
 /* ============================================================ TILT CONTROLS (phone gyro) */
 const tiltBtn = document.getElementById("tiltBtn");
@@ -590,7 +629,7 @@ function onTilt(e){
   const delta = g - tiltCenter;
   state.playerTargetX = THREE.MathUtils.clamp(delta*TILT_SENSITIVITY, -playHalfWidth, playHalfWidth);
 }
-function setTiltLabel(){ if(tiltBtn) tiltBtn.textContent = "🎮 TILT: " + (tiltEnabled?"ON":"OFF"); }
+function setTiltLabel(){ /* icon-only now — color (.on class) signals state, not text */ }
 function enableTilt(){
   window.addEventListener("deviceorientation", onTilt);
   tiltEnabled = true; tiltCenter = null; setTiltLabel();
@@ -847,11 +886,6 @@ document.getElementById("bestScore").textContent=state.best;
   function saveMissions(){ store.set("xz_missions", missions); }
 
   /* ----------------------------- leaderboard ------------------------------ */
-  const SEED_LB = [
-    {name:"0xGhostWhale", score:18400}, {name:"rugproof.sol", score:12950},
-    {name:"ser_apebrain", score:9700},  {name:"fudbuster99", score:6200},
-    {name:"diamondpaws",  score:3100},  {name:"ngmi_nate",   score:1450}
-  ];
   /* run-score milestones — purely cosmetic titles, separate from the wallet-holdings VIP tiers */
   const SCORE_TITLES = [
     {score:100,   name:"SCAM SPOTTER"},
@@ -868,17 +902,19 @@ document.getElementById("bestScore").textContent=state.best;
   function titleForScore(score){
     let t=null; for(const tier of SCORE_TITLES){ if(score>=tier.score) t=tier; else break; } return t;
   }
-  let leaderboard = store.get("xz_lb", null);
-  if(!Array.isArray(leaderboard)) leaderboard = SEED_LB.slice();
   function tgName(){
     try { const u = tg && tg.initDataUnsafe && tg.initDataUnsafe.user;
       if(u) return (u.username ? "@"+u.username : (u.first_name||"YOU")); } catch(e){}
     return "YOU";
   }
+  // No fake rivals, no per-run spam — just your single best score on record, with
+  // your real Telegram name when the game is opened inside Telegram.
+  let myBest = store.get("xz_mybest", null);
   function pushScore(score){
-    leaderboard = leaderboard.concat([{name:tgName(), score:Math.round(score), you:true}])
-      .sort((a,b)=>b.score-a.score).slice(0,10);
-    store.set("xz_lb", leaderboard.map(({you,...r})=>r));
+    const s = Math.round(score);
+    if(!myBest || s>myBest.score) myBest = {name:tgName(), score:s};
+    else myBest.name = tgName();   // keep the name fresh even on a non-record run
+    store.set("xz_mybest", myBest);
   }
 
   /* ------------------------- per-run stat tracking ------------------------ */
@@ -1168,8 +1204,10 @@ document.getElementById("bestScore").textContent=state.best;
       window.__composer = composer;
     }
   } catch(e){ composer=null; }
-  function viewH(){ return (tg && tg.viewportHeight) ? tg.viewportHeight : window.innerHeight; }
-  window.addEventListener("resize", ()=>{ if(composer) composer.setSize(window.innerWidth, viewH()); });
+  function viewH(){ return window.getViewportSize().h; }
+  const resizeComposer = ()=>{ if(composer) composer.setSize(window.innerWidth, viewH()); };
+  window.addEventListener("resize", resizeComposer);
+  if(window.visualViewport) window.visualViewport.addEventListener("resize", resizeComposer);
 
   /* ======================================================================== *
    *  BOSS                                                                     *
@@ -1355,13 +1393,15 @@ document.getElementById("bestScore").textContent=state.best;
   }
   function renderLeaderboard(){
     const best = state.best||0;
+    const myTitle = titleForScore(best);
     $("leaderboardInner").innerHTML =
       '<h2 class="pnl-title" style="border-color:'+MAG+'">DEGEN RANKINGS</h2>'+
-      leaderboard.map((r,i)=>
-        '<div class="lrow'+(r.you?' you':'')+'">'+
-          '<span class="lrank">'+String(i+1).padStart(2,"0")+'</span>'+
-          '<span class="lname">'+r.name+'</span>'+
-          '<b>'+fmt(r.score)+'</b></div>').join("")+
+      (myBest
+        ? '<div class="lrow you">'+
+            '<span class="lrank">\u2605</span>'+
+            '<span class="lname">'+myBest.name+(myTitle?' \u00b7 <span style="color:'+GOLD+'">'+myTitle.name+'</span>':'')+'</span>'+
+            '<b>'+fmt(myBest.score)+'</b></div>'
+        : '<div class="sub">Play a run to set your first score.</div>')+
       '<h2 class="pnl-title" style="border-color:'+GOLD+';margin-top:18px;">RANK MILESTONES</h2>'+
       '<div class="sub" style="margin-bottom:8px;">Best run: '+fmt(best)+' pts</div>'+
       SCORE_TITLES.map(t=>{
@@ -1972,9 +2012,8 @@ document.getElementById("bestScore").textContent=state.best;
         }catch(e){ toast("Share unavailable",RED); }
       };
       $("lbShare").onclick=()=>{
-        const me=leaderboard.find(r=>r.you);
-        const rank=me? (leaderboard.indexOf(me)+1):"—";
-        const txt="I'm rank #"+rank+" in XZILLA: Scam Destroyer 🦖 — best "+fmt(state.best||0);
+        const t=titleForScore(state.best||0);
+        const txt="I'm a "+(t?t.name:"ROOKIE")+" in XZILLA: Scam Destroyer \ud83e\udd96 \u2014 best "+fmt(state.best||0);
         try{ if(tg&&tg.openTelegramLink){ tg.openTelegramLink("https://t.me/share/url?url=&text="+encodeURIComponent(txt)); }
           else { navigator.clipboard.writeText(txt); toast("Rank copied",CYAN); } }catch(e){ toast(txt); }
       };
