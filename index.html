@@ -290,7 +290,10 @@ function startMusic(){ if(!actx||music.playing) return;
 /* ============================================================ THREE: RENDERER */
 if(typeof THREE==="undefined"){ window.__showFatal&&window.__showFatal("Three.js engine failed to load (CDN blocked?). Game cannot start."); throw new Error("THREE not loaded"); }
 const container=document.getElementById("game");
-const renderer=new THREE.WebGLRenderer({ antialias:true, alpha:false });
+// antialias:false — with the bloom EffectComposer active the scene renders into
+// a render target, so MSAA on the default framebuffer never touches geometry and
+// is pure wasted GPU; the bloom blur masks edge aliasing. (P1 optimization)
+const renderer=new THREE.WebGLRenderer({ antialias:false, alpha:false });
 renderer.setPixelRatio(Math.min(window.devicePixelRatio||1,2));
 renderer.outputEncoding=THREE.sRGBEncoding;
 container.appendChild(renderer.domElement);
@@ -452,7 +455,10 @@ resize();
 [60,250,600,1200].forEach(ms=>setTimeout(resize,ms));
 
 /* ============================================================ INPUT */
-function pointerToWorldX(clientX){ const nx=(clientX/window.innerWidth)*2-1; return THREE.MathUtils.clamp(nx*playHalfWidth,-playHalfWidth,playHalfWidth); }
+// Normalize against the canvas/visual-viewport width (same source as camera.aspect
+// in resize()), NOT window.innerWidth — they diverge under Telegram chrome / zoom,
+// which skewed steering. #game sits at (0,0) so clientX is already canvas-relative. (BUG #2)
+function pointerToWorldX(clientX){ const nx=(clientX/getViewportSize().w)*2-1; return THREE.MathUtils.clamp(nx*playHalfWidth,-playHalfWidth,playHalfWidth); }
 let dragging=false;
 function onDown(x){ if(!state.running) return; dragging=true; state.playerTargetX=pointerToWorldX(x); }
 function onMove(x){ if(!state.running||!dragging) return; state.playerTargetX=pointerToWorldX(x); }
@@ -524,7 +530,10 @@ function updateParticles(dt){ for(let i=particles.length-1;i>=0;i--){ const p=pa
   if(p.life<=0){ scene.remove(p.sprite); p.sprite.material.dispose(); particles.splice(i,1); } } }
 const popupsEl=document.getElementById("popups");
 function popup(worldPos,text,color){ const v=worldPos.clone().project(camera);
-  const sx=(v.x*0.5+0.5)*window.innerWidth, sy=(-v.y*0.5+0.5)*window.innerHeight;
+  // Map NDC -> canvas pixels using the canvas/visual-viewport size (matches the
+  // rendered frame), not the window — otherwise popups drift off the 3D sprite
+  // when the canvas is shorter than the window (Telegram chrome / keyboard). (BUG #2)
+  const vp=getViewportSize(); const sx=(v.x*0.5+0.5)*vp.w, sy=(-v.y*0.5+0.5)*vp.h;
   const el=document.createElement("div"); el.className="popup"; el.textContent=text; el.style.left=sx+"px"; el.style.top=sy+"px"; el.style.color=color;
   popupsEl.appendChild(el); setTimeout(()=>el.remove(),900); }
 function shake(a){ state.shake=Math.max(state.shake,a); }

@@ -398,9 +398,14 @@ window._adsPayload = "WwogIHsKICAgICJpZCI6ICJ4emlsbGEtaG9tZSIsCiAgICAidGV4dCI6IC
   // Keep the bloom composer locked to the SAME size as renderer.setSize() in
   // index.html (both from getViewportSize) — mixing innerWidth here caused the
   // post-processed frame to mismatch the canvas and clip on mobile.
-  const resizeComposer = ()=>{ if(composer){ const v=window.getViewportSize(); composer.setSize(v.w, v.h); } };
+  // Composer matches the full canvas; the bloom pass renders at HALF resolution
+  // (¼ the fragments). Bloom is blurred + additively composited, so half-res is
+  // visually ~identical but far cheaper — the biggest mobile GPU win here. (P1)
+  const resizeComposer = ()=>{ if(composer){ const v=window.getViewportSize();
+    composer.setSize(v.w, v.h); if(bloom) bloom.setSize(v.w*0.5, v.h*0.5); } };
   window.addEventListener("resize", resizeComposer);
   if(window.visualViewport) window.visualViewport.addEventListener("resize", resizeComposer);
+  resizeComposer();   // apply half-res bloom immediately (no resize event fires on a plain load)
 
   /* === ANCHOR: BOSS === */
   /* ======================================================================== *
@@ -947,11 +952,13 @@ window._adsPayload = "WwogIHsKICAgICJpZCI6ICJ4emlsbGEtaG9tZSIsCiAgICAidGV4dCI6IC
     const _origAddScore = window.addScore;
     window.addScore = function(base, worldPos){
       const x2 = powActive(px.x2Until) ? 2 : 1;
+      // BUG #1: _origAddScore advances state.wave itself, so reading state.wave
+      // AFTER it always sees the new value and the boss never scheduled. Capture
+      // the wave BEFORE delegating, then detect the crossing here.
+      const prevWave = state.wave;
       _origAddScore(base * x2, worldPos);
-      // wave cadence + boss scheduling on top of base behaviour
-      const nw = 1 + Math.floor(state.score/150);
-      if(nw>state.wave){ state.wave=nw;
-        if(state.wave % 4 === 0 && state.wave!==lastBossWave){ rugPending=true; lastBossWave=state.wave; }
+      if(state.wave > prevWave && state.wave % 4 === 0 && state.wave!==lastBossWave){
+        rugPending=true; lastBossWave=state.wave;
       }
       // rank-milestone callout — once per run, the first time you cross a new title threshold
       const t = titleForScore(state.score);
@@ -1058,8 +1065,14 @@ window._adsPayload = "WwogIHsKICAgICJpZCI6ICJ4emlsbGEtaG9tZSIsCiAgICAidGV4dCI6IC
       if(powActive(px.slowUntil)) parts.push('<span style="color:#7df9ff">⏳'+Math.ceil(px.slowUntil-t)+'</span>');
       if(powActive(px.x2Until))   parts.push('<span style="color:'+GOLD+'">✕2 '+Math.ceil(px.x2Until-t)+'</span>');
       if(powActive(px.magUntil))  parts.push('<span style="color:'+MAG+'">🧲'+Math.ceil(px.magUntil-t)+'</span>');
-      el.innerHTML=parts.join(" ");
-      el.style.display = parts.length? "flex":"none";
+      // P2: this runs every frame — only touch the DOM when the rendered string
+      // actually changes (idle frames, and the 59/60 frames between countdown ticks),
+      // eliminating a per-frame innerHTML parse + layout recalc.
+      const html=parts.join(" ");
+      if(html!==el._lastHtml){
+        el.innerHTML=html; el._lastHtml=html;
+        el.style.display = parts.length? "flex":"none";
+      }
     }
 
     /* ===================================================================== *
