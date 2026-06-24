@@ -100,8 +100,8 @@
   const run = {kills:0, boss:0, combo:0, score:0, earned:0, lastTitle:null};
   function resetRun(){ run.kills=0; run.boss=0; run.combo=0; run.score=0; run.earned=0; run.lastTitle=null; }
 
-  /* ======================================================================== *
   /* === ANCHOR: ART === */
+  /* ======================================================================== *
    *  CANVAS-TEXTURE ART (higher-res, full characters)                        *
    * ======================================================================== */
   function makeTex(draw, S){
@@ -258,8 +258,8 @@
   const myBombMat     = spriteMat(drawBomb2);
   const matWhale      = spriteMat(drawWhale);
 
-  /* ======================================================================== *
   /* === ANCHOR: WORLD === */
+  /* ======================================================================== *
    *  WORLD: floor, sun-streak, skyline walls, rushing pylons, player shadow   *
    * ======================================================================== */
   // Real floor surface — short grass, with a faint center lane glow
@@ -390,8 +390,8 @@
   window.addEventListener("resize", resizeComposer);
   if(window.visualViewport) window.visualViewport.addEventListener("resize", resizeComposer);
 
-  /* ======================================================================== *
   /* === ANCHOR: BOSS === */
+  /* ======================================================================== *
    *  BOSS                                                                     *
    * ======================================================================== */
   TYPE.BOSS = 4;
@@ -413,8 +413,8 @@
     setTimeout(()=>b.classList.remove("mega"),1400);
   }
 
-  /* ======================================================================== *
   /* === ANCHOR: CORE_LOOP === */
+  /* ======================================================================== *
    *  OVERRIDES (these symbols are called internally by name -> reassign works) *
    * ======================================================================== */
   window.addScore = function(base, worldPos){
@@ -494,8 +494,8 @@
       shadow.scale.x = 3 - (player.position.y-0.9)*0.6; } catch(e){}
   };
 
-  /* ======================================================================== *
   /* === ANCHOR: UI_PANELS === */
+  /* ======================================================================== *
    *  UI: tabs, wallet, missions, leaderboard, skins, streak, share            *
    * ======================================================================== */
   const $ = id => document.getElementById(id);
@@ -1213,8 +1213,8 @@
       }
     })();
 
-    /* ===================================================================== *
   /* === ANCHOR: WEB3 === */
+    /* ===================================================================== *
      *  WALLET PANEL — read-only live balance hook (display scaffolding)       *
      *  Adds a "Refresh on-chain balance" affordance. The actual signed        *
      *  read/claim/transfer must be done by you against your mint + RPC; this  *
@@ -1356,8 +1356,8 @@
     })();
 
 
-    /* ===================================================================== *
   /* === ANCHOR: GAME_FEEL === */
+    /* ===================================================================== *
      *  GAME-FEEL / JUICE BUNDLE                                              *
      *  hit-stop · rising-pitch combo audio · combo "heat" (bloom+vignette)   *
      *  · number-rolling score · speed lines · milestone flair · chomp pop    *

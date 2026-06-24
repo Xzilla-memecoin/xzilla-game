@@ -4,7 +4,14 @@
       "Bash(git --version)",
       "Bash(git init *)",
       "Bash(git add *)",
-      "Bash(git -c user.name=KOU -c user.email=kombainain@gmail.com commit -q -m 'refactor: extract CSS to styles.css and SET2 layer to game.js with anchors *)"
+      "Bash(git -c user.name=KOU -c user.email=kombainain@gmail.com commit -q -m 'refactor: extract CSS to styles.css and SET2 layer to game.js with anchors *)",
+      "Bash(node --check index.html)",
+      "Bash(echo \"exit: $?\")",
+      "Bash(node --check game.js)",
+      "Bash(node --check styles.css)",
+      "Bash(node \"C:/Users/KOU/AppData/Local/Temp/claude/C--Users-KOU-Desktop-xzilla-game/ba3eb85d-e8fa-4f89-a7f7-43c1aff043c4/scratchpad/fixanchors.js\")",
+      "Bash(echo \"GAME.JS OK exit:$?\")",
+      "Bash(git -c user.name=KOU -c user.email=kombainain@gmail.com commit -q -m 'fix: repair ANCHOR comments that broke game.js banner comments *)"
     ]
   }
 }
