@@ -11,7 +11,7 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@500;700;900&family=Press+Start+2P&display=swap" rel="stylesheet">
 
-<link rel="stylesheet" href="styles.css?v=14">
+<link rel="stylesheet" href="styles.css?v=15">
 </head>
 <body>
   <div id="game"></div>
@@ -53,7 +53,7 @@
          half of the landscape split (title stays above the image in both orientations). -->
     <div class="heroWrap">
       <h1 class="game-title">XZILLA:<span class="title-accent"> RUG SMASHER</span></h1>
-      <img id="heroImg" alt="Xzilla" src="https://raw.githubusercontent.com/Xzilla-memecoin/xzilla-game/main/images/mainImage.webp?v=14" />
+      <img id="heroImg" alt="Xzilla" src="https://raw.githubusercontent.com/Xzilla-memecoin/xzilla-game/main/images/mainImage.webp?v=15" />
     </div>
     <!-- .startCol is display:contents in portrait (no layout change) and becomes the
          RIGHT column of the side-by-side split in mobile landscape (see styles.css). -->
@@ -399,7 +399,7 @@ const scene=new THREE.Scene();
 scene.fog=new THREE.Fog(0x2a0b40, 22, 60);
 // BASE_FOV is the landscape framing; PORTRAIT_FOV_MAX caps how far the vertical
 // FOV is widened on tall/narrow screens (see resize()) so it never fish-eyes.
-const BASE_FOV=62, PORTRAIT_FOV_MAX=90;
+const BASE_FOV=62, PORTRAIT_FOV_MAX=105;   // 105 lets tall phones widen to ~landscape-parity horizontal view (un-zooms portrait)
 const camera=new THREE.PerspectiveCamera(BASE_FOV,1,0.1,140);
 const CAM={x:0,y:5,z:16}; const PLAYER_Z=8, SPAWN_Z=-30;
 let playHalfWidth=3, camAimY=2.4;
@@ -526,23 +526,25 @@ function spawn(){ const e=getEntity(), r=Math.random();
 
 /* ============================================================ RESIZE */
 function getViewportSize(){
-  // SOURCE OF TRUTH = the game container's real rendered box. CSS pins #game to
-  // 100vw × --tg-viewport-stable-height (Telegram's header-aware inner height), so
-  // reading it back guarantees the WebGL buffer + camera aspect match the display
-  // exactly — no stretch, no zoom inside the Mini App. Fall back to the visual
-  // viewport / Telegram height before the first layout (or outside Telegram).
-  if(container && container.clientWidth && container.clientHeight)
-    return { w: container.clientWidth, h: container.clientHeight };
+  // True VISIBLE viewport. The canvas is sized to EXACTLY this so it never overflows the
+  // screen (overflow crops the view and reads as "zoomed / can't see the full canvas").
+  // visualViewport is the real visible area inside Telegram's webview (below the header);
+  // fall back to inner*, then Telegram's reported height. Clamp to the device window so an
+  // over-reported height can never push the canvas past the visible area.
   const vv = window.visualViewport;
-  const w = (vv && vv.width) || window.innerWidth;
-  const h = (vv && vv.height) || window.innerHeight || (tg && (tg.viewportStableHeight||tg.viewportHeight)) || 0;
+  let w = (vv && vv.width)  || window.innerWidth;
+  let h = (vv && vv.height) || window.innerHeight || (tg && (tg.viewportStableHeight||tg.viewportHeight)) || 0;
+  if(window.innerWidth)  w = Math.min(w, window.innerWidth);
+  if(window.innerHeight) h = Math.min(h, window.innerHeight);
   return {w,h};
 }
 window.getViewportSize = getViewportSize;
 function resize(){ const {w,h}=getViewportSize();
-  // #game is sized entirely by CSS now (100vw × --tg-viewport-stable-height, !important),
-  // so we no longer set its inline width/height here — we just match the renderer buffer
-  // and camera to that real box (w,h from getViewportSize) so nothing stretches.
+  // Size the container to the true visible viewport every resize so the canvas fills the
+  // screen exactly — never taller than visible (which would crop/zoom it). The renderer
+  // buffer + camera aspect use the same w,h, so display and buffer always match.
+  container.style.width = w + "px";
+  container.style.height = h + "px";
   const aspect = w/h;
   // PORTRAIT ZOOM-OUT: Three's PerspectiveCamera FOV is VERTICAL, so the horizontal
   // field of view = vertical·aspect. On tall/narrow phones (aspect<1) that collapses
@@ -935,6 +937,6 @@ document.querySelectorAll("#startScreen .btn").forEach(b=>{
 document.addEventListener("visibilitychange",()=>{ if(document.hidden&&state.running) pauseGame(); });
 document.getElementById("bestScore").textContent=state.best;
 </script>
-<script src="game.js?v=14"></script>
+<script src="game.js?v=15"></script>
 </body>
 </html>

@@ -5,17 +5,13 @@
   *{ box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
   html,body{ margin:0; padding:0; width:100%; height:100%; height:100dvh; overflow:hidden; background:#070318;
     overscroll-behavior:none; touch-action:none; user-select:none; -webkit-user-select:none; }
-  /* Telegram-safe sizing: hard-lock the game box to the device width and Telegram's
-     STABLE inner height (header-bar-aware), so the canvas can't overflow, stretch, or
-     read as zoomed inside the Mini App. --tg-viewport-stable-height is published by
-     telegram-web-app.js; it falls back to 100dvh in a normal browser. JS (getViewportSize)
-     reads this element's real client box back, so the WebGL buffer + camera aspect always
-     match exactly what is displayed (no stretch). body bg is the void so any seam blends. */
+  /* The container is sized precisely by JS (resize() in index.html) to the TRUE visible
+     viewport every frame, so the canvas always exactly fills the visible area — never
+     taller than the screen (which would crop it and read as "zoomed"). The vw/dvh values
+     here are only a pre-JS fallback; dvh tracks the Telegram/browser chrome. body bg is
+     the void so any sub-pixel seam during a rotate/resize blends with the scene. */
   #game{ position:fixed; inset:0; margin:0; padding:0; overflow:hidden;
-    width:100vw !important;
-    height:100vh !important;
-    height:var(--tg-viewport-stable-height, 100dvh) !important;
-    max-height:100% !important; }
+    width:100vw; height:100vh; height:100dvh; }
   #fatal{ position:fixed; top:0; left:0; right:0; z-index:999; display:none;
     background:#1a0008; color:#ff6b81; font:12px/1.5 ui-monospace,monospace; padding:14px;
     white-space:pre-wrap; border-bottom:2px solid #ff3b5c; }
