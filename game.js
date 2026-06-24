@@ -1063,10 +1063,11 @@ window._adsPayload = "WwogIHsKICAgICJpZCI6ICJ4emlsbGEtaG9tZSIsCiAgICAidGV4dCI6IC
       }
       _showTab(name);
     };
-    // re-bind existing tab buttons through the wrapped showTab
-    document.querySelectorAll("#tabbar .tab").forEach(b=>{
-      b.addEventListener("click", ()=>showTab(b.dataset.tab));
-    });
+    // NOTE: the original tab buttons are already wired at "// tab bar wiring" above;
+    // that handler closes over `showTab`, which we just reassigned, so it routes
+    // through the wrapped version automatically. The UPGRADE button is wired in
+    // ensureUpgradeTab(). Re-binding here would add a 2nd listener and fire showTab
+    // (a full panel re-render) twice per tab tap — so it is intentionally omitted.
 
     function renderUpgrades(){
       const tier=tierFor(econ.holdings);
@@ -1533,7 +1534,6 @@ window._adsPayload = "WwogIHsKICAgICJpZCI6ICJ4emlsbGEtaG9tZSIsCiAgICAidGV4dCI6IC
         AD_IMAGES.length=0; AD_IMAGES.push(...imgs);
         AD_LINKS.length=0;  AD_LINKS.push(...links);
         imgs.forEach(adImage);   // warm the image cache so backgrounds are ready ASAP
-        try{ console.log("[ads] decoded window._adsPayload:",AD_MSGS.length,"ads"); }catch(_){}
       })();
 
       // The billboard panel itself is a FIXED size (flush-mounted on the tower
