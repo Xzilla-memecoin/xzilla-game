@@ -98,6 +98,7 @@
   .go-rank-label{ font-size:8px; letter-spacing:3px; color:#9fb6c9; opacity:.7; }
   .go-rank-cur{ font-family:'Press Start 2P'; font-size:13px; color:var(--gold); text-shadow:0 0 12px var(--gold); }
   .go-rank-next{ font-size:10px; letter-spacing:.5px; color:#9fb6c9; }
+  .go-rank-world{ margin-top:3px; font-family:'Press Start 2P'; font-size:9px; color:var(--cyan); text-shadow:0 0 8px var(--cyan); }
   .go-stats{ display:flex; flex-direction:column; align-items:center; }
   .stat{ font-size:13px; margin:6px 0; letter-spacing:1px; }
   .stat .num{ color:var(--cyan); font-weight:900; font-size:20px; text-shadow:0 0 10px var(--cyan); }

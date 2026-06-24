@@ -506,8 +506,29 @@ window._adsPayload = "WwogIHsKICAgICJpZCI6ICJ4emlsbGEtaG9tZSIsCiAgICAidGV4dCI6IC
     if(score<=0) return;
     try{
       fetch(api + "/submit", { method:"POST", headers:{ "content-type":"application/json" },
-        body: JSON.stringify({ initData: tg.initData, score }) }).catch(()=>{});
+        body: JSON.stringify({ initData: tg.initData, score }) })
+        .then(r=>r.json()).then(d=>{
+          const el=document.getElementById("goWorldRank"); if(!el) return;
+          if(d && d.rank){ el.textContent="🌍 GLOBAL RANK #"+d.rank; el.style.color=GOLD; }
+          else el.textContent="";
+        }).catch(()=>{ const el=document.getElementById("goWorldRank"); if(el) el.textContent=""; });
     }catch(_){}
+  }
+  // Nicely-formatted score share that also links the bot so friends can tap & play.
+  function shareScore(){
+    const best  = Math.max(Math.round(state.best||0), (myBest&&myBest.score)||0, Math.round(state.score||0));
+    const t     = titleForScore(best);
+    const title = t ? t.name : "ROOKIE";
+    const link  = window.__BOT_SHARE_URL || "";
+    const txt   = "🦖 I smashed "+fmt(best)+" pts as "+title+" in XZILLA: RUG SMASHER!\nThink you can beat my rank? 👇";
+    try{
+      if(tg && tg.openTelegramLink){
+        tg.openTelegramLink("https://t.me/share/url?url="+encodeURIComponent(link)+"&text="+encodeURIComponent(txt));
+        return;
+      }
+    }catch(_){}
+    const full = txt + (link ? ("\n"+link) : "");
+    try{ navigator.clipboard.writeText(full); toast("Copied — paste anywhere to share!",CYAN); }catch(_){ toast(full); }
   }
   function updateHUDtokens(){ const b=$("bagHud"); if(b) b.textContent=abbr(econ.tokens); }
   function updateVip(){
@@ -696,7 +717,9 @@ window._adsPayload = "WwogIHsKICAgICJpZCI6ICJ4emlsbGEtaG9tZSIsCiAgICAidGV4dCI6IC
       rankEl.innerHTML='<span class="go-rank-label">ACTIVE RANK</span>'+
         '<span class="go-rank-cur">★ '+(cur?cur.name:"UNRANKED")+'</span>'+
         (next ? '<span class="go-rank-next">'+fmt(next.score-bestSc)+' pts to '+next.name+'</span>'
-              : '<span class="go-rank-next">MAX RANK REACHED</span>');
+              : '<span class="go-rank-next">MAX RANK REACHED</span>')+
+        // global-rank line: filled async by submitLeaderboard() when /submit replies
+        ((lbApi() && tg && tg.initData) ? '<span class="go-rank-world" id="goWorldRank">🌍 finding your global rank…</span>' : '');
     }
     updateHUDtokens();
     $("tabbar").classList.remove("hidden");
@@ -722,12 +745,8 @@ window._adsPayload = "WwogIHsKICAgICJpZCI6ICJ4emlsbGEtaG9tZSIsCiAgICAidGV4dCI6IC
     const menu=document.createElement("button"); menu.className="btn secondary"; menu.textContent="◀ MENU";
     menu.addEventListener("click", ()=>{ $("gameOverScreen").classList.add("hidden");
       $("tabbar").classList.remove("hidden"); showTab("PLAY"); });
-    const share=document.createElement("button"); share.className="btn secondary"; share.textContent="SHARE SCORE";
-    share.addEventListener("click", ()=>{
-      const txt="I scored "+fmt(state.score)+" smashing scammers in XZILLA Scam Destroyer 🦖";
-      try{ if(tg&&tg.openTelegramLink){ tg.openTelegramLink("https://t.me/share/url?url=&text="+encodeURIComponent(txt)); return; } }catch(e){}
-      try{ navigator.clipboard.writeText(txt); toast("Score copied to clipboard",CYAN); }catch(e){ toast(txt); }
-    });
+    const share=document.createElement("button"); share.className="btn secondary"; share.textContent="📣 SHARE SCORE";
+    share.addEventListener("click", shareScore);
     gb.appendChild(menu); gb.appendChild(share);
   })();
 
@@ -1285,12 +1304,11 @@ window._adsPayload = "WwogIHsKICAgICJpZCI6ICJ4emlsbGEtaG9tZSIsCiAgICAidGV4dCI6IC
         (lbApi() ? '' : '<div class="sub" style="opacity:.7">Global TOP 10 activates once the $XZILLA leaderboard backend is connected.</div>');
       host.appendChild(wrap);
       $("lbInvite").onclick=()=>{
-        const link = (tg && tg.initDataUnsafe && tg.initDataUnsafe.user)
-          ? "https://t.me/share/url?url=&text="+encodeURIComponent("Hunt scammers with me in XZILLA 🦖 — claim your starter XP boost")
-          : null;
+        const link = window.__BOT_SHARE_URL || "";
+        const txt  = "🦖 Hunt scammers with me in XZILLA: RUG SMASHER — climb the global leaderboard! 👇";
         try{
-          if(tg && tg.openTelegramLink && link){ tg.openTelegramLink(link); }
-          else { navigator.clipboard.writeText("Play XZILLA: Scam Destroyer 🦖"); toast("Invite copied",CYAN); }
+          if(tg && tg.openTelegramLink){ tg.openTelegramLink("https://t.me/share/url?url="+encodeURIComponent(link)+"&text="+encodeURIComponent(txt)); }
+          else { navigator.clipboard.writeText(txt + (link?("\n"+link):"")); toast("Invite copied",CYAN); }
           // local referral reward (server should be the real source of truth)
           if(!store.get("xz_invited_once",false)){
             econ.tokens+=500; saveEcon(); updateHUDtokens(); store.set("xz_invited_once",true);
@@ -1298,12 +1316,7 @@ window._adsPayload = "WwogIHsKICAgICJpZCI6ICJ4emlsbGEtaG9tZSIsCiAgICAidGV4dCI6IC
           }
         }catch(e){ toast("Share unavailable",RED); }
       };
-      $("lbShare").onclick=()=>{
-        const t=titleForScore(state.best||0);
-        const txt="I'm a "+(t?t.name:"ROOKIE")+" in XZILLA: Scam Destroyer \ud83e\udd96 \u2014 best "+fmt(state.best||0);
-        try{ if(tg&&tg.openTelegramLink){ tg.openTelegramLink("https://t.me/share/url?url=&text="+encodeURIComponent(txt)); }
-          else { navigator.clipboard.writeText(txt); toast("Rank copied",CYAN); } }catch(e){ toast(txt); }
-      };
+      $("lbShare").onclick=shareScore;
     };
 
     /* weekly local reset so the board feels alive ---------------------------- */
