@@ -9,7 +9,7 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@500;700;900&family=Press+Start+2P&display=swap" rel="stylesheet">
 
-<link rel="stylesheet" href="styles.css?v=2">
+<link rel="stylesheet" href="styles.css?v=3">
 </head>
 <body>
   <div id="game"></div>
@@ -46,14 +46,18 @@
   </div>
 
   <div id="startScreen" class="overlay">
-    <img id="heroImg" alt="Xzilla" src="https://raw.githubusercontent.com/Xzilla-memecoin/xzilla-game/main/images/mainImage.webp" />
-    <div class="logo"><span class="sub">3D SCAM DESTROYER</span></div>
-    <p class="tag">The kaiju that hunts the chain. Smash <b class="good">SCAMMERS</b>, paid KOLs &amp; ruggers
-      for points — but never crush a loyal <b class="bad">HODLER</b>. Three strikes and you're rugged.</p>
-    <button id="startBtn" class="btn">▶ START GAME</button>
-    <button id="connectBtn" class="btn secondary small" style="margin-top:18px;">CONNECT YOUR XZILLA HODL WALLET FOR SCORE MULTIPLIERS</button>
-    <div id="walletInfo" class="wallet">Wallet not connected</div>
-    <div id="vipStatus" class="status-line"></div>
+    <img id="heroImg" alt="Xzilla" src="https://raw.githubusercontent.com/Xzilla-memecoin/xzilla-game/main/images/mainImage.webp?v=3" />
+    <!-- .startCol is display:contents in portrait (no layout change) and becomes the
+         RIGHT column of the side-by-side split in mobile landscape (see styles.css). -->
+    <div class="startCol">
+      <div class="logo"><span class="sub">For the ultimate arcade experience, rotate to landscape and enable tilting.</span></div>
+      <p class="tag">The kaiju that hunts the chain. Smash <b class="good">SCAMMERS</b>, paid KOLs &amp; ruggers
+        for points — but never crush a loyal <b class="bad">HODLER</b>. Three strikes and you're rugged.</p>
+      <button id="startBtn" class="btn">▶ START GAME</button>
+      <button id="connectBtn" class="btn secondary small" style="margin-top:18px;">CONNECT YOUR XZILLA HODL WALLET FOR SCORE MULTIPLIERS</button>
+      <div id="walletInfo" class="wallet">Wallet not connected</div>
+      <div id="vipStatus" class="status-line"></div>
+    </div>
   </div>
 
   <div id="walletPanel" class="overlay panel hidden"><div class="panelInner" id="walletInner"></div></div>
@@ -229,6 +233,31 @@ function stopEngine(){
     engine.vca.gain.setValueAtTime(engine.vca.gain.value,t); engine.vca.gain.linearRampToValueAtTime(0.0001,t+0.5);
     const e=engine; setTimeout(()=>{try{e.src.stop();e.sub.stop();}catch(_){}} ,560);
     engine=null;
+  }catch(e){}
+}
+/* ---- start-screen "rev" SFX: real motorcycle-rev mp3 from /sounds ----
+ * Decoded once up-front into revBuffer (own throwaway context, like the custom
+ * music/engine preloader above). playRev() fires a short, snappy rev whenever a
+ * player hovers/taps a primary start-screen button — playbackRate>1 makes it read
+ * as a quick "rapid rev" rather than the full clip, and a small throttle stops a
+ * hover+tap on the same button from double-firing. */
+let revBuffer=null, _lastRev=0;
+(function preloadRev(){
+  try{
+    const dctx=new (window.AudioContext||window.webkitAudioContext)();
+    fetch("sounds/tanweraman-motorcycle-engine-rev-2-337870.mp3").then(r=>r.arrayBuffer())
+      .then(b=>dctx.decodeAudioData(b)).then(dec=>{ revBuffer=dec; try{ dctx.close(); }catch(_){} })
+      .catch(()=>{ /* missing/blocked file — silently skip the rev */ });
+  }catch(e){}
+})();
+function playRev(){
+  const now=Date.now(); if(now-_lastRev<140) return; _lastRev=now;
+  if(!revBuffer) return;
+  audioInit();                                  // lazily create/resume the context on first interaction
+  if(!actx) return;
+  try{
+    const s=actx.createBufferSource(); s.buffer=revBuffer; s.playbackRate.value=1.35;
+    const g=actx.createGain(); g.gain.value=0.9; s.connect(g); g.connect(sfxGain||masterGain); s.start();
   }catch(e){}
 }
 function blip(freq,dur,type,vol,dest){
@@ -542,16 +571,20 @@ function enableTilt(){
   window.addEventListener("deviceorientation", onTilt);
   tiltEnabled = true; tiltCenter = null;
   if(tiltBtn) tiltBtn.classList.add("on");
+  try{ localStorage.setItem("xzilla_tilt","1"); }catch(_){}   // persist the toggle preference
 }
 function disableTilt(){
   tiltEnabled = false;
   if(tiltBtn) tiltBtn.classList.remove("on");
+  try{ localStorage.setItem("xzilla_tilt","0"); }catch(_){}
 }
 if(tiltBtn && isTouchDevice && hasOrientation){
-  // Capable, but keep it hidden until a run starts — at z-index 25 it sits behind the
-  // translucent menu/overlay (z-index 40) and would otherwise bleed through. startGame/
-  // resumeGame show it; gameOver/quitToMenu/pauseGame hide it (mirrors #pauseBtn).
+  // Dedicated tilt toggle — visible & interactive from the start screen, mirroring the
+  // sound button. It sits at z-index 50 (above the overlays) so it stays on-screen and
+  // tappable on every screen without bleeding through, so we no longer show/hide it
+  // per run. Stacked just above #soundBtn in the bottom-right corner, clear of the menu.
   tiltAvailable = true;
+  tiltBtn.classList.remove("hidden");
   tiltBtn.addEventListener("click", async ()=>{
     if(tiltEnabled){ disableTilt(); return; }
     // iOS 13+ requires an explicit permission grant from a real tap — this click is that tap.
@@ -562,6 +595,12 @@ if(tiltBtn && isTouchDevice && hasOrientation){
       } else { enableTilt(); }
     }catch(e){ toast("Tilt unavailable on this device",RED); }
   });
+  // Restore a previously-saved "on" preference. iOS gates the sensor behind a fresh
+  // per-tap permission prompt, so there we leave it off until the button is pressed;
+  // platforms without that prompt (Android/desktop) re-arm tilt automatically.
+  try{
+    if(localStorage.getItem("xzilla_tilt")==="1" && typeof DeviceOrientationEvent.requestPermission!=="function") enableTilt();
+  }catch(_){}
 }
 
 window.addEventListener("keydown",e=>{ if(!state.running) return;
@@ -687,13 +726,12 @@ function startGame(){ audioInit(); startMusic(); startEngine(); resetGame();
   document.getElementById("startScreen").classList.add("hidden"); document.getElementById("gameOverScreen").classList.add("hidden");
   document.getElementById("pauseScreen").classList.add("hidden");
   el.hud.classList.remove("hidden"); /* sound toggle is always visible now */ el.vipBadge.style.display=state.vip?"inline-block":"none"; vipGlow.material.opacity=0; state.running=true;
-  document.getElementById("pauseBtn").classList.remove("hidden");
-  if(tiltAvailable) tiltBtn.classList.remove("hidden"); }
+  document.getElementById("pauseBtn").classList.remove("hidden"); }
 function gameOver(){ state.running=false; stopEngine(); sfx.over();
   if(state.score>state.best){ state.best=Math.floor(state.score); try{ localStorage.setItem("xzilla_best",String(state.best)); }catch(e){} }
   document.getElementById("finalScore").textContent=Math.floor(state.score); document.getElementById("finalKills").textContent=state.kills;
   document.getElementById("bestScore").textContent=state.best; document.getElementById("gameOverScreen").classList.remove("hidden"); el.hud.classList.add("hidden");
-  document.getElementById("pauseBtn").classList.add("hidden"); tiltBtn.classList.add("hidden"); }
+  document.getElementById("pauseBtn").classList.add("hidden"); }
 
 /* ============================================================ PAUSE */
 let isPaused = false;
@@ -701,14 +739,12 @@ function pauseGame(){
   if(!state.running || isPaused) return;
   isPaused = true; state.running = false;
   try{ if(actx && actx.state==="running") actx.suspend(); }catch(e){}   // freezes music + engine + sfx in place
-  tiltBtn.classList.add("hidden");   // don't let it bleed through the pause overlay
   document.getElementById("pauseScreen").classList.remove("hidden");
 }
 function resumeGame(){
   if(!isPaused) return;
   isPaused = false; state.running = true;
   try{ if(actx && actx.state==="suspended") actx.resume(); }catch(e){}
-  if(tiltAvailable) tiltBtn.classList.remove("hidden");
   document.getElementById("pauseScreen").classList.add("hidden");
 }
 function quitToMenu(){
@@ -717,7 +753,7 @@ function quitToMenu(){
   stopEngine();
   document.getElementById("pauseScreen").classList.add("hidden");
   document.getElementById("gameOverScreen").classList.add("hidden");
-  el.hud.classList.add("hidden"); document.getElementById("pauseBtn").classList.add("hidden"); tiltBtn.classList.add("hidden");
+  el.hud.classList.add("hidden"); document.getElementById("pauseBtn").classList.add("hidden");
   document.getElementById("startScreen").classList.remove("hidden");
 }
 document.getElementById("pauseBtn").addEventListener("click",pauseGame);
@@ -753,9 +789,14 @@ document.getElementById("connectBtn").addEventListener("click",connectWallet);
 document.getElementById("startBtn").addEventListener("click",startGame);
 document.getElementById("retryBtn").addEventListener("click",startGame);
 el.sound.addEventListener("click",()=>{ state.soundOn=!state.soundOn; el.sound.textContent=state.soundOn?"🔊":"🔇"; audioInit(); if(masterGain) masterGain.gain.value=state.soundOn?1:0; });
+// Rev the bike when hovering (desktop) or tapping the primary start-screen buttons.
+document.querySelectorAll("#startScreen .btn").forEach(b=>{
+  b.addEventListener("mouseenter", playRev);
+  b.addEventListener("pointerdown", playRev);
+});
 document.addEventListener("visibilitychange",()=>{ if(document.hidden&&state.running) pauseGame(); });
 document.getElementById("bestScore").textContent=state.best;
 </script>
-<script src="game.js?v=2"></script>
+<script src="game.js?v=3"></script>
 </body>
 </html>

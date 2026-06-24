@@ -69,7 +69,15 @@
     animation:heroFloat 3.2s ease-in-out infinite; }
   @keyframes heroFloat{ 0%,100%{transform:translateY(0) rotate(-1deg)} 50%{transform:translateY(-10px) rotate(1deg)} }
   .logo{ font-family:'Press Start 2P'; line-height:1.5; margin-bottom:6px; }
-  .logo .sub{ font-size:13px; color:var(--magenta); text-shadow:0 0 12px var(--magenta); display:block; }
+  /* Subtitle directly under the hero title: a small, clean (non-pixel) instructional
+     line — readable as a full sentence where the Press Start 2P pixel font would not. */
+  .logo .sub{ font-family:'Orbitron',sans-serif; font-weight:500; font-size:11px; letter-spacing:.4px;
+    line-height:1.5; color:var(--cyan); text-shadow:0 0 10px rgba(33,230,255,.5); display:block;
+    max-width:320px; margin:0 auto; }
+  /* Right-hand column wrapper. display:contents = invisible to layout in portrait (its
+     children flow as direct flex items of #startScreen, unchanged); the landscape media
+     query promotes it to the flex column on the RIGHT half of the split. */
+  .startCol{ display:contents; }
   .tag{ font-size:12px; letter-spacing:.5px; opacity:.88; max-width:320px; margin:12px 0 24px; line-height:1.6; }
   .tag b.good{ color:var(--magenta); } .tag b.bad{ color:var(--cyan); }
   .btn{ font-family:'Press Start 2P'; font-size:13px; letter-spacing:1px; color:#04130a; background:var(--toxic);
@@ -91,7 +99,10 @@
   #soundBtn{ position:fixed; z-index:50; right:14px; bottom:calc(14px + env(safe-area-inset-bottom));
     width:46px; height:46px; border-radius:50%; border:1px solid rgba(255,255,255,.25);
     background:rgba(10,6,19,.6); color:#fff; font-size:18px; pointer-events:auto; cursor:pointer; }
-  #tiltBtn{ position:fixed; z-index:25; right:14px; bottom:calc(68px + env(safe-area-inset-bottom));
+  /* z-index 50 (matching #soundBtn) keeps the tilt toggle above the overlays so it is
+     visible and tappable on the start screen and every other screen, stacked just above
+     the sound button in the bottom-right corner — clear of the menu text/buttons. */
+  #tiltBtn{ position:fixed; z-index:50; right:14px; bottom:calc(68px + env(safe-area-inset-bottom));
     width:46px; height:46px; border-radius:50%; border:1px solid rgba(255,255,255,.25);
     background:rgba(10,6,19,.6); color:#fff; font-size:18px; pointer-events:auto; cursor:pointer; }
   #tiltBtn.on{ border-color:var(--toxic); color:var(--toxic); box-shadow:0 0 12px rgba(57,255,122,.4); }
@@ -195,4 +206,25 @@
     .tag{ margin:8px 0 14px; }
     .go-buttons{ margin-top:16px; gap:8px; }
     .panelInner{ max-height:74vh; }
+  }
+
+  /* === ANCHOR: LANDSCAPE-SPLIT === */
+  /* Mobile landscape (short viewport): stop stacking the start menu vertically — which
+     would push the buttons off a short landscape screen and force scrolling — and lay it
+     out side-by-side instead: the hero art fills the LEFT half, and the subtitle, tagline,
+     options and action buttons sit tightly on the RIGHT half. Everything is constrained
+     within 100vh (overflow hidden on the row; the right column caps at 100vh with an
+     auto-scroll safety net) so the player never has to scroll to reach START. */
+  @media (orientation:landscape) and (max-height:600px){
+    #startScreen{ flex-direction:row; flex-wrap:nowrap; align-items:center; justify-content:center;
+      gap:22px; padding:8px 22px; padding-top:calc(8px + env(safe-area-inset-top)); overflow:hidden; }
+    #startScreen #heroImg{ flex:0 1 44%; width:auto; max-width:44%; max-height:86vh; margin:0; align-self:center; }
+    #startScreen .startCol{ display:flex; flex-direction:column; align-items:center; justify-content:center;
+      flex:1 1 50%; max-width:440px; max-height:100vh; overflow-y:auto; gap:5px; text-align:center; }
+    #startScreen .logo{ margin-bottom:2px; }
+    #startScreen .logo .sub{ font-size:10px; max-width:none; }
+    #startScreen .tag{ font-size:9px; line-height:1.5; margin:4px 0 8px; max-width:none; }
+    #startScreen #startBtn{ font-size:12px; padding:13px 22px; }
+    #startScreen #connectBtn{ margin-top:8px !important; font-size:8px; padding:9px 12px; }
+    #startScreen .wallet, #startScreen .status-line{ font-size:9px; margin-top:4px; }
   }
