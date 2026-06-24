@@ -592,10 +592,21 @@ window._adsPayload = "WwogIHsKICAgICJpZCI6ICJ4emlsbGEtaG9tZSIsCiAgICAidGV4dCI6IC
     pushScore(state.score);
     // augment game over screen
     const go=$("gameOverScreen");
+    // EARNED-XP line lives inside .go-stats so it joins the stats row in landscape.
+    const goStats=go.querySelector(".go-stats");
     let extra=$("goExtra");
     if(!extra){ extra=document.createElement("div"); extra.id="goExtra"; extra.className="stat";
-      go.querySelector(".go-buttons").before(extra); }
+      if(goStats) goStats.appendChild(extra); else go.querySelector(".go-buttons").before(extra); }
     extra.innerHTML = 'EARNED <span class="num" style="color:'+GOLD+'">+'+fmt(run.earned)+'</span> XP';
+    // current rank milestone for this run + how far to the next one
+    const rankEl=$("goRank");
+    if(rankEl){
+      const cur=titleForScore(state.score);
+      let next=null; for(const tier of SCORE_TITLES){ if(tier.score>state.score && (!next||tier.score<next.score)) next=tier; }
+      rankEl.innerHTML='<span class="go-rank-cur">★ '+(cur?cur.name:"UNRANKED")+'</span>'+
+        (next ? '<span class="go-rank-next">'+fmt(next.score-Math.round(state.score))+' pts to '+next.name+'</span>'
+              : '<span class="go-rank-next">MAX RANK REACHED</span>');
+    }
     updateHUDtokens();
     $("tabbar").classList.remove("hidden");
   };

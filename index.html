@@ -9,7 +9,7 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@500;700;900&family=Press+Start+2P&display=swap" rel="stylesheet">
 
-<link rel="stylesheet" href="styles.css?v=4">
+<link rel="stylesheet" href="styles.css?v=5">
 </head>
 <body>
   <div id="game"></div>
@@ -46,13 +46,13 @@
   </div>
 
   <div id="startScreen" class="overlay">
-    <img id="heroImg" alt="Xzilla" src="https://raw.githubusercontent.com/Xzilla-memecoin/xzilla-game/main/images/mainImage.webp?v=4" />
+    <img id="heroImg" alt="Xzilla" src="https://raw.githubusercontent.com/Xzilla-memecoin/xzilla-game/main/images/mainImage.webp?v=5" />
     <!-- .startCol is display:contents in portrait (no layout change) and becomes the
          RIGHT column of the side-by-side split in mobile landscape (see styles.css). -->
     <div class="startCol">
-      <div class="logo"><span class="sub">For the ultimate arcade experience, rotate to landscape and enable tilting.</span></div>
-      <p class="tag">The kaiju that hunts the chain. Smash <b class="good">SCAMMERS</b>, paid KOLs &amp; ruggers
-        for points — but never crush a loyal <b class="bad">HODLER</b>. Three strikes and you're rugged.</p>
+      <!-- Mobile-only nudge: shown to touch players in portrait; hidden on desktop and
+           once they have already rotated to landscape (see .orient-hint in styles.css). -->
+      <p class="orient-hint">For the ultimate arcade experience, rotate to landscape and enable tilting.</p>
       <button id="startBtn" class="btn">▶ START GAME</button>
       <button id="connectBtn" class="btn secondary small" style="margin-top:18px;">CONNECT YOUR XZILLA HODL WALLET FOR SCORE MULTIPLIERS</button>
       <div id="walletInfo" class="wallet">Wallet not connected</div>
@@ -73,9 +73,12 @@
 
   <div id="gameOverScreen" class="overlay hidden">
     <div class="go-title">GAME OVER</div>
-    <div class="stat">SCORE <span id="finalScore" class="num">0</span></div>
-    <div class="stat">SCAMS DESTROYED <span id="finalKills" class="num">0</span></div>
-    <div class="stat best">BEST <span id="bestScore" class="num">0</span></div>
+    <div id="goRank" class="go-rank"></div>
+    <div class="go-stats">
+      <div class="stat">SCORE <span id="finalScore" class="num">0</span></div>
+      <div class="stat">SCAMS <span id="finalKills" class="num">0</span></div>
+      <div class="stat best">BEST <span id="bestScore" class="num">0</span></div>
+    </div>
     <div class="go-buttons"><button id="retryBtn" class="btn">▶ PLAY AGAIN</button></div>
   </div>
 
@@ -797,6 +800,6 @@ document.querySelectorAll("#startScreen .btn").forEach(b=>{
 document.addEventListener("visibilitychange",()=>{ if(document.hidden&&state.running) pauseGame(); });
 document.getElementById("bestScore").textContent=state.best;
 </script>
-<script src="game.js?v=4"></script>
+<script src="game.js?v=5"></script>
 </body>
 </html>

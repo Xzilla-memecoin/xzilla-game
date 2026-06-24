@@ -68,18 +68,16 @@
     filter:drop-shadow(0 0 30px rgba(57,255,122,.6)) drop-shadow(0 0 12px rgba(0,0,0,.6));
     animation:heroFloat 3.2s ease-in-out infinite; }
   @keyframes heroFloat{ 0%,100%{transform:translateY(0) rotate(-1deg)} 50%{transform:translateY(-10px) rotate(1deg)} }
-  .logo{ font-family:'Press Start 2P'; line-height:1.5; margin-bottom:6px; }
-  /* Subtitle directly under the hero title: a small, clean (non-pixel) instructional
-     line — readable as a full sentence where the Press Start 2P pixel font would not. */
-  .logo .sub{ font-family:'Orbitron',sans-serif; font-weight:500; font-size:11px; letter-spacing:.4px;
-    line-height:1.5; color:var(--cyan); text-shadow:0 0 10px rgba(33,230,255,.5); display:block;
-    max-width:320px; margin:0 auto; }
+  /* Rotate-to-landscape nudge. Hidden by default; only revealed to mobile/touch
+     players who are still in portrait (see the @media rule near the bottom) — pointless
+     on desktop or once already rotated to landscape. Clean, readable Orbitron. */
+  .orient-hint{ display:none; font-family:'Orbitron',sans-serif; font-weight:500; font-size:11px;
+    letter-spacing:.4px; line-height:1.5; color:var(--cyan); text-shadow:0 0 10px rgba(33,230,255,.5);
+    max-width:320px; margin:0 auto 4px; }
   /* Right-hand column wrapper. display:contents = invisible to layout in portrait (its
      children flow as direct flex items of #startScreen, unchanged); the landscape media
      query promotes it to the flex column on the RIGHT half of the split. */
   .startCol{ display:contents; }
-  .tag{ font-size:12px; letter-spacing:.5px; opacity:.88; max-width:320px; margin:12px 0 24px; line-height:1.6; }
-  .tag b.good{ color:var(--magenta); } .tag b.bad{ color:var(--cyan); }
   .btn{ font-family:'Press Start 2P'; font-size:13px; letter-spacing:1px; color:#04130a; background:var(--toxic);
     border:none; border-radius:10px; padding:18px 26px; cursor:pointer; pointer-events:auto;
     box-shadow:0 0 22px rgba(57,255,122,.55), inset 0 -4px 0 rgba(0,0,0,.25); transition:transform .08s ease; }
@@ -88,11 +86,16 @@
   .btn.small{ font-size:9px; padding:11px 16px; border-radius:8px; line-height:1.5; max-width:260px; }
   .wallet{ margin-top:18px; font-size:10px; letter-spacing:1px; min-height:16px; color:var(--cyan); opacity:.9; word-break:break-all; max-width:300px; }
   .status-line{ margin-top:8px; font-size:10px; color:var(--gold); min-height:14px; }
-  .go-title{ font-family:'Press Start 2P'; font-size:24px; color:var(--danger); text-shadow:0 0 16px var(--danger); margin-bottom:22px; }
+  .go-title{ font-family:'Press Start 2P'; font-size:24px; color:var(--danger); text-shadow:0 0 16px var(--danger); margin-bottom:14px; }
+  /* Rank milestone block (filled by game.js): current run title + distance to next. */
+  .go-rank{ display:flex; flex-direction:column; align-items:center; gap:3px; margin-bottom:14px; }
+  .go-rank-cur{ font-family:'Press Start 2P'; font-size:13px; color:var(--gold); text-shadow:0 0 12px var(--gold); }
+  .go-rank-next{ font-size:10px; letter-spacing:.5px; color:#9fb6c9; }
+  .go-stats{ display:flex; flex-direction:column; align-items:center; }
   .stat{ font-size:13px; margin:6px 0; letter-spacing:1px; }
   .stat .num{ color:var(--cyan); font-weight:900; font-size:20px; text-shadow:0 0 10px var(--cyan); }
   .best{ color:var(--gold); }
-  .go-buttons{ display:flex; flex-direction:column; gap:12px; margin-top:26px; }
+  .go-buttons{ display:flex; flex-direction:column; gap:12px; margin-top:22px; }
   /* z-index 50 keeps the sound toggle above the overlays (40) and tab bar (46) so
      it stays visible and tappable on the menu, in gameplay, and on the game-over
      screen — not buried behind a full-screen overlay. */
@@ -191,19 +194,16 @@
      vertical rhythm tightens so the centered column stays inside the viewport. */
   @media (max-width:400px){
     #heroImg{ width:170px; max-width:48vw; }
-    .logo{ font-size:.86em; }
-    .logo .sub{ font-size:11px; }
-    .tag{ font-size:11px; margin:10px 0 18px; }
+    .orient-hint{ font-size:10px; }
     .btn{ font-size:11px; padding:15px 20px; }
     .btn.small{ font-size:8px; padding:10px 14px; }
     .go-title{ font-size:20px; }
+    .go-rank-cur{ font-size:11px; }
     #startScreen{ padding-top:calc(64px + env(safe-area-inset-top)); }
     #tabbar .tab{ font-size:7px; padding:10px 1px; }
   }
   @media (max-height:640px){
     #heroImg{ width:130px; margin-bottom:0; }
-    .logo{ margin-bottom:4px; }
-    .tag{ margin:8px 0 14px; }
     .go-buttons{ margin-top:16px; gap:8px; }
     .panelInner{ max-height:74vh; }
   }
@@ -221,9 +221,6 @@
     #startScreen #heroImg{ flex:0 1 44%; width:auto; max-width:44%; max-height:86vh; margin:0; align-self:center; }
     #startScreen .startCol{ display:flex; flex-direction:column; align-items:center; justify-content:center;
       flex:1 1 50%; max-width:440px; max-height:100vh; overflow-y:auto; gap:5px; text-align:center; }
-    #startScreen .logo{ margin-bottom:2px; }
-    #startScreen .logo .sub{ font-size:10px; max-width:none; }
-    #startScreen .tag{ font-size:9px; line-height:1.5; margin:4px 0 8px; max-width:none; }
     #startScreen #startBtn{ font-size:12px; padding:13px 22px; }
     #startScreen #connectBtn{ margin-top:8px !important; font-size:8px; padding:9px 12px; }
     #startScreen .wallet, #startScreen .status-line{ font-size:9px; margin-top:4px; }
@@ -232,4 +229,21 @@
        they stay completely clear of the menu buttons and wallet text. */
     #soundBtn{ left:14px; right:auto; }
     #tiltBtn{ left:14px; right:auto; }
+
+    /* GAME OVER, landscape: compress everything onto one screen (no scrolling) — stats
+       and buttons flow horizontally, type tightens, and the overlay clips overflow. */
+    #gameOverScreen{ padding:8px 20px; padding-top:calc(8px + env(safe-area-inset-top)); overflow:hidden; }
+    #gameOverScreen .go-title{ font-size:18px; margin-bottom:6px; }
+    #gameOverScreen .go-rank{ margin-bottom:8px; }
+    #gameOverScreen .go-rank-cur{ font-size:11px; }
+    #gameOverScreen .go-stats{ flex-direction:row; flex-wrap:wrap; justify-content:center; gap:6px 20px; }
+    #gameOverScreen .stat{ font-size:11px; margin:2px 0; }
+    #gameOverScreen .stat .num{ font-size:16px; }
+    #gameOverScreen .go-buttons{ flex-direction:row; flex-wrap:wrap; justify-content:center; gap:8px; margin-top:12px; }
+    #gameOverScreen .go-buttons .btn{ font-size:10px; padding:11px 16px; margin-top:0 !important; }
+  }
+
+  /* Rotate-to-landscape nudge: only for touch players still in portrait. */
+  @media (pointer:coarse) and (orientation:portrait){
+    .orient-hint{ display:block; }
   }
