@@ -16,8 +16,10 @@
      high write concurrency migrate to a Durable Object.
    ========================================================================== */
 
-const TOP_KEY  = "lb:v1";
-const MAX_KEEP = 200;
+const TOP_KEY   = "lb:v1";
+const MAX_KEEP  = 200;
+const MAX_SCORE = 50000;   // sanity ceiling — a higher score on launch day means an exploit script → reject
+const RATE_MS   = 30000;   // minimum ms between accepted submits per user → blocks rapid API spam
 
 function cors(origin){
   return {
@@ -74,19 +76,30 @@ export default {
     if(req.method === "POST" && url.pathname === "/submit"){
       let body;
       try{ body = await req.json(); }catch(_){ return json({ error: "bad json" }, 400, origin); }
-      const score = Math.max(0, Math.min(1e9, Math.round(Number(body.score) || 0)));
+      const score = Math.max(0, Math.round(Number(body.score) || 0));
       const user = await verifyInitData(body.initData || "", env.BOT_TOKEN);
       if(!user) return json({ error: "unauthorized" }, 401, origin);
       const id   = String(user.id);
       const name = (user.username ? "@" + user.username : (user.first_name || "Player")).slice(0, 24);
 
+      // (1) SANITY CAP — reject impossible scores instead of recording them.
+      if(score > MAX_SCORE) return json({ error: "score_rejected" }, 400, origin);
+
+      // (2) RATE LIMIT — one accepted submit per user per RATE_MS (per-user timestamp in KV).
+      const tsKey = "ts:" + id;
+      const last  = parseInt((await env.LB.get(tsKey)) || "0", 10);
+      const now   = Date.now();
+      if(last && (now - last) < RATE_MS) return json({ error: "rate_limited" }, 429, origin);
+      await env.LB.put(tsKey, String(now));
+
       const list = JSON.parse((await env.LB.get(TOP_KEY)) || "[]");
       const idx  = list.findIndex(e => e.id === id);
-      if(idx >= 0){ if(score > list[idx].score){ list[idx].score = score; list[idx].name = name; } }
-      else list.push({ id, name, score });
+      let changed = false;
+      if(idx >= 0){ if(score > list[idx].score){ list[idx].score = score; list[idx].name = name; changed = true; } }
+      else { list.push({ id, name, score }); changed = true; }
       list.sort((a, b) => b.score - a.score);
       const trimmed = list.slice(0, MAX_KEEP);
-      await env.LB.put(TOP_KEY, JSON.stringify(trimmed));
+      if(changed) await env.LB.put(TOP_KEY, JSON.stringify(trimmed));   // only write the board when it actually changes
       const rank = trimmed.findIndex(e => e.id === id) + 1;
       return json({ ok: true, rank, top: trimmed.slice(0, 10).map(e => ({ name: e.name, score: e.score })) }, 200, origin);
     }
