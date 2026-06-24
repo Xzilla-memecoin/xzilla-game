@@ -9,7 +9,7 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@500;700;900&family=Press+Start+2P&display=swap" rel="stylesheet">
 
-<link rel="stylesheet" href="styles.css?v=5">
+<link rel="stylesheet" href="styles.css?v=6">
 </head>
 <body>
   <div id="game"></div>
@@ -46,7 +46,12 @@
   </div>
 
   <div id="startScreen" class="overlay">
-    <img id="heroImg" alt="Xzilla" src="https://raw.githubusercontent.com/Xzilla-memecoin/xzilla-game/main/images/mainImage.webp?v=5" />
+    <!-- Title sits ABOVE the hero art; .heroWrap keeps the two together as the LEFT
+         half of the landscape split (title stays above the image in both orientations). -->
+    <div class="heroWrap">
+      <h1 class="game-title">XZILLA:<span class="title-accent"> RUG DESTROYER</span></h1>
+      <img id="heroImg" alt="Xzilla" src="https://raw.githubusercontent.com/Xzilla-memecoin/xzilla-game/main/images/mainImage.webp?v=6" />
+    </div>
     <!-- .startCol is display:contents in portrait (no layout change) and becomes the
          RIGHT column of the side-by-side split in mobile landscape (see styles.css). -->
     <div class="startCol">
@@ -792,14 +797,16 @@ document.getElementById("connectBtn").addEventListener("click",connectWallet);
 document.getElementById("startBtn").addEventListener("click",startGame);
 document.getElementById("retryBtn").addEventListener("click",startGame);
 el.sound.addEventListener("click",()=>{ state.soundOn=!state.soundOn; el.sound.textContent=state.soundOn?"🔊":"🔇"; audioInit(); if(masterGain) masterGain.gain.value=state.soundOn?1:0; });
-// Rev the bike when hovering (desktop) or tapping the primary start-screen buttons.
+// Rev the bike ONLY on hover / pointer-enter (a preview cue) — never bound to the
+// click/tap that actually starts the game or connects the wallet. pointerenter unifies
+// mouse-hover and the moment a finger first lands on the button, so it's identical on
+// every device (touch and desktop alike).
 document.querySelectorAll("#startScreen .btn").forEach(b=>{
-  b.addEventListener("mouseenter", playRev);
-  b.addEventListener("pointerdown", playRev);
+  b.addEventListener("pointerenter", playRev);
 });
 document.addEventListener("visibilitychange",()=>{ if(document.hidden&&state.running) pauseGame(); });
 document.getElementById("bestScore").textContent=state.best;
 </script>
-<script src="game.js?v=5"></script>
+<script src="game.js?v=6"></script>
 </body>
 </html>
