@@ -491,6 +491,24 @@ window._adsPayload = "WwogIHsKICAgICJpZCI6ICJ4emlsbGEtaG9tZSIsCiAgICAidGV4dCI6IC
     setTimeout(()=>{ t.classList.remove("show"); setTimeout(()=>t.remove(),300); },1800);
   }
   window.__toast = toast;   // exposed so the real wallet flow in index.html can surface errors
+
+  /* --------------------- cross-player leaderboard (optional) ---------------
+   * Backed by the Cloudflare Worker in /worker. Enabled only when LEADERBOARD_API
+   * is set in index.html; otherwise everything below no-ops and the local RANKS
+   * board still works. */
+  function escapeHtml(s){ return String(s).replace(/[&<>"']/g, c =>
+    ({ "&":"&amp;", "<":"&lt;", ">":"&gt;", '"':"&quot;", "'":"&#39;" }[c])); }
+  function lbApi(){ const u = window.__LB_API || ""; return u ? u.replace(/\/+$/,"") : ""; }
+  function submitLeaderboard(){
+    const api = lbApi(); if(!api) return;
+    if(!(tg && tg.initData)) return;                 // need verifiable Telegram identity to post
+    const score = Math.max(Math.round(state.best||0), Math.round(state.score||0), (myBest&&myBest.score)||0);
+    if(score<=0) return;
+    try{
+      fetch(api + "/submit", { method:"POST", headers:{ "content-type":"application/json" },
+        body: JSON.stringify({ initData: tg.initData, score }) }).catch(()=>{});
+    }catch(_){}
+  }
   function updateHUDtokens(){ const b=$("bagHud"); if(b) b.textContent=abbr(econ.tokens); }
   function updateVip(){
     // VIP if the simulated holdings tier grants a multiplier OR a real on-chain
@@ -659,6 +677,7 @@ window._adsPayload = "WwogIHsKICAgICJpZCI6ICJ4emlsbGEtaG9tZSIsCiAgICAidGV4dCI6IC
     pushScore(state.score);
     progressDaily();      // tally the daily challenge from this run
     syncRankSkins();      // unlock any rank-reward skins the new best just earned
+    submitLeaderboard();  // post the best score to the cross-player board (if configured)
     // augment game over screen
     const go=$("gameOverScreen");
     // EARNED-XP line lives inside .go-stats so it joins the stats row in landscape.
@@ -1233,8 +1252,29 @@ window._adsPayload = "WwogIHsKICAgICJpZCI6ICJ4emlsbGEtaG9tZSIsCiAgICAidGV4dCI6IC
     const _renderLeaderboard = renderLeaderboard;
     renderLeaderboard = function(){
       _renderLeaderboard();
-      // append a social strip below the existing rankings
       const host=$("leaderboardInner"); if(!host) return;
+
+      // GLOBAL TOP 10 (when a backend is configured) — prepend above the local rankings.
+      if(lbApi() && !host.querySelector("#lbTop")){
+        const box=document.createElement("div"); box.id="lbTop";
+        box.innerHTML='<h2 class="pnl-title" style="border-color:'+CYAN+'">TOP 10 DEGENS</h2>'+
+          '<div class="sub" id="lbTopList">Loading global rankings…</div>';
+        host.insertBefore(box, host.firstChild);
+        const mine = myBest && myBest.name;
+        fetch(lbApi()+"/top").then(r=>r.json()).then(d=>{
+          const list=(d && d.top) || []; const el=$("lbTopList"); if(!el) return;
+          if(!list.length){ el.textContent="No scores yet — be the first to rank!"; return; }
+          el.className=""; el.innerHTML=list.map((e,i)=>{
+            const me = mine && e.name===mine;
+            return '<div class="lrow'+(me?' you':'')+'">'+
+              '<span class="lrank">#'+(i+1)+'</span>'+
+              '<span class="lname">'+escapeHtml(e.name)+'</span>'+
+              '<b>'+fmt(e.score)+'</b></div>';
+          }).join("");
+        }).catch(()=>{ const el=$("lbTopList"); if(el) el.textContent="Global rankings unavailable — retry later."; });
+      }
+
+      // append a social strip below the existing rankings
       if(host.querySelector("#lbSocial")) return;
       const wrap=document.createElement("div"); wrap.id="lbSocial";
       wrap.style.cssText="margin-top:14px;display:flex;flex-direction:column;gap:8px";
@@ -1242,7 +1282,7 @@ window._adsPayload = "WwogIHsKICAgICJpZCI6ICJ4emlsbGEtaG9tZSIsCiAgICAidGV4dCI6IC
         '<div class="sub" style="margin-top:2px">PLAY WITH FRIENDS</div>'+
         '<button class="btn secondary" id="lbInvite" style="font-size:11px;padding:13px">INVITE A DEGEN (+500 XP)</button>'+
         '<button class="btn secondary" id="lbShare" style="font-size:11px;padding:13px">SHARE MY RANK</button>'+
-        '<div class="sub" style="opacity:.7">Global sync activates once the $XZILLA backend is connected.</div>';
+        (lbApi() ? '' : '<div class="sub" style="opacity:.7">Global TOP 10 activates once the $XZILLA leaderboard backend is connected.</div>');
       host.appendChild(wrap);
       $("lbInvite").onclick=()=>{
         const link = (tg && tg.initDataUnsafe && tg.initDataUnsafe.user)

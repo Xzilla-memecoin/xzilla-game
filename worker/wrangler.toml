@@ -1,0 +1,14 @@
+name = "xzilla-leaderboard"
+main = "src/index.js"
+compatibility_date = "2024-09-01"
+
+# KV namespace that stores the board. Create it once and paste the id below:
+#   npx wrangler kv namespace create LB
+# Wrangler prints an id — put it here:
+kv_namespaces = [
+  { binding = "LB", id = "PASTE_YOUR_KV_NAMESPACE_ID_HERE" }
+]
+
+# BOT_TOKEN is a SECRET — do NOT put it in this file. Set it with:
+#   npx wrangler secret put BOT_TOKEN
+# (paste your @BotFather token when prompted)
