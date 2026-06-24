@@ -11,7 +11,7 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@500;700;900&family=Press+Start+2P&display=swap" rel="stylesheet">
 
-<link rel="stylesheet" href="styles.css?v=27">
+<link rel="stylesheet" href="styles.css?v=28">
 </head>
 <body>
   <div id="game"></div>
@@ -53,7 +53,7 @@
          half of the landscape split (title stays above the image in both orientations). -->
     <div class="heroWrap">
       <h1 class="game-title">XZILLA:<span class="title-accent"> RUG SMASHER</span></h1>
-      <img id="heroImg" alt="Xzilla" src="https://raw.githubusercontent.com/Xzilla-memecoin/xzilla-game/main/images/mainImage.webp?v=27" />
+      <img id="heroImg" alt="Xzilla" src="https://raw.githubusercontent.com/Xzilla-memecoin/xzilla-game/main/images/mainImage.webp?v=28" />
     </div>
     <!-- .startCol is display:contents in portrait (no layout change) and becomes the
          RIGHT column of the side-by-side split in mobile landscape (see styles.css). -->
@@ -809,7 +809,11 @@ function loop(){ requestAnimationFrame(loop); const dt=Math.min(clock.getDelta()
         if(dx<catchX){ resolve(e); continue; }
         // near-miss: a dangerous item swept past just outside the catch radius without a hit
         else if(dx<nearX && !e._nm){ e._nm=true; if(window.__nearMiss) window.__nearMiss(e,dx); } }
-      if(z>CAM.z+1){ if(e.type===TYPE.SCAMMER){ state.combo=0; renderCombo(); } e._nm=false; freeEntity(e); } }
+      if(z>CAM.z+1){
+        // Rug boss is UNMISSABLE: if it slips past undefeated, send it back to chase again
+        // (TYPE.RUGBOSS/BOSS are added by game.js; undefined-safe before it loads).
+        if((e.type===TYPE.RUGBOSS||e.type===TYPE.BOSS) && !e.dead){ e.sprite.position.z=SPAWN_Z-4; e.prevZ=e.sprite.position.z; e._nm=false; continue; }
+        if(e.type===TYPE.SCAMMER){ state.combo=0; renderCombo(); } e._nm=false; freeEntity(e); } }
     // combo decay: any increase in the streak this frame refreshes the deadline; if it lapses, the streak drops
     if(state.combo>_lastCombo) state.comboUntil=now+CFG.comboWindow;
     _lastCombo=state.combo;
@@ -949,6 +953,6 @@ document.querySelectorAll("#startScreen .btn").forEach(b=>{
 document.addEventListener("visibilitychange",()=>{ if(document.hidden&&state.running) pauseGame(); });
 document.getElementById("bestScore").textContent=state.best;
 </script>
-<script src="game.js?v=27"></script>
+<script src="game.js?v=28"></script>
 </body>
 </html>
