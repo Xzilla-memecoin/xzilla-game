@@ -1186,6 +1186,10 @@ window._adsPayload = "WwogIHsKICAgICJpZCI6ICJ4emlsbGEtaG9tZSIsCiAgICAidGV4dCI6IC
       // rug boss weave + bar follow
       for(const a of active){ if(a.type===TYPE.RUGBOSS){
         a.sprite.position.x = Math.sin(t*2.4)*1.1; } }
+      // self-heal: if the boss left the screen un-defeated (dodged), its health bar must
+      // not linger — hide it whenever there is no boss on the field.
+      { const bar=$("rugBar");
+        if(bar && bar.style.display!=="none" && !active.some(a=>a.type===TYPE.RUGBOSS||a.type===TYPE.BOSS)) hideRugBar(); }
       // active-buff HUD ticker
       renderBuffs(t);
     };
