@@ -13,6 +13,46 @@
  * NOTE: Base64 is encoding, not encryption — trivially decodable in any console. */
 window._adsPayload = "WwogIHsKICAgICJpZCI6ICJ4emlsbGEtaG9tZSIsCiAgICAidGV4dCI6ICIkWFpJTExBIMK3IEJVWSBOT1ciLAogICAgImltYWdlVXJsIjogImh0dHBzOi8vcmF3LmdpdGh1YnVzZXJjb250ZW50LmNvbS9YemlsbGEtbWVtZWNvaW4veHppbGxhLWdhbWUvbWFpbi9pbWFnZXMvcnVnX2Jvc3Mud2VicCIsCiAgICAiY2xpY2tMaW5rIjogImh0dHBzOi8veHppbGxhLmlvIgogIH0sCiAgewogICAgImlkIjogImhvZGwtd2FnbWkiLAogICAgInRleHQiOiAiSE9ETCDCtyBXQUdNSSIsCiAgICAiaW1hZ2VVcmwiOiAiaHR0cHM6Ly9yYXcuZ2l0aHVidXNlcmNvbnRlbnQuY29tL1h6aWxsYS1tZW1lY29pbi94emlsbGEtZ2FtZS9tYWluL2ltYWdlcy9ob2RsZXIud2VicCIsCiAgICAiY2xpY2tMaW5rIjogImh0dHBzOi8vdC5tZS94emlsbGEiCiAgfSwKICB7CiAgICAiaWQiOiAidG8tdGhlLW1vb24iLAogICAgInRleHQiOiAiVE8gVEhFIE1PT04iLAogICAgImltYWdlVXJsIjogImh0dHBzOi8vcmF3LmdpdGh1YnVzZXJjb250ZW50LmNvbS9YemlsbGEtbWVtZWNvaW4veHppbGxhLWdhbWUvbWFpbi9pbWFnZXMvbWFpbkltYWdlLndlYnAiLAogICAgImNsaWNrTGluayI6ICJodHRwczovL2RleHNjcmVlbmVyLmNvbSIKICB9Cl0K";
 
+/* ============================================================================
+   ENGINE AUDIO — real chopper-engine mp3.
+   Replaces the synthesized V-twin by OVERRIDING the engine hooks that index.html
+   already calls (startGame -> startEngine, the loop -> setEnginePitch, gameOver/
+   quit -> stopEngine), so there is exactly ONE engine voice and it tracks run
+   state (start / pause / resume / crash) without any double-audio.
+   ========================================================================== */
+(function engineAudio(){
+  let engineSound;
+  try { engineSound = new Audio('sounds/spinopel-the-accelerating-chopper-style-motorcycle-545712.mp3'); }
+  catch(_){ return; }
+  engineSound.loop = true;
+  engineSound.volume = 0.4;
+  engineSound.preload = "auto";
+  const maxSpeed = 24;          // reference top speed for the rev ramp (state.speed grows from baseSpeed 9)
+  let started = false;
+
+  // Run start = a real user gesture (the START tap), which clears the browser autoplay guard.
+  window.startEngine = function(){
+    started = true;
+    try{ engineSound.muted = !state.soundOn; engineSound.currentTime = 0; engineSound.play().catch(()=>{}); }catch(_){}
+  };
+  // Crash / quit to menu: cut the engine dead so it doesn't roar over the scoreboard.
+  window.stopEngine = function(){
+    try{ engineSound.pause(); engineSound.currentTime = 0; }catch(_){}
+  };
+  // Called every frame from the loop: rev with screen speed, follow pause/resume + the mute toggle.
+  window.setEnginePitch = function(){
+    try{
+      engineSound.muted = !state.soundOn;
+      if(state.running){
+        if(started && engineSound.paused) engineSound.play().catch(()=>{});             // resume after a pause
+        if(state.speed > 0) engineSound.playbackRate = 1.0 + Math.min(state.speed/maxSpeed, 1) * 0.25;
+      } else if(!engineSound.paused){
+        engineSound.pause();                                                            // freeze over menu / pause / game over
+      }
+    }catch(_){}
+  };
+})();
+
 (function(){
   if (typeof THREE === "undefined") { return; }
   const TEAL="#39ff7a", MAG="#ff2bd6", CYAN="#21e6ff", GOLD="#ffd23f", RED="#ff3b5c";
