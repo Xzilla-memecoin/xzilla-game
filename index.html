@@ -11,7 +11,7 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@500;700;900&family=Press+Start+2P&display=swap" rel="stylesheet">
 
-<link rel="stylesheet" href="styles.css?v=9">
+<link rel="stylesheet" href="styles.css?v=10">
 </head>
 <body>
   <div id="game"></div>
@@ -53,7 +53,7 @@
          half of the landscape split (title stays above the image in both orientations). -->
     <div class="heroWrap">
       <h1 class="game-title">XZILLA:<span class="title-accent"> RUG SMASHER</span></h1>
-      <img id="heroImg" alt="Xzilla" src="https://raw.githubusercontent.com/Xzilla-memecoin/xzilla-game/main/images/mainImage.webp?v=9" />
+      <img id="heroImg" alt="Xzilla" src="https://raw.githubusercontent.com/Xzilla-memecoin/xzilla-game/main/images/mainImage.webp?v=10" />
     </div>
     <!-- .startCol is display:contents in portrait (no layout change) and becomes the
          RIGHT column of the side-by-side split in mobile landscape (see styles.css). -->
@@ -144,9 +144,10 @@ const HOLDER_IMAGE_URL  = ASSET_BASE + "hodler.webp";
 const MUSIC_URL  = "";   // 🎵 your own looping background track
 const ENGINE_URL = "";   // 🏍 your own looping motorcycle engine sound
 
-const XZILLA_MINT_ADDRESS = "YOUR_XZILLA_MINT_ADDRESS_HERE";
+const XZILLA_MINT         = "2VzDVUgzTHSf9qCPdkYBeMd2sK7m8t9GR2MN5kxRpump";   // $XZILLA SPL mint
+const XZILLA_MINT_ADDRESS = XZILLA_MINT;          // shared with game.js wallet-panel on-chain refresh
 const SOLANA_RPC          = "https://api.mainnet-beta.solana.com";
-const FORCE_VIP_FOR_DEMO  = true;
+const FORCE_VIP_FOR_DEMO  = false;                // VIP is now gated by a real on-chain $XZILLA holding
 
 const CFG = { lives:3, baseSpeed:9, speedRampPerSec:0.18, baseSpawnGap:0.92, minSpawnGap:0.34,
   holderChance:0.32, powerupChance:0.05, scammerPoints:10, vipMultiplier:1.2, playerSpeedLerp:0.22,
@@ -155,7 +156,7 @@ const CFG = { lives:3, baseSpeed:9, speedRampPerSec:0.18, baseSpawnGap:0.92, min
 /* ============================================================ STATE */
 const state = { running:false, score:0, lives:CFG.lives, combo:0, kills:0, wave:1, vip:false, best:0,
   speed:CFG.baseSpeed, spawnGap:CFG.baseSpawnGap, spawnTimer:0, elapsed:0, playerTargetX:0, shake:0, soundOn:true,
-  comboUntil:0 };      // performance.now()*0.001 deadline at which the current combo expires
+  comboUntil:0, walletConnected:false };      // comboUntil: combo-expiry deadline · walletConnected: verified $XZILLA holder
 try { state.best = parseInt(localStorage.getItem("xzilla_best")||"0",10)||0; } catch(e){}
 
 /* ============================================================ TELEGRAM */
@@ -859,18 +860,49 @@ async function checkTokenBalance(connection,ownerPubkeyStr,mint){ try{
   res.value.forEach(a=>{ total+=a.account.data.parsed.info.tokenAmount.uiAmount||0; }); return total; }catch(e){ return 0; } }
 async function connectWallet(){ audioInit();
   const info=document.getElementById("walletInfo"), vipEl=document.getElementById("vipStatus"),
-    startBtn=document.getElementById("startBtn"), connectBtn=document.getElementById("connectBtn");
-  info.textContent="Connecting…"; info.classList.add("blink"); let pubkey=null;
-  try{ if(window.solana&&window.solana.isPhantom){ const r=await window.solana.connect(); pubkey=r.publicKey.toString(); } }catch(e){}
-  if(!pubkey){ try{ pubkey=solanaWeb3.Keypair.generate().publicKey.toString(); }catch(e){ pubkey="MockWa11et"+Math.random().toString(36).slice(2,10); } }
-  info.classList.remove("blink"); info.textContent="✔ "+shortKey(pubkey); connectBtn.classList.add("hidden");
-  vipEl.textContent="Checking $XZILLA balance…"; let balance=0;
-  try{ const conn=new solanaWeb3.Connection(SOLANA_RPC,"confirmed"); balance=await checkTokenBalance(conn,pubkey,XZILLA_MINT_ADDRESS); }catch(e){}
-  state.vip = balance>0 || FORCE_VIP_FOR_DEMO;
-  if(state.vip){ el.vipBadge.style.display="inline-block"; vipEl.style.color="#ffd23f";
-    vipEl.textContent = balance>0 ? ("★ VIP HODLER — "+balance.toLocaleString()+" $XZILLA · 1.2x") : "★ VIP HODLER unlocked (demo) · 1.2x score"; }
-  else { vipEl.style.color="#9fb6c9"; vipEl.textContent="No $XZILLA found — standard mode"; }
+    connectBtn=document.getElementById("connectBtn");
+  // Real wallet required — no mock fallback. The game stays fully playable WITHOUT connecting.
+  if(!window.solana){
+    info.style.color="#ff3b5c"; info.textContent="No Solana wallet found — install Phantom to connect";
+    if(window.__toast) window.__toast("Install Phantom to connect","#ff3b5c");
+    return;
   }
+  info.classList.add("blink"); info.style.color="#21e6ff"; info.textContent="Connecting…";
+  let pubkey=null;
+  try{ const r=await window.solana.connect(); pubkey=r.publicKey.toString(); }
+  catch(e){ info.classList.remove("blink"); info.style.color="#ff3b5c"; info.textContent="Connection cancelled"; return; }
+  info.classList.remove("blink");
+  vipEl.style.color="#9fb6c9"; vipEl.textContent="Verifying $XZILLA balance…";
+  // ----- strict on-chain SPL holder check -----
+  try{
+    const connection = new solanaWeb3.Connection(SOLANA_RPC, "confirmed");
+    const ownerPublicKey = new solanaWeb3.PublicKey(pubkey);
+    const res = await connection.getParsedTokenAccountsByOwner(ownerPublicKey, { mint:new solanaWeb3.PublicKey(XZILLA_MINT) });
+    let uiAmount = 0;
+    (res && res.value ? res.value : []).forEach(a=>{ try{ uiAmount += a.account.data.parsed.info.tokenAmount.uiAmount||0; }catch(_){} });
+    if(uiAmount > 0){
+      // verified holder → unlock the multiplier
+      state.vip = true; state.walletConnected = true; window.__holderVerified = true;
+      el.vipBadge.style.display="inline-block";
+      info.style.color="#ffd23f"; info.textContent="Xzilla Holder: "+shortKey(pubkey)+" 🔥";
+      vipEl.style.color="#ffd23f"; vipEl.textContent="★ HOLDER VERIFIED — "+uiAmount.toLocaleString()+" $XZILLA · "+CFG.vipMultiplier+"x score";
+      connectBtn.classList.add("hidden");
+      if(window.__buzz) window.__buzz([40,30,80],"success");
+    } else {
+      // connected, but holds none → standard mode (still fully playable)
+      state.vip = false; state.walletConnected = false; window.__holderVerified = false;
+      el.vipBadge.style.display="none";
+      info.style.color="#ff3b5c"; info.textContent="Connected but NO tokens found! Buy $XZILLA for multipliers.";
+      vipEl.style.color="#9fb6c9"; vipEl.textContent="Standard mode — no multiplier";
+    }
+  } catch(e){
+    // RPC failure / timeout — never crash the UI; let them retry
+    state.vip = false; state.walletConnected = false;
+    info.style.color="#21e6ff"; info.textContent="✔ "+shortKey(pubkey);
+    if(window.__toast) window.__toast("Error verifying balance, please retry","#ff3b5c");
+    else { vipEl.style.color="#ff3b5c"; vipEl.textContent="Error verifying balance, please retry"; }
+  }
+}
 
 /* ============================================================ WIRING */
 document.getElementById("connectBtn").addEventListener("click",connectWallet);
@@ -887,6 +919,6 @@ document.querySelectorAll("#startScreen .btn").forEach(b=>{
 document.addEventListener("visibilitychange",()=>{ if(document.hidden&&state.running) pauseGame(); });
 document.getElementById("bestScore").textContent=state.best;
 </script>
-<script src="game.js?v=9"></script>
+<script src="game.js?v=10"></script>
 </body>
 </html>

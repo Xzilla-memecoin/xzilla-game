@@ -490,11 +490,17 @@ window._adsPayload = "WwogIHsKICAgICJpZCI6ICJ4emlsbGEtaG9tZSIsCiAgICAidGV4dCI6IC
     requestAnimationFrame(()=>t.classList.add("show"));
     setTimeout(()=>{ t.classList.remove("show"); setTimeout(()=>t.remove(),300); },1800);
   }
+  window.__toast = toast;   // exposed so the real wallet flow in index.html can surface errors
   function updateHUDtokens(){ const b=$("bagHud"); if(b) b.textContent=abbr(econ.tokens); }
   function updateVip(){
-    const t=tierFor(econ.holdings); state.vip = t.m>1;
-    try{ el.vipBadge.style.display = t.m>1 ? "inline-block" : "none";
-      el.vipBadge.textContent = "★ "+t.l+" · "+t.m+"x"; }catch(e){}
+    // VIP if the simulated holdings tier grants a multiplier OR a real on-chain
+    // $XZILLA holding was verified by the wallet flow (window.__holderVerified).
+    // The OR keeps a verified holder's VIP from being wiped when beforeRun() calls
+    // this with empty simulated holdings.
+    const t=tierFor(econ.holdings); const holder=!!window.__holderVerified;
+    state.vip = t.m>1 || holder;
+    try{ el.vipBadge.style.display = state.vip ? "inline-block" : "none";
+      el.vipBadge.textContent = t.m>1 ? ("★ "+t.l+" · "+t.m+"x") : "★ $XZILLA HOLDER"; }catch(e){}
   }
 
   const PANELS = {WALLET:"walletPanel", MISSIONS:"missionsPanel", LEADERBOARD:"leaderboardPanel", SKINS:"skinsPanel"};
@@ -684,9 +690,8 @@ window._adsPayload = "WwogIHsKICAgICJpZCI6ICJ4emlsbGEtaG9tZSIsCiAgICAidGV4dCI6IC
     updateVip(); applySkin();
   }
   ["startBtn","retryBtn"].forEach(id=>{ const b=$(id); if(b) b.addEventListener("click", beforeRun); });
-  // start-screen connect also grants a demo bag so tiers light up
-  const cb=$("connectBtn"); if(cb) cb.addEventListener("click", ()=>{
-    if(econ.holdings<100000) econ.holdings=250000; saveEcon(); updateVip(); });
+  // (Removed the start-screen "demo bag" grant — the connect button now performs a REAL
+  //  on-chain $XZILLA holder check in index.html. Simulated tiers remain in the WALLET tab.)
 
   // tab bar wiring
   document.querySelectorAll("#tabbar .tab").forEach(b=> b.addEventListener("click", ()=>showTab(b.dataset.tab)) );
