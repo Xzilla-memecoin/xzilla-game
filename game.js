@@ -1792,9 +1792,15 @@ window._adsPayload = "WwogIHsKICAgICJpZCI6ICJ4emlsbGEtaG9tZSIsCiAgICAidGV4dCI6IC
       document.head.appendChild(s);
       function assert(){ try{ if(typeof tg!=="undefined" && tg){
         tg.ready&&tg.ready(); tg.expand&&tg.expand();
-        tg.disableVerticalSwipes&&tg.disableVerticalSwipes(); } }catch(_){} }
+        tg.disableVerticalSwipes&&tg.disableVerticalSwipes();
+        // expand() can change the viewport without Telegram reliably firing
+        // viewportChanged (esp. if already expanded) — force a re-measure so
+        // #game always re-syncs to the settled Telegram viewport height.
+        window.dispatchEvent(new Event("resize")); } }catch(_){} }
       assert();
-      // Telegram can finish expanding a beat late on iOS — re-assert once.
+      // Telegram can finish expanding a beat late on iOS — re-assert a couple
+      // of times to catch the settled viewportStableHeight.
+      setTimeout(assert, 400);
       setTimeout(assert, 1200);
     })();
     /* refresh HUD lives to reflect upgraded max HP on boot ------------------- */
