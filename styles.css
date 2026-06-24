@@ -50,8 +50,14 @@
   @keyframes bannerFlash{ 0%{opacity:0;transform:scale(.6)} 20%{opacity:1;transform:scale(1.18)} 70%{opacity:1;transform:scale(1)} 100%{opacity:0;transform:scale(1.4)} }
 
   /* === ANCHOR: OVERLAYS === */
-  .overlay{ position:fixed; inset:0; z-index:40; display:flex; flex-direction:column; align-items:center;
-    justify-content:center; text-align:center; padding:24px; font-family:'Orbitron',sans-serif; color:#fff;
+  /* UPPER MENU PROTECTION: when the centered column grows taller than a short/narrow
+     viewport, plain flex centering pushes the TOP of the content (logo, hero, the
+     tab-bar clearance) above the top edge where it is clipped and unreachable.
+     `safe center` makes the browser fall back to start-alignment the instant content
+     overflows, and overflow-y:auto lets it scroll instead of clipping — so the top UI
+     always stays bound inside the upper viewport. */
+  .overlay{ position:fixed; inset:0; z-index:40; display:flex; flex-direction:column; align-items:safe center;
+    justify-content:safe center; overflow-y:auto; text-align:center; padding:24px; font-family:'Orbitron',sans-serif; color:#fff;
     background:linear-gradient(rgba(7,3,24,.55), rgba(7,3,24,.86)); }
   .hidden{ display:none !important; }
   /* The tab bar (#tabbar, fixed top, z-index 46) renders above this centered overlay,
@@ -166,3 +172,27 @@
   /* mega NO MERCY banner */
   #banner.mega{ font-size:34px; color:var(--toxic);
     text-shadow:3px 3px 0 var(--magenta), 6px 6px 0 #5a1a8a, 0 0 26px var(--toxic); }
+
+  /* === ANCHOR: NARROW-VIEWPORT SCALE === */
+  /* Aspect-aware zoom-out for the HTML menu/UI (the 3D scene is scaled by the camera
+     FOV in index.html). On narrow phones the hero art + type scale down proportionally
+     so the whole menu fits without clipping the top elements; on short screens the
+     vertical rhythm tightens so the centered column stays inside the viewport. */
+  @media (max-width:400px){
+    #heroImg{ width:170px; max-width:48vw; }
+    .logo{ font-size:.86em; }
+    .logo .sub{ font-size:11px; }
+    .tag{ font-size:11px; margin:10px 0 18px; }
+    .btn{ font-size:11px; padding:15px 20px; }
+    .btn.small{ font-size:8px; padding:10px 14px; }
+    .go-title{ font-size:20px; }
+    #startScreen{ padding-top:calc(64px + env(safe-area-inset-top)); }
+    #tabbar .tab{ font-size:7px; padding:10px 1px; }
+  }
+  @media (max-height:640px){
+    #heroImg{ width:130px; margin-bottom:0; }
+    .logo{ margin-bottom:4px; }
+    .tag{ margin:8px 0 14px; }
+    .go-buttons{ margin-top:16px; gap:8px; }
+    .panelInner{ max-height:74vh; }
+  }
