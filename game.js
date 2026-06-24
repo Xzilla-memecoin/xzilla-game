@@ -532,27 +532,28 @@ window._adsPayload = "WwogIHsKICAgICJpZCI6ICJ4emlsbGEtaG9tZSIsCiAgICAidGV4dCI6IC
         '<div class="tierbadge" style="border-color:'+t.c+';color:'+t.c+'">'+t.l+'</div>'+
       '</div>'+
       '<button class="btn pbtn" id="wConnect">CONNECT PHANTOM</button>'+
-      '<div class="sub">SIMULATE BAG (TEST TIERS)</div>'+
-      '<div class="simrow">'+
-        '<button class="sbtn" data-add="100000">+100K</button>'+
-        '<button class="sbtn" data-add="1000000">+1M</button>'+
-        '<button class="sbtn" data-add="5000000">+5M</button>'+
-        '<button class="sbtn dump" data-add="dump">DUMP</button>'+
-      '</div>'+
+      '<div class="sub">Connect to verify your on-chain $XZILLA — your real balance sets the tier.</div>'+
       '<div class="ttable">'+ rows.map(r=>
         '<div class="trow'+(t.m===r[2]?' on':'')+'"><span>'+r[0]+'</span><b>'+r[1]+'</b></div>').join("")+
       '</div>';
     $("wConnect").onclick = walletConnect;
-    $("walletInner").querySelectorAll(".sbtn").forEach(b=>b.onclick=()=>{
-      if(b.dataset.add==="dump") econ.holdings=0;
-      else econ.holdings=Math.min(econ.holdings + (+b.dataset.add), 12e6);
-      saveEcon(); updateVip(); renderWallet();
-    });
   }
+  // Real Phantom connect + on-chain $XZILLA lookup; the actual balance drives the tier.
   async function walletConnect(){
-    try{ if(window.solana && window.solana.isPhantom){ await window.solana.connect(); } }catch(e){}
-    if(econ.holdings<100000){ econ.holdings=250000; } // demo bag
-    saveEcon(); updateVip(); renderWallet(); toast("Wallet connected · demo bag granted",CYAN);
+    if(!window.solana){ toast("No Solana wallet found — install Phantom",RED); return; }
+    let pubkey=null;
+    try{ const r=await window.solana.connect(); pubkey=r.publicKey.toString(); }
+    catch(e){ toast("Connection cancelled",RED); return; }
+    toast("Verifying $XZILLA balance…",CYAN);
+    try{
+      const conn=new solanaWeb3.Connection(SOLANA_RPC,"confirmed");
+      const bal=await checkTokenBalance(conn, pubkey, XZILLA_MINT_ADDRESS);   // sums uiAmount for the mint
+      econ.holdings=Math.round(bal); window.__holderVerified = bal>0;
+      saveEcon(); updateVip(); updateHUDtokens(); renderWallet();
+      toast(bal>0 ? ("Verified — "+fmt(bal)+" $XZILLA") : "Connected — no $XZILLA found", bal>0?GOLD:RED);
+    }catch(e){
+      toast("Error verifying balance, please retry",RED);
+    }
   }
 
   function renderMissions(){
