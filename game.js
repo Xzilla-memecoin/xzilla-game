@@ -1347,9 +1347,10 @@ window._adsPayload = "WwogIHsKICAgICJpZCI6ICJ4emlsbGEtaG9tZSIsCiAgICAidGV4dCI6IC
           if(!list.length){ el.textContent="No scores yet — be the first to rank!"; return; }
           el.className=""; el.innerHTML=list.map((e,i)=>{
             const me = mine && e.name===mine;
+            const t  = titleForScore(e.score);   // each player's rank milestone, derived from their score
             return '<div class="lrow'+(me?' you':'')+'">'+
               '<span class="lrank">#'+(i+1)+'</span>'+
-              '<span class="lname">'+escapeHtml(e.name)+'</span>'+
+              '<span class="lname">'+escapeHtml(e.name)+(t?' · <span style="color:'+GOLD+'">'+t.name+'</span>':'')+'</span>'+
               '<b>'+fmt(e.score)+'</b></div>';
           }).join("");
         }).catch(()=>{ const el=$("lbTopList"); if(el) el.textContent="Global rankings unavailable — retry later."; });
