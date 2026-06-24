@@ -3,13 +3,15 @@
     --void:#070318; --toxic:#39ff7a; --magenta:#ff2bd6; --cyan:#21e6ff; --gold:#ffd23f; --danger:#ff3b5c;
   }
   *{ box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
-  html,body{ margin:0; padding:0; width:100%; height:100%; overflow:hidden; background:#000;
+  html,body{ margin:0; padding:0; width:100%; height:100%; height:100dvh; overflow:hidden; background:#070318;
     overscroll-behavior:none; touch-action:none; user-select:none; -webkit-user-select:none; }
   /* Container is sized precisely by JS (resize() in index.html) to the visual
-     viewport. The vw / dvh values below are a fallback so it still fills the
-     screen before JS runs or if it fails; dvh tracks mobile browser chrome
-     (address bar show/hide) where 100vh would overshoot and clip the canvas. */
-  #game{ position:fixed; top:0; left:0; width:100vw; height:100vh; height:100dvh; }
+     viewport. inset:0 anchors it to all four edges (incl. the bottom) so there is
+     never a gap under the canvas, and the vw/dvh values are a fallback for before
+     JS runs; dvh tracks mobile browser chrome (address bar / Telegram webview)
+     where 100vh would overshoot and clip the canvas. body bg matches the void so
+     any sub-pixel seam during a rotate/resize blends with the scene. */
+  #game{ position:fixed; inset:0; width:100vw; height:100vh; height:100dvh; }
   #fatal{ position:fixed; top:0; left:0; right:0; z-index:999; display:none;
     background:#1a0008; color:#ff6b81; font:12px/1.5 ui-monospace,monospace; padding:14px;
     white-space:pre-wrap; border-bottom:2px solid #ff3b5c; }
@@ -73,7 +75,10 @@
   .stat .num{ color:var(--cyan); font-weight:900; font-size:20px; text-shadow:0 0 10px var(--cyan); }
   .best{ color:var(--gold); }
   .go-buttons{ display:flex; flex-direction:column; gap:12px; margin-top:26px; }
-  #soundBtn{ position:fixed; z-index:25; right:14px; bottom:calc(14px + env(safe-area-inset-bottom));
+  /* z-index 50 keeps the sound toggle above the overlays (40) and tab bar (46) so
+     it stays visible and tappable on the menu, in gameplay, and on the game-over
+     screen — not buried behind a full-screen overlay. */
+  #soundBtn{ position:fixed; z-index:50; right:14px; bottom:calc(14px + env(safe-area-inset-bottom));
     width:46px; height:46px; border-radius:50%; border:1px solid rgba(255,255,255,.25);
     background:rgba(10,6,19,.6); color:#fff; font-size:18px; pointer-events:auto; cursor:pointer; }
   #tiltBtn{ position:fixed; z-index:25; right:14px; bottom:calc(68px + env(safe-area-inset-bottom));

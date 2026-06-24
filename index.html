@@ -33,7 +33,7 @@
 
   <div id="popups"></div>
   <div id="banner"></div>
-  <button id="soundBtn" class="hidden">🔊</button>
+  <button id="soundBtn">🔊</button>
   <button id="tiltBtn" class="hidden">📱⇄</button>
   <button id="pauseBtn" class="hidden">⏸</button>
 
@@ -428,9 +428,11 @@ function spawn(){ const e=getEntity(), r=Math.random();
 function getViewportSize(){
   const vv = window.visualViewport;
   const w = (vv && vv.width) || window.innerWidth;
-  // prefer Telegram's own settled viewport height; visualViewport next (tracks on-screen
-  // keyboard / mobile browser chrome show-hide better than window.innerHeight); innerHeight last
-  const h = (tg && (tg.viewportStableHeight||tg.viewportHeight)) || (vv && vv.height) || window.innerHeight;
+  // Fill the FULL rendered webview height so no black gap appears below the canvas.
+  // Telegram's viewportStableHeight is frequently SHORTER than the painted area,
+  // which left a gap at the bottom; visualViewport.height is the true visible height
+  // (and tracks the on-screen keyboard). Fall back to innerHeight, then Telegram.
+  const h = (vv && vv.height) || window.innerHeight || (tg && (tg.viewportStableHeight||tg.viewportHeight)) || 0;
   return {w,h};
 }
 window.getViewportSize = getViewportSize;
@@ -483,13 +485,35 @@ const hasOrientation = typeof window.DeviceOrientationEvent !== "undefined";
 let tiltEnabled = false, tiltCenter = null;
 const TILT_SENSITIVITY = 0.16; // world-units per degree of tilt past center; tune to taste
 
+// deviceorientation angles are reported in the DEVICE frame, so the axis that maps
+// to left/right STEERING changes with screen orientation: it's gamma in portrait but
+// beta in landscape (and the sign flips depending on which way you rotated). Picking
+// the right axis per orientation keeps steering responsive after a rotate instead of
+// going dead/locked in landscape.
+function screenAngle(){
+  const a = (screen.orientation && typeof screen.orientation.angle==="number") ? screen.orientation.angle
+          : (typeof window.orientation==="number" ? window.orientation : 0);
+  return ((a%360)+360)%360;
+}
+function tiltSteerValue(e){
+  const a=screenAngle();
+  if(a===90)  return (e.beta ==null ? null :  e.beta);    // landscape
+  if(a===270) return (e.beta ==null ? null : -e.beta);    // landscape (rotated the other way)
+  if(a===180) return (e.gamma==null ? null : -e.gamma);   // upside-down portrait
+  return       (e.gamma==null ? null :  e.gamma);         // upright portrait
+}
 function onTilt(e){
   if(!tiltEnabled || !state.running || dragging) return;     // a finger-drag always wins while it's active
-  const g = e.gamma; if(g===null || g===undefined) return;    // some devices report null before first real reading
-  if(tiltCenter===null){ tiltCenter=g; return; }               // first reading after enabling = "neutral" pose
+  const g = tiltSteerValue(e); if(g===null) return;          // that axis not reported yet on this device
+  if(tiltCenter===null){ tiltCenter=g; return; }             // first reading after enable/rotate = "neutral" pose
   const delta = g - tiltCenter;
   state.playerTargetX = THREE.MathUtils.clamp(delta*TILT_SENSITIVITY, -playHalfWidth, playHalfWidth);
 }
+// On rotation the steering axis AND the neutral pose change — null the center so the
+// next reading recalibrates, preventing the tilt controls from locking or going dead.
+function recalibrateTilt(){ tiltCenter=null; }
+window.addEventListener("orientationchange", recalibrateTilt);
+if(screen.orientation && screen.orientation.addEventListener) screen.orientation.addEventListener("change", recalibrateTilt);
 // (D7) removed empty setTiltLabel() no-op; the .on class color is the only state cue.
 function enableTilt(){
   window.addEventListener("deviceorientation", onTilt);
@@ -636,7 +660,7 @@ function resetGame(){ for(let i=active.length-1;i>=0;i--) freeEntity(active[i]);
 function startGame(){ audioInit(); startMusic(); startEngine(); resetGame();
   document.getElementById("startScreen").classList.add("hidden"); document.getElementById("gameOverScreen").classList.add("hidden");
   document.getElementById("pauseScreen").classList.add("hidden");
-  el.hud.classList.remove("hidden"); el.sound.classList.remove("hidden"); el.vipBadge.style.display=state.vip?"inline-block":"none"; vipGlow.material.opacity=0; state.running=true;
+  el.hud.classList.remove("hidden"); /* sound toggle is always visible now */ el.vipBadge.style.display=state.vip?"inline-block":"none"; vipGlow.material.opacity=0; state.running=true;
   document.getElementById("pauseBtn").classList.remove("hidden"); }
 function gameOver(){ state.running=false; stopEngine(); sfx.over();
   if(state.score>state.best){ state.best=Math.floor(state.score); try{ localStorage.setItem("xzilla_best",String(state.best)); }catch(e){} }
