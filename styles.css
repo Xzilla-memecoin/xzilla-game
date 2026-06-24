@@ -54,6 +54,10 @@
     justify-content:center; text-align:center; padding:24px; font-family:'Orbitron',sans-serif; color:#fff;
     background:linear-gradient(rgba(7,3,24,.55), rgba(7,3,24,.86)); }
   .hidden{ display:none !important; }
+  /* The tab bar (#tabbar, fixed top, z-index 46) renders above this centered overlay,
+     so reserve clearance at the top or the hero art slides under the bar in portrait.
+     Asymmetric top padding shifts the centered column down clear of the bar. */
+  #startScreen{ padding-top:calc(72px + env(safe-area-inset-top)); }
   #heroImg{ width:210px; max-width:60vw; height:auto; margin-bottom:2px;
     filter:drop-shadow(0 0 30px rgba(57,255,122,.6)) drop-shadow(0 0 12px rgba(0,0,0,.6));
     animation:heroFloat 3.2s ease-in-out infinite; }
