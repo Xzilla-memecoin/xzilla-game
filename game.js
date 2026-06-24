@@ -88,7 +88,13 @@ window._adsPayload = "WwogIHsKICAgICJpZCI6ICJ4emlsbGEtaG9tZSIsCiAgICAidGV4dCI6IC
     {score:18000, name:"XZILLA LEGEND"}
   ];
   function titleForScore(score){
-    let t=null; for(const tier of SCORE_TITLES){ if(score>=tier.score) t=tier; else break; } return t;
+    // Highest tier whose threshold the score actually clears. Scans every entry and
+    // keeps the max-threshold match, so it can never over-rank (e.g. award APEX
+    // PREDATOR at a low score) even if SCORE_TITLES is ever reordered — no reliance
+    // on ascending sort order or an early `break`.
+    let t=null;
+    for(const tier of SCORE_TITLES){ if(score>=tier.score && (!t || tier.score>t.score)) t=tier; }
+    return t;
   }
   function tgName(){
     try { const u = tg && tg.initDataUnsafe && tg.initDataUnsafe.user;
@@ -512,7 +518,10 @@ window._adsPayload = "WwogIHsKICAgICJpZCI6ICJ4emlsbGEtaG9tZSIsCiAgICAidGV4dCI6IC
   }
   function renderLeaderboard(){
     const best = state.best||0;
-    const myTitle = titleForScore(best);
+    // The "you" row's rank must reflect the score actually shown in that row
+    // (myBest.score), not the separately-stored state.best — otherwise a stale high
+    // best could tag a low shown score with too high a rank (e.g. premature APEX).
+    const myTitle = titleForScore(myBest ? myBest.score : best);
     $("leaderboardInner").innerHTML =
       '<h2 class="pnl-title" style="border-color:'+MAG+'">DEGEN RANKINGS</h2>'+
       (myBest
