@@ -5,8 +5,11 @@
   *{ box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
   html,body{ margin:0; padding:0; width:100%; height:100%; overflow:hidden; background:#000;
     overscroll-behavior:none; touch-action:none; user-select:none; -webkit-user-select:none; }
-  /* --- container now sized by JS to match visual viewport --- */
-  #game{ position:fixed; top:0; left:0; /* width/height set by JS */ }
+  /* Container is sized precisely by JS (resize() in index.html) to the visual
+     viewport. The vw / dvh values below are a fallback so it still fills the
+     screen before JS runs or if it fails; dvh tracks mobile browser chrome
+     (address bar show/hide) where 100vh would overshoot and clip the canvas. */
+  #game{ position:fixed; top:0; left:0; width:100vw; height:100vh; height:100dvh; }
   #fatal{ position:fixed; top:0; left:0; right:0; z-index:999; display:none;
     background:#1a0008; color:#ff6b81; font:12px/1.5 ui-monospace,monospace; padding:14px;
     white-space:pre-wrap; border-bottom:2px solid #ff3b5c; }

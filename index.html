@@ -432,6 +432,12 @@ function getViewportSize(){
 }
 window.getViewportSize = getViewportSize;
 function resize(){ const {w,h}=getViewportSize();
+  // FIX (mobile cut-off): #game is position:fixed with no CSS width/height, and
+  // #game canvas is forced to 100% of it. Without sizing the container here it
+  // collapses and the canvas only partially fills the screen. Size it to the
+  // (visual) viewport every resize so the canvas fills the screen exactly.
+  container.style.width = w + "px";
+  container.style.height = h + "px";
   renderer.setSize(w,h,true); camera.aspect=w/h; camera.updateProjectionMatrix();
   const dist=CAM.z-PLAYER_Z, visH=2*Math.tan(THREE.MathUtils.degToRad(camera.fov)/2)*dist;
   playHalfWidth=(visH*camera.aspect)/2*0.86; placeCamera(); }

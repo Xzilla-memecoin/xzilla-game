@@ -395,7 +395,10 @@ window._adsPayload = "WwogIHsKICAgICJpZCI6ICJ4emlsbGEtaG9tZSIsCiAgICAidGV4dCI6IC
     }
   } catch(e){ composer=null; }
   function viewH(){ return window.getViewportSize().h; }
-  const resizeComposer = ()=>{ if(composer) composer.setSize(window.innerWidth, viewH()); };
+  // Keep the bloom composer locked to the SAME size as renderer.setSize() in
+  // index.html (both from getViewportSize) — mixing innerWidth here caused the
+  // post-processed frame to mismatch the canvas and clip on mobile.
+  const resizeComposer = ()=>{ if(composer){ const v=window.getViewportSize(); composer.setSize(v.w, v.h); } };
   window.addEventListener("resize", resizeComposer);
   if(window.visualViewport) window.visualViewport.addEventListener("resize", resizeComposer);
 
