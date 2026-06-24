@@ -4,6 +4,15 @@
    Runs after the base game script; overrides spawn/resolve/addScore/gameOver
    (all called internally by name) and augments the world & UI.
    ========================================================================== */
+
+/* === ANCHOR: ADS_PAYLOAD === */
+/* Base64 snapshot of the local (gitignored) ads-config.json. This string is the
+ * payload that actually ships; regenerate it after editing ads-config.json with:
+ *   node -e "console.log(Buffer.from(require('fs').readFileSync('ads-config.json')).toString('base64'))"
+ * Decoded + JSON-parsed at runtime by decodeAdsPayload() in the ad-screen system.
+ * NOTE: Base64 is encoding, not encryption — trivially decodable in any console. */
+window._adsPayload = "WwogIHsKICAgICJpZCI6ICJ4emlsbGEtaG9tZSIsCiAgICAidGV4dCI6ICIkWFpJTExBIMK3IEJVWSBOT1ciLAogICAgImltYWdlVXJsIjogImh0dHBzOi8vcmF3LmdpdGh1YnVzZXJjb250ZW50LmNvbS9YemlsbGEtbWVtZWNvaW4veHppbGxhLWdhbWUvbWFpbi9pbWFnZXMvcnVnX2Jvc3Mud2VicCIsCiAgICAiY2xpY2tMaW5rIjogImh0dHBzOi8veHppbGxhLmlvIgogIH0sCiAgewogICAgImlkIjogImhvZGwtd2FnbWkiLAogICAgInRleHQiOiAiSE9ETCDCtyBXQUdNSSIsCiAgICAiaW1hZ2VVcmwiOiAiaHR0cHM6Ly9yYXcuZ2l0aHVidXNlcmNvbnRlbnQuY29tL1h6aWxsYS1tZW1lY29pbi94emlsbGEtZ2FtZS9tYWluL2ltYWdlcy9ob2RsZXIud2VicCIsCiAgICAiY2xpY2tMaW5rIjogImh0dHBzOi8vdC5tZS94emlsbGEiCiAgfSwKICB7CiAgICAiaWQiOiAidG8tdGhlLW1vb24iLAogICAgInRleHQiOiAiVE8gVEhFIE1PT04iLAogICAgImltYWdlVXJsIjogImh0dHBzOi8vcmF3LmdpdGh1YnVzZXJjb250ZW50LmNvbS9YemlsbGEtbWVtZWNvaW4veHppbGxhLWdhbWUvbWFpbi9pbWFnZXMvbWFpbkltYWdlLndlYnAiLAogICAgImNsaWNrTGluayI6ICJodHRwczovL2RleHNjcmVlbmVyLmNvbSIKICB9Cl0K";
+
 (function(){
   if (typeof THREE === "undefined") { return; }
   const TEAL="#39ff7a", MAG="#ff2bd6", CYAN="#21e6ff", GOLD="#ffd23f", RED="#ff3b5c";
@@ -1537,13 +1546,74 @@
       const adScreens=[];
       const AD_MSGS=["$XZILLA","WAGMI","PUMP IT","HODL","BUY THE DIP","DIAMOND HANDS","FEW","LFG","TO THE MOON"];
       const AD_COLORS=[null,null,null,null,null,null,null,null,null]; // per-message color override (ads.json), null = use combo-tier color
+      const AD_IMAGES=[]; // per-message background image URL (parallel to AD_MSGS), undefined = no image
+      const AD_LINKS=[];  // per-message click target (reserved; raycast click handling not wired here)
+
+      /* ---------- cached background-image system (from billboard-textures POC) ----------
+       * One HTMLImageElement per URL, loaded once and shared by reference. drawAd()
+       * draws the cached bitmap behind the text only once it has decoded (img._ready),
+       * so there is zero per-frame image work — repaint happens only on message change. */
+      const _adImgCache={};
+      function adImage(url){
+        if(!url) return null;
+        if(_adImgCache[url]) return _adImgCache[url];
+        const img=new Image(); img.crossOrigin="anonymous";
+        img.onload=()=>{ img._ready=true; };
+        img.onerror=()=>{ img._failed=true; };
+        img.src=url;
+        return (_adImgCache[url]=img);
+      }
+
+      /* ---------- decode window._adsPayload (Base64 ads-config.json) ----------
+       * Returns the parsed array of {id,text,imageUrl,clickLink} or null on any
+       * failure (missing/garbled payload), so the built-in AD_MSGS stay as fallback. */
+      function decodeAdsPayload(){
+        try{
+          if(!window._adsPayload) return null;
+          // utf-8-safe Base64 -> string -> JSON
+          const bin=atob(window._adsPayload);
+          let json; try{ json=decodeURIComponent(escape(bin)); }catch(_){ json=bin; }
+          const data=JSON.parse(json);
+          const arr=Array.isArray(data)?data:(data&&Array.isArray(data.ads)?data.ads:null);
+          return (arr&&arr.length)?arr:null;
+        }catch(e){ return null; }
+      }
+      (function applyAdsPayload(){
+        const ads=decodeAdsPayload();
+        if(!ads) return;   // keep built-in defaults
+        const msgs=[],cols=[],imgs=[],links=[];
+        for(const a of ads){
+          const text=a&&typeof a.text==="string"?a.text.trim():"";
+          if(!text) continue;
+          msgs.push(text.toUpperCase().slice(0,60));
+          cols.push(/^#[0-9a-fA-F]{3,8}$/.test(a.color||"")?a.color:null);
+          imgs.push(typeof a.imageUrl==="string"?a.imageUrl:undefined);
+          links.push(typeof a.clickLink==="string"?a.clickLink:undefined);
+        }
+        if(!msgs.length) return;
+        AD_MSGS.length=0; AD_MSGS.push(...msgs);
+        AD_COLORS.length=0; AD_COLORS.push(...cols);
+        AD_IMAGES.length=0; AD_IMAGES.push(...imgs);
+        AD_LINKS.length=0;  AD_LINKS.push(...links);
+        imgs.forEach(adImage);   // warm the image cache so backgrounds are ready ASAP
+        try{ console.log("[ads] decoded window._adsPayload:",AD_MSGS.length,"ads"); }catch(_){}
+      })();
+
       // The billboard panel itself is a FIXED size (flush-mounted on the tower
       // face) — it never grows. Longer text instead auto-shrinks its font
       // (28px down to 14px) and re-wraps until it fits, so the message
       // always stays fully on the screen no matter how long it is.
-      function drawAd(scr,msg,color){
+      function drawAd(scr,msg,color,imageUrl){
         const x=scr.ctx,W=256,H=128;
-        x.fillStyle="#05030f"; x.fillRect(0,0,W,H);
+        // Background: cached ad image if decoded, else the solid neon-dark panel.
+        const img=adImage(imageUrl);
+        if(img&&img._ready){
+          x.fillStyle="#05030f"; x.fillRect(0,0,W,H);          // base under transparent/letterboxed art
+          x.globalAlpha=0.6; x.drawImage(img,0,0,W,H); x.globalAlpha=1;
+          x.fillStyle="rgba(5,3,15,0.35)"; x.fillRect(0,0,W,H); // scrim so text stays legible
+        } else {
+          x.fillStyle="#05030f"; x.fillRect(0,0,W,H);
+        }
         x.strokeStyle=color; x.lineWidth=6; x.strokeRect(5,5,W-10,H-10);
         x.fillStyle=color; x.shadowColor=color; x.shadowBlur=18;
         x.textAlign="center"; x.textBaseline="middle";
@@ -1574,7 +1644,7 @@
           new THREE.MeshBasicMaterial({map:scr.tex,transparent:true,depthWrite:false,fog:true}));
         m.position.set(0, faceY, 0);   // z offset applied by caller via group depth
         m._scr=scr; m._t=Math.random()*4; m._msg=(Math.random()*AD_MSGS.length)|0; m._mode="msg";
-        drawAd(scr,AD_MSGS[m._msg],CYAN);
+        drawAd(scr,AD_MSGS[m._msg],CYAN,AD_IMAGES[m._msg]);
         group.add(m); adScreens.push(m);
         return m;
       }
@@ -1632,19 +1702,25 @@
         fetch(ADS_CONFIG_URL, {cache:"no-store"}).then(r=>r.ok?r.json():null).then(data=>{
           let raw = Array.isArray(data) ? data : (data && Array.isArray(data.messages) ? data.messages : null);
           if(!raw) return;
-          // each entry can be a plain string ("WAGMI") or {"text":"WAGMI","color":"#21e6ff"}
-          const msgs=[], colors=[];
+          // each entry can be a plain string ("WAGMI") or
+          // {"text":"WAGMI","color":"#21e6ff","imageUrl":"...","clickLink":"..."}
+          const msgs=[], colors=[], imgs=[], links=[];
           for(const item of raw){
             const text = typeof item==="string" ? item : (item && item.text);
             if(typeof text!=="string" || !text.trim()) continue;
             msgs.push(text.trim().toUpperCase().slice(0,60));
             colors.push((item && typeof item==="object" && /^#[0-9a-fA-F]{3,8}$/.test(item.color||"")) ? item.color : null);
+            imgs.push((item && typeof item==="object" && typeof item.imageUrl==="string") ? item.imageUrl : undefined);
+            links.push((item && typeof item==="object" && typeof item.clickLink==="string") ? item.clickLink : undefined);
           }
           if(!msgs.length) return;
           AD_MSGS.length=0; AD_MSGS.push(...msgs);
           AD_COLORS.length=0; AD_COLORS.push(...colors);
+          AD_IMAGES.length=0; AD_IMAGES.push(...imgs);
+          AD_LINKS.length=0;  AD_LINKS.push(...links);
+          imgs.forEach(adImage);
           for(const s of adScreens){ s._msg=s._msg%AD_MSGS.length; s._t=0;
-            drawAd(s._scr,AD_MSGS[s._msg],AD_COLORS[s._msg]||CYAN); }
+            drawAd(s._scr,AD_MSGS[s._msg],AD_COLORS[s._msg]||CYAN,AD_IMAGES[s._msg]); }
         }).catch(()=>{ /* keep built-in defaults */ });
       })();
 
@@ -1691,7 +1767,7 @@
             if(s._mode==="boss"){ s._mode="msg"; s._t=99; }
             if(s._t>3.4){ s._t=0; s._msg=(s._msg+1)%AD_MSGS.length;
               const tierCol=combo>=10?GOLD:(combo>=5?MAG:CYAN);
-              drawAd(s._scr,AD_MSGS[s._msg],AD_COLORS[s._msg]||tierCol); }
+              drawAd(s._scr,AD_MSGS[s._msg],AD_COLORS[s._msg]||tierCol,AD_IMAGES[s._msg]); }
           }
         }
       };

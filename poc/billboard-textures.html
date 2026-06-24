@@ -1,0 +1,221 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
+<title>XZILLA POC — image / canvas billboard textures @ 60FPS</title>
+<style>
+  html,body{ margin:0; height:100%; background:#070318; overflow:hidden; font-family:ui-monospace,monospace; }
+  #poc{ position:fixed; inset:0; }
+  #hud{ position:fixed; top:8px; left:8px; z-index:10; color:#39ff7a; font-size:12px; line-height:1.6;
+        text-shadow:0 0 8px #39ff7a; pointer-events:none; }
+  #fps{ color:#ffd23f; }
+  #fps.bad{ color:#ff3b5c; }
+  #controls{ position:fixed; bottom:10px; left:8px; right:8px; z-index:10; display:flex; gap:6px; flex-wrap:wrap; }
+  button{ font-family:inherit; font-size:11px; color:#04130a; background:#39ff7a; border:none;
+          border-radius:6px; padding:9px 12px; cursor:pointer; }
+  button.off{ background:#2a2150; color:#9fb6c9; }
+</style>
+</head>
+<body>
+  <div id="poc"></div>
+  <div id="hud">
+    XZILLA billboard texture POC<br>
+    FPS: <span id="fps">--</span> &nbsp;|&nbsp; screens: <span id="count">0</span><br>
+    mode: <span id="mode">PLAIN TEXT (current engine)</span>
+  </div>
+  <div id="controls">
+    <button data-mode="text" class="on">A · Plain text (baseline)</button>
+    <button data-mode="image" class="off">B · Image sprite</button>
+    <button data-mode="composite" class="off">C · Image + text canvas</button>
+  </div>
+
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+  <script>
+  /* ============================================================================
+     PROOF OF CONCEPT — replacing / overlaying the plain-text ad-screen billboards
+     (game.js drawAd / mountScreen) with EITHER:
+        B) a textured image sprite, or
+        C) an HTML5 canvas texture that composites an image + neon text.
+
+     The single rule that protects the 60FPS target, demonstrated below:
+        ── NEVER allocate or repaint per frame. ──
+     • Textures/canvases/materials are created ONCE and reused.
+     • A canvas billboard is repainted ONLY when its message changes, and the
+       ONLY per-frame cost is the cheap `texture.needsUpdate = true` upload.
+     • Image textures are loaded ONCE through a cache and shared by reference.
+
+     This mirrors exactly how the real engine already drives ad-screens:
+     drawAd() runs on a ~3.4s message cadence, not every frame (see game.js
+     window.__frame ad-screen loop). The POC stress-tests 30 billboards all
+     animating to prove the per-frame cost stays flat.
+     ========================================================================== */
+
+  const W = innerWidth, H = innerHeight;
+  const renderer = new THREE.WebGLRenderer({ antialias:true });
+  renderer.setPixelRatio(Math.min(devicePixelRatio||1, 2));   // same clamp as the game
+  renderer.setSize(W, H);
+  document.getElementById("poc").appendChild(renderer.domElement);
+
+  const scene = new THREE.Scene();
+  scene.fog = new THREE.Fog(0x2a0b40, 22, 90);
+  scene.background = new THREE.Color(0x070318);
+  const camera = new THREE.PerspectiveCamera(62, W/H, 0.1, 200);
+  camera.position.set(0, 4, 18); camera.lookAt(0, 2, -20);
+
+  const CYAN="#21e6ff", MAG="#ff2bd6", GOLD="#ffd23f";
+  const ASSET_BASE = "https://raw.githubusercontent.com/Xzilla-memecoin/xzilla-game/main/images/";
+  const AD_MSGS = ["$XZILLA","WAGMI","PUMP IT","HODL","TO THE MOON","DIAMOND HANDS","LFG","FEW"];
+
+  /* ---------------------------------------------------------------------------
+     SHARED, LOAD-ONCE IMAGE TEXTURE CACHE.
+     TextureLoader is async; the texture object exists immediately and fills in
+     when the image arrives, so we can assign material.map right away with zero
+     per-frame work. One THREE.Texture per URL, shared across every billboard.
+     --------------------------------------------------------------------------- */
+  const texLoader = new THREE.TextureLoader();
+  texLoader.setCrossOrigin("anonymous");           // assets are CORS-enabled raw.githubusercontent
+  const _imgCache = {};
+  function imageTexture(url){
+    if(_imgCache[url]) return _imgCache[url];
+    const t = texLoader.load(url);
+    t.encoding = THREE.sRGBEncoding;
+    return (_imgCache[url] = t);
+  }
+
+  /* ---------------------------------------------------------------------------
+     APPROACH C — canvas that composites a loaded IMAGE behind neon text.
+     Same drawAd() shape as the engine, with one addition: draw a cached
+     HTMLImageElement first, then the text on top. Repainted only on change.
+     --------------------------------------------------------------------------- */
+  const _bgImgCache = {};
+  function bgImage(url){
+    if(_bgImgCache[url]) return _bgImgCache[url];
+    const img = new Image(); img.crossOrigin = "anonymous"; img.src = url;
+    img.onload = ()=>{ img._ready = true; };       // billboards repaint on next message tick
+    return (_bgImgCache[url] = img);
+  }
+  function makeCanvasScreen(){
+    const c = document.createElement("canvas"); c.width = 256; c.height = 128;
+    return { canvas:c, ctx:c.getContext("2d"), tex:new THREE.CanvasTexture(c) };
+  }
+  function drawComposite(scr, msg, color, imgUrl){
+    const x = scr.ctx, CW=256, CH=128;
+    x.clearRect(0,0,CW,CH);
+    const img = bgImage(imgUrl);
+    if(img._ready){ x.globalAlpha = 0.55; x.drawImage(img,0,0,CW,CH); x.globalAlpha = 1; }
+    else { x.fillStyle="#05030f"; x.fillRect(0,0,CW,CH); }
+    x.strokeStyle=color; x.lineWidth=6; x.strokeRect(5,5,CW-10,CH-10);
+    x.fillStyle=color; x.shadowColor=color; x.shadowBlur=18;
+    x.textAlign="center"; x.textBaseline="middle";
+    x.font="bold 26px monospace";
+    x.fillText(msg, CW/2, CH/2);
+    x.shadowBlur=0;
+    scr.tex.needsUpdate = true;                    // <-- the ONLY GPU upload, and only on change
+  }
+  function drawTextOnly(scr, msg, color){          // APPROACH A — current engine behaviour
+    const x = scr.ctx, CW=256, CH=128;
+    x.fillStyle="#05030f"; x.fillRect(0,0,CW,CH);
+    x.strokeStyle=color; x.lineWidth=6; x.strokeRect(5,5,CW-10,CH-10);
+    x.fillStyle=color; x.shadowColor=color; x.shadowBlur=18;
+    x.textAlign="center"; x.textBaseline="middle";
+    x.font="bold 26px monospace"; x.fillText(msg, CW/2, CH/2); x.shadowBlur=0;
+    scr.tex.needsUpdate = true;
+  }
+
+  /* ---------------------------------------------------------------------------
+     Build a grid of billboards. Each panel carries ALL THREE renderings as
+     pre-built children (text-canvas mesh, image-sprite, composite-canvas mesh)
+     and we just toggle .visible — so switching modes never re-allocates either.
+     --------------------------------------------------------------------------- */
+  const SPRITE_IMG = ASSET_BASE + "rug_boss.webp";   // any CORS image; reuse a game asset
+  const panels = [];
+  const COLORS = [CYAN, MAG, GOLD];
+  function buildPanel(px, pz){
+    const group = new THREE.Group();
+    group.position.set(px, 3, pz);
+
+    // A) plain-text canvas mesh
+    const tScr = makeCanvasScreen();
+    const textMesh = new THREE.Mesh(new THREE.PlaneGeometry(5.2, 2.6),
+      new THREE.MeshBasicMaterial({ map:tScr.tex, transparent:true, depthWrite:false, fog:true }));
+
+    // B) image sprite — shared texture, zero canvas work
+    const imgMesh = new THREE.Mesh(new THREE.PlaneGeometry(5.2, 2.6),
+      new THREE.MeshBasicMaterial({ map:imageTexture(SPRITE_IMG), transparent:true, depthWrite:false, fog:true }));
+    imgMesh.visible = false;
+
+    // C) composite canvas mesh
+    const cScr = makeCanvasScreen();
+    const compMesh = new THREE.Mesh(new THREE.PlaneGeometry(5.2, 2.6),
+      new THREE.MeshBasicMaterial({ map:cScr.tex, transparent:true, depthWrite:false, fog:true }));
+    compMesh.visible = false;
+
+    group.add(textMesh, imgMesh, compMesh);
+    scene.add(group);
+
+    const p = { group, textMesh, imgMesh, compMesh, tScr, cScr,
+                msg:(Math.random()*AD_MSGS.length)|0, col:(Math.random()*3)|0, t:Math.random()*3.4 };
+    drawTextOnly(tScr, AD_MSGS[p.msg], COLORS[p.col]);
+    drawComposite(cScr, AD_MSGS[p.msg], COLORS[p.col], SPRITE_IMG);
+    panels.push(p);
+  }
+  for(let i=0;i<30;i++) buildPanel(((i%6)-2.5)*7, -20 - ((i/6)|0)*9);
+  document.getElementById("count").textContent = panels.length;
+
+  /* ---------------------------------- mode switch ---------------------------- */
+  let MODE = "text";
+  const modeLabel = { text:"PLAIN TEXT (current engine)", image:"IMAGE SPRITE", composite:"IMAGE + TEXT CANVAS" };
+  document.querySelectorAll("#controls button").forEach(btn=>{
+    btn.onclick = ()=>{
+      MODE = btn.dataset.mode;
+      document.querySelectorAll("#controls button").forEach(b=>b.className = b===btn?"on":"off");
+      document.getElementById("mode").textContent = modeLabel[MODE];
+      for(const p of panels){
+        p.textMesh.visible = MODE==="text";
+        p.imgMesh.visible  = MODE==="image";
+        p.compMesh.visible = MODE==="composite";
+      }
+    };
+  });
+
+  /* ---------------------------------- render loop ---------------------------- */
+  let last = performance.now(), fpsT = 0, frames = 0;
+  const fpsEl = document.getElementById("fps");
+  function frame(now){
+    const dt = Math.min((now - last)/1000, 0.05); last = now;
+
+    // Per-frame work is intentionally tiny: rotate panels + advance message timers.
+    // A repaint happens only when a panel's 3.4s message cadence rolls over —
+    // NOT every frame. This is the whole point of the 60FPS guarantee.
+    for(const p of panels){
+      p.group.rotation.y = Math.sin(now*0.0005 + p.group.position.x) * 0.15;
+      p.t += dt;
+      if(p.t > 3.4){
+        p.t = 0; p.msg = (p.msg+1) % AD_MSGS.length; p.col = (p.col+1)%3;
+        if(MODE==="text")      drawTextOnly(p.tScr, AD_MSGS[p.msg], COLORS[p.col]);
+        else if(MODE==="composite") drawComposite(p.cScr, AD_MSGS[p.msg], COLORS[p.col], SPRITE_IMG);
+        // image mode: nothing to repaint — texture is static & shared.
+      }
+    }
+
+    renderer.render(scene, camera);
+
+    frames++; fpsT += dt;
+    if(fpsT >= 0.5){
+      const fps = Math.round(frames / fpsT);
+      fpsEl.textContent = fps;
+      fpsEl.className = fps < 55 ? "bad" : "";
+      frames = 0; fpsT = 0;
+    }
+    requestAnimationFrame(frame);
+  }
+  requestAnimationFrame(frame);
+
+  addEventListener("resize", ()=>{
+    camera.aspect = innerWidth/innerHeight; camera.updateProjectionMatrix();
+    renderer.setSize(innerWidth, innerHeight);
+  });
+  </script>
+</body>
+</html>
