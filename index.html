@@ -490,14 +490,14 @@ function onTilt(e){
   const delta = g - tiltCenter;
   state.playerTargetX = THREE.MathUtils.clamp(delta*TILT_SENSITIVITY, -playHalfWidth, playHalfWidth);
 }
-function setTiltLabel(){ /* icon-only now — color (.on class) signals state, not text */ }
+// (D7) removed empty setTiltLabel() no-op; the .on class color is the only state cue.
 function enableTilt(){
   window.addEventListener("deviceorientation", onTilt);
-  tiltEnabled = true; tiltCenter = null; setTiltLabel();
+  tiltEnabled = true; tiltCenter = null;
   if(tiltBtn) tiltBtn.classList.add("on");
 }
 function disableTilt(){
-  tiltEnabled = false; setTiltLabel();
+  tiltEnabled = false;
   if(tiltBtn) tiltBtn.classList.remove("on");
 }
 if(tiltBtn && isTouchDevice && hasOrientation){
@@ -520,14 +520,35 @@ window.addEventListener("keydown",e=>{ if(!state.running) return;
 
 /* ============================================================ EFFECTS */
 const particles=[];
-const partMat=new THREE.SpriteMaterial({ map:radialGlow("#ffffff"), transparent:true, blending:THREE.AdditiveBlending, depthWrite:false });
-function burst(x,y,z,color,count){ for(let i=0;i<count;i++){ const m=partMat.clone(); m.color=new THREE.Color(color);
-  const s=new THREE.Sprite(m); s.scale.set(0.8,0.8,1); s.position.set(x,y,z); scene.add(s);
-  particles.push({sprite:s,vx:(Math.random()-0.5)*9,vy:(Math.random()-0.5)*9,vz:(Math.random()-0.5)*7,life:0.65}); } }
+/* (P3) Pooled particle system. Previously every particle cloned a SpriteMaterial +
+ * created a Sprite, then disposed both on death — a heavy allocate/dispose churn on
+ * every explosion (bombs/bosses burst 40+ at once) that spiked GC mid-combo. Now:
+ *  - one shared glow TEXTURE for all particles,
+ *  - a color-keyed pool of reusable SpriteMaterials (each live particle keeps its own
+ *    instance so opacity still fades independently — they're recycled, never disposed),
+ *  - a pool of Sprite objects kept in the scene and toggled visible.
+ * Nothing is allocated or disposed after warm-up. */
+const PART_TEX=radialGlow("#ffffff");
+const _partSprites=[];           // free Sprite pool
+const _partMats={};              // color -> [free SpriteMaterial]
+function _partMat(color){
+  const pool=_partMats[color]||(_partMats[color]=[]);
+  let m=pool.pop();
+  if(!m){ m=new THREE.SpriteMaterial({ map:PART_TEX, transparent:true, blending:THREE.AdditiveBlending, depthWrite:false }); m._ck=color; m.color.set(color); }
+  m.opacity=1; return m;
+}
+function _partSprite(){ let s=_partSprites.pop(); if(!s){ s=new THREE.Sprite(); scene.add(s); } s.visible=true; return s; }
+function emitParticle(x,y,z,color,scale,vx,vy,vz,life){
+  const s=_partSprite(); s.material=_partMat(color); s.scale.set(scale,scale,1); s.position.set(x,y,z);
+  particles.push({sprite:s,vx:vx,vy:vy,vz:vz,life:life});
+}
+function burst(x,y,z,color,count){ for(let i=0;i<count;i++)
+  emitParticle(x,y,z,color,0.8,(Math.random()-0.5)*9,(Math.random()-0.5)*9,(Math.random()-0.5)*7,0.65); }
 function updateParticles(dt){ for(let i=particles.length-1;i>=0;i--){ const p=particles[i]; p.life-=dt;
   p.sprite.position.x+=p.vx*dt; p.sprite.position.y+=p.vy*dt; p.sprite.position.z+=p.vz*dt;
   const k=Math.max(p.life/0.65,0); p.sprite.material.opacity=k; p.sprite.scale.setScalar(0.8*k+0.15);
-  if(p.life<=0){ scene.remove(p.sprite); p.sprite.material.dispose(); particles.splice(i,1); } } }
+  if(p.life<=0){ const m=p.sprite.material; p.sprite.visible=false; _partSprites.push(p.sprite);
+    (_partMats[m._ck]||(_partMats[m._ck]=[])).push(m); particles.splice(i,1); } } }
 const popupsEl=document.getElementById("popups");
 function popup(worldPos,text,color){ const v=worldPos.clone().project(camera);
   // Map NDC -> canvas pixels using the canvas/visual-viewport size (matches the
@@ -538,9 +559,8 @@ function popup(worldPos,text,color){ const v=worldPos.clone().project(camera);
   popupsEl.appendChild(el); setTimeout(()=>el.remove(),900); }
 function shake(a){ state.shake=Math.max(state.shake,a); }
 function footPuff(){ const px=player.position.x;
-  for(let i=0;i<2;i++){ const m=partMat.clone(); m.color=new THREE.Color("#cbb8ff");
-    const s=new THREE.Sprite(m); s.scale.set(0.5,0.5,1); s.position.set(px+(Math.random()-0.5)*0.7,-0.3,PLAYER_Z+0.4); scene.add(s);
-    particles.push({sprite:s,vx:(Math.random()-0.5)*1.6,vy:Math.random()*1.0+0.2,vz:2+Math.random()*2,life:0.4}); } }
+  for(let i=0;i<2;i++) emitParticle(px+(Math.random()-0.5)*0.7,-0.3,PLAYER_Z+0.4,"#cbb8ff",0.5,
+    (Math.random()-0.5)*1.6, Math.random()*1.0+0.2, 2+Math.random()*2, 0.4); }
 function flashColor(c,a){ const f=document.createElement("div");
   f.style.cssText="position:fixed;inset:0;z-index:24;pointer-events:none;background:radial-gradient(ellipse at center,rgba(0,0,0,0) 40%,"+c+" 100%);opacity:"+a+";transition:opacity .3s;";
   document.body.appendChild(f); requestAnimationFrame(()=>{ f.style.opacity="0"; }); setTimeout(()=>f.remove(),320); }

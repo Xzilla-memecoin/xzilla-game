@@ -265,7 +265,8 @@ window._adsPayload = "WwogIHsKICAgICJpZCI6ICJ4emlsbGEtaG9tZSIsCiAgICAidGV4dCI6IC
   const myHolderMat   = spriteMatURL(HOLDER_IMAGE_URL, drawHolder2);
   const myShieldMat   = spriteMat(drawShield2);
   const myBombMat     = spriteMat(drawBomb2);
-  const matWhale      = spriteMat(drawWhale);
+  // matWhale removed with the placeholder Glitch Whale (D2). drawWhale is still
+  // used by the Rug Boss material (matRug) below, so the draw fn is retained.
 
   /* === ANCHOR: WORLD === */
   /* ======================================================================== *
@@ -305,72 +306,14 @@ window._adsPayload = "WwogIHsKICAgICJpZCI6ICJ4emlsbGEtaG9tZSIsCiAgICAidGV4dCI6IC
     transparent:true, blending:THREE.AdditiveBlending, depthWrite:false, fog:false, opacity:0.6 }));
   sunStreak.scale.set(14,40,1); sunStreak.position.set(0,-1.2,-50); scene.add(sunStreak);
 
-  // Skyline — individual buildings that recycle past, so the city visibly moves
-  function buildingTex(neon){
-    const W=128,H=256, c=document.createElement("canvas"); c.width=W; c.height=H;
-    const x=c.getContext("2d");
-    x.fillStyle="#0a0420"; x.fillRect(0,0,W,H);
-    x.strokeStyle=neon; x.lineWidth=3; x.shadowColor=neon; x.shadowBlur=10;
-    x.strokeRect(2,2,W-4,H-4); x.shadowBlur=0;
-    x.fillStyle = neon==MAG ? "rgba(255,43,214,0.55)" : "rgba(33,230,255,0.55)";
-    for(let wy=18; wy<H-14; wy+=22) for(let wx=12; wx<W-16; wx+=20)
-      if(Math.random()>0.45) x.fillRect(wx,wy,9,12);
-    if(Math.random()>0.5){
-      const words=["$XZILLA","WAGMI","PUMP.FUN","DEGEN","NGMI","FEW","HODL"];
-      x.save(); x.translate(W/2,H*0.5); x.rotate(Math.PI/2);
-      x.font="bold 18px 'Press Start 2P', monospace"; x.textAlign="center";
-      x.fillStyle=neon; x.shadowColor=neon; x.shadowBlur=14;
-      x.fillText(words[(Math.random()*words.length)|0],0,0); x.restore(); x.shadowBlur=0;
-    }
-    const t=new THREE.CanvasTexture(c); t.encoding=THREE.sRGBEncoding; return t;
-  }
+  // Skyline + roadside are (re)built by environmentOverhaulV2 below: 3D crypto
+  // towers fill skyline[], and the lane is left empty (pylons[] stays cleared).
+  // The old canvas-textured building planes and low-poly trees used to be generated
+  // here and then *instantly disposed* by that overhaul — pure startup allocation/GC
+  // waste that never rendered a single frame — so the generation is removed. We keep
+  // only the arrays + span constants the recycle loop and the overhaul rely on. (D1)
   const skyline=[]; const SKY_PER=7, SKY_GAP=11, SKY_SPAN=SKY_PER*SKY_GAP;
-  for(let side=-1; side<=1; side+=2){
-    for(let i=0;i<SKY_PER;i++){
-      const neon = (i%2) ? MAG : CYAN;
-      const bw=4+Math.random()*3, bh=9+Math.random()*14;
-      const m=new THREE.Mesh(new THREE.PlaneGeometry(bw,bh),
-        new THREE.MeshBasicMaterial({ map:buildingTex(neon), transparent:true, depthWrite:false, fog:true }));
-      m.position.set(side*(15+Math.random()*5), bh/2-1.45, -34 + i*SKY_GAP);
-      m.rotation.y = side<0 ? Math.PI*0.32 : -Math.PI*0.32;
-      scene.add(m); skyline.push(m);
-    }
-  }
-
-  // Rushing low-poly trees (strong speed cue, reads as a forest blur past)
-  const pylons=[]; const PYL_PER=9, PYL_GAP=7, PYL_SPAN=PYL_PER*PYL_GAP;
-  function makeTree(){
-    const g = new THREE.Group();
-    const trunkH = 1.1 + Math.random()*0.4;
-    const trunk = new THREE.Mesh(
-      new THREE.CylinderGeometry(0.12,0.16,trunkH,6),
-      new THREE.MeshBasicMaterial({ color:0x2a1a3a }));
-    trunk.position.y = trunkH/2; g.add(trunk);
-    const tiers = 3, baseR = 0.85 + Math.random()*0.25;
-    const leafColor = Math.random()>0.5 ? 0x1f8a4a : 0x16cf7a;
-    for(let i=0;i<tiers;i++){
-      const r = baseR * (1 - i*0.26);
-      const h = 1.3 - i*0.18;
-      const cone = new THREE.Mesh(
-        new THREE.ConeGeometry(r,h,7),
-        new THREE.MeshBasicMaterial({ color:leafColor }));
-      cone.position.y = trunkH + i*0.62 + h*0.42;
-      g.add(cone);
-      const rim = new THREE.Mesh(
-        new THREE.ConeGeometry(r*1.01,h*1.01,7),
-        new THREE.MeshBasicMaterial({ color:0x39ff7a, wireframe:true, transparent:true, opacity:0.35 }));
-      rim.position.copy(cone.position); g.add(rim);
-    }
-    g.scale.setScalar(0.9 + Math.random()*0.5);
-    return g;
-  }
-  for(let side=-1; side<=1; side+=2){
-    for(let i=0;i<PYL_PER;i++){
-      const t = makeTree();
-      t.position.set(side*(6.6 + Math.random()*2.2), -1.45, -34 + i*PYL_GAP + Math.random()*2);
-      scene.add(t); pylons.push(t);
-    }
-  }
+  const pylons=[];
 
   // Player contact shadow
   const shadow = new THREE.Sprite(new THREE.SpriteMaterial({
@@ -394,7 +337,7 @@ window._adsPayload = "WwogIHsKICAgICJpZCI6ICJ4emlsbGEtaG9tZSIsCiAgICAidGV4dCI6IC
       window.__composer = composer;
     }
   } catch(e){ composer=null; }
-  function viewH(){ return window.getViewportSize().h; }
+  // (D3) removed unused viewH() helper — resizeComposer reads getViewportSize() directly.
   // Keep the bloom composer locked to the SAME size as renderer.setSize() in
   // index.html (both from getViewportSize) — mixing innerWidth here caused the
   // post-processed frame to mismatch the canvas and clip on mobile.
@@ -411,18 +354,11 @@ window._adsPayload = "WwogIHsKICAgICJpZCI6ICJ4emlsbGEtaG9tZSIsCiAgICAidGV4dCI6IC
   /* ======================================================================== *
    *  BOSS                                                                     *
    * ======================================================================== */
-  TYPE.BOSS = 4;
-  let bossPending = false;
-  function bossActive(){ for(const a of active) if(a.type===TYPE.BOSS) return true; return false; }
-  function spawnBoss(){
-    const e=getEntity();
-    e.type=TYPE.BOSS; e.hp=1; e.sprite.material=matWhale;
-    e.sprite.scale.set(6.6,6.6,1);
-    e.sprite.position.set(0,1.9,SPAWN_Z-6); e.prevZ=e.sprite.position.z;
-    active.push(e);
-    showBanner("⚠ GLITCH WHALE ⚠"); flashColor("rgba(255,43,214,.4)",0.6); shake(0.9);
-    try{ if(tg&&tg.HapticFeedback) tg.HapticFeedback.notificationOccurred("warning"); }catch(_){}
-  }
+  TYPE.BOSS = 4;   // retained: referenced by the hit-stop set, the ad-screen boss check, and run reset
+  // The placeholder "Glitch Whale" boss (bossPending / bossActive() / spawnBoss() /
+  // matWhale) was fully superseded by the operational Rug Boss in the SET2 layer and
+  // never actually spawned, so it has been removed. bigBanner stays — the Rug Boss
+  // uses it for its "⚠ RUG BOSS ⚠" / "RUGGED THE RUGGER" callouts. (D2)
   function bigBanner(text){
     const b=document.getElementById("banner");
     b.textContent=text; b.classList.add("mega");
@@ -442,12 +378,10 @@ window._adsPayload = "WwogIHsKICAgICJpZCI6ICJ4emlsbGEtaG9tZSIsCiAgICAidGV4dCI6IC
     const nw = 1 + Math.floor(state.score/150);
     if(nw>state.wave){ state.wave=nw; try{sfx.wave();}catch(_){}
       showBanner("WAVE "+state.wave);
-      if(state.wave%4===0) bossPending=true;
     }
   };
 
   window.spawn = function(){
-    if(bossPending && !bossActive()){ bossPending=false; spawnBoss(); return; }
     const e=getEntity(), r=Math.random();
     if(r<CFG.powerupChance){
       e.type = Math.random()<0.5 ? TYPE.SHIELD : TYPE.BOMB;
@@ -462,18 +396,6 @@ window._adsPayload = "WwogIHsKICAgICJpZCI6ICJ4emlsbGEtaG9tZSIsCiAgICAidGV4dCI6IC
 
   window.resolve = function(e){
     const p=e.sprite.position.clone();
-    if(e.type===TYPE.BOSS){
-      burst(p.x,p.y,p.z,MAG,46); burst(p.x,p.y,p.z,TEAL,46); burst(p.x,p.y,p.z,GOLD,24);
-      shake(1.8); flashColor("rgba(57,255,122,.55)",0.85);
-      const gain=Math.round(600*window.__mult()); state.score+=gain; renderScore();
-      econ.tokens+=500; run.earned+=500; run.boss++; run.score=Math.max(run.score,state.score);
-      popup(p,"+"+gain,GOLD); bigBanner("NO MERCY");
-      try{sfx.over&&0;}catch(_){} try{sfx.power();}catch(_){}
-      for(let i=active.length-1;i>=0;i--){ const a=active[i]; if(a!==e&&a.type===TYPE.SCAMMER&&!a.dead){
-        a.dead=true; const ap=a.sprite.position.clone(); burst(ap.x,ap.y,ap.z,MAG,5); freeEntity(a); } }
-      try{ if(tg&&tg.HapticFeedback) tg.HapticFeedback.notificationOccurred("success"); }catch(_){}
-      e.dead=true; freeEntity(e); updateHUDtokens(); return;
-    }
     if(e.type===TYPE.SCAMMER){
       state.combo++; state.kills++; run.kills++; if(state.combo>run.combo) run.combo=state.combo;
       try{sfx.catch(state.combo);}catch(_){}
@@ -496,18 +418,14 @@ window._adsPayload = "WwogIHsKICAgICJpZCI6ICJ4emlsbGEtaG9tZSIsCiAgICAidGV4dCI6IC
 
   /* ------------------------- per-frame world hook ------------------------- */
   window.__frame = function(dt){
-    const now=performance.now()*0.001;
     const sp=(state.running?state.speed:3.5)*dt;
-    for(const py of pylons){ py.position.z+=sp; if(py.position.z>CAM.z+3) py.position.z-=PYL_SPAN; }
+    // pylons[] is intentionally empty (roadside cleared by the overhaul); only the
+    // tower skyline recycles. Boss-flair loop removed with the Glitch Whale. (D1/D2)
     for(const b of skyline){ b.position.z+=sp; if(b.position.z>CAM.z+5) b.position.z-=SKY_SPAN; }
     floorTex.offset.y = (floorTex.offset.y - sp*0.012)%1;
-    // boss flair
-    for(const a of active){ if(a.type===TYPE.BOSS){
-      a.sprite.position.x = Math.sin(now*2)*0.7;
-      a.sprite.material.rotation = Math.sin(now*3)*0.05; } }
     // shadow follows player
     try { shadow.position.x = player.position.x;
-      const s = 2.6 + (player.position.y-0.9)*0.0 ; shadow.material.opacity = 0.7 - (player.position.y-0.9)*0.5;
+      shadow.material.opacity = 0.7 - (player.position.y-0.9)*0.5;   // D6: removed dead `const s` (was *0.0)
       shadow.scale.x = 3 - (player.position.y-0.9)*0.6; } catch(e){}
   };
 
@@ -653,7 +571,7 @@ window._adsPayload = "WwogIHsKICAgICJpZCI6ICJ4emlsbGEtaG9tZSIsCiAgICAidGV4dCI6IC
     _gameOver();
     // economy + missions + leaderboard
     run.score=Math.max(run.score, state.score);
-    econ.tokens += 0; // run earnings already added live; persist now
+    // run earnings were already added live during play; just persist now (D5: removed `econ.tokens += 0;` no-op)
     saveEcon();
     missions.forEach(m=>{
       if(m.done) return;
@@ -675,7 +593,7 @@ window._adsPayload = "WwogIHsKICAgICJpZCI6ICJ4emlsbGEtaG9tZSIsCiAgICAidGV4dCI6IC
 
   // pre-run hooks via extra listeners (start/retry buttons hold direct refs)
   function beforeRun(){
-    resetRun(); bossPending=false;
+    resetRun();
     for(let i=active.length-1;i>=0;i--){ if(active[i].type===TYPE.BOSS) freeEntity(active[i]); }
     hideAllOverlays(); $("gameOverScreen").classList.add("hidden"); $("tabbar").classList.add("hidden");
     updateVip(); applySkin();
@@ -1295,11 +1213,14 @@ window._adsPayload = "WwogIHsKICAgICJpZCI6ICJ4emlsbGEtaG9tZSIsCiAgICAidGV4dCI6IC
         x.fillStyle=g; x.beginPath(); x.arc(cx,cx,S*0.49,0,TAU); x.fill();
       },256);
       const rings=[];
+      const _ringFree=[];   // (P3) pool of reusable ring sprites — recolored on reuse, never disposed
       function ring(p,color,scale,life){
-        const m=new THREE.SpriteMaterial({ map:ringTex, transparent:true,
-          blending:THREE.AdditiveBlending, depthWrite:false, color:new THREE.Color(color) });
-        const s=new THREE.Sprite(m); s.position.copy(p); s.scale.set(scale,scale,1);
-        scene.add(s); rings.push({ s, t:0, life:life||0.42, from:scale, to:scale*3.2 });
+        let s=_ringFree.pop();
+        if(!s){ s=new THREE.Sprite(new THREE.SpriteMaterial({ map:ringTex, transparent:true,
+          blending:THREE.AdditiveBlending, depthWrite:false })); scene.add(s); }
+        s.material.color.set(color); s.material.opacity=0.9; s.visible=true;
+        s.position.copy(p); s.scale.set(scale,scale,1);
+        rings.push({ s, t:0, life:life||0.42, from:scale, to:scale*3.2 });
       }
       function killFX(p, color, big){
         ring(p, color, big?2.2:1.3, big?0.6:0.42);
@@ -1359,7 +1280,7 @@ window._adsPayload = "WwogIHsKICAgICJpZCI6ICJ4emlsbGEtaG9tZSIsCiAgICAidGV4dCI6IC
           const e=1-Math.pow(1-k,3);                       // ease-out
           const sc=r.from+(r.to-r.from)*e;
           r.s.scale.set(sc,sc,1); r.s.material.opacity=(1-k)*0.9;
-          if(k>=1){ scene.remove(r.s); r.s.material.dispose(); rings.splice(i,1); }
+          if(k>=1){ r.s.visible=false; _ringFree.push(r.s); rings.splice(i,1); }   // (P3) recycle, don't dispose
         }
       };
 
