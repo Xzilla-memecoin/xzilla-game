@@ -2,6 +2,8 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8" />
+<!-- Telegram Web App SDK — loaded first so window.Telegram.WebApp (incl. CloudStorage) is ready before any init code runs. -->
+<script src="https://telegram.org/js/telegram-web-app.js"></script>
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover" />
 <title>XZILLA: 3D Scam Destroyer</title>
 
@@ -9,7 +11,7 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@500;700;900&family=Press+Start+2P&display=swap" rel="stylesheet">
 
-<link rel="stylesheet" href="styles.css?v=8">
+<link rel="stylesheet" href="styles.css?v=9">
 </head>
 <body>
   <div id="game"></div>
@@ -51,7 +53,7 @@
          half of the landscape split (title stays above the image in both orientations). -->
     <div class="heroWrap">
       <h1 class="game-title">XZILLA:<span class="title-accent"> RUG SMASHER</span></h1>
-      <img id="heroImg" alt="Xzilla" src="https://raw.githubusercontent.com/Xzilla-memecoin/xzilla-game/main/images/mainImage.webp?v=8" />
+      <img id="heroImg" alt="Xzilla" src="https://raw.githubusercontent.com/Xzilla-memecoin/xzilla-game/main/images/mainImage.webp?v=9" />
     </div>
     <!-- .startCol is display:contents in portrait (no layout change) and becomes the
          RIGHT column of the side-by-side split in mobile landscape (see styles.css). -->
@@ -109,7 +111,7 @@
     })();
   </script>
   <!-- ===================== LIBRARIES ===================== -->
-  <script src="https://telegram.org/js/telegram-web-app.js"></script>
+  <!-- (telegram-web-app.js is loaded at the top of <head> so CloudStorage is ready early) -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
   <script>typeof THREE==="undefined"&&document.write('<scr'+'ipt src="https://cdn.jsdelivr.net/npm/three@0.128.0/build/three.min.js"><\/scr'+'ipt>');</script>
   <!-- Solana web3 (IIFE build exposes window.solanaWeb3) -->
@@ -161,6 +163,27 @@ let tg=null;
 try{ tg = (window.Telegram&&window.Telegram.WebApp)?window.Telegram.WebApp:null;
   if(tg){ tg.ready(); tg.expand(); tg.setHeaderColor&&tg.setHeaderColor("#070318"); tg.setBackgroundColor&&tg.setBackgroundColor("#070318"); }
 }catch(e){}
+
+/* ---- CloudStorage: pull the cross-device best at launch and reconcile with local ----
+ * Telegram CloudStorage persists per-user across devices; localStorage is per-device.
+ * Take the higher of the two, show it, and seed whichever store is behind so they converge. */
+(function loadCloudBest(){
+  try{
+    if(tg && tg.CloudStorage && tg.CloudStorage.getItem){
+      tg.CloudStorage.getItem("xzilla_best", function(err, value){
+        if(err) return;
+        const cloud = parseInt(value||"0",10) || 0;
+        if(cloud > (state.best||0)){
+          state.best = cloud;
+          try{ localStorage.setItem("xzilla_best", String(cloud)); }catch(e){}
+          const bs = document.getElementById("bestScore"); if(bs) bs.textContent = state.best;
+        } else if((state.best||0) > cloud){
+          try{ tg.CloudStorage.setItem("xzilla_best", String(state.best)); }catch(e){}  // local ahead → back it up
+        }
+      });
+    }
+  }catch(e){}
+})();
 
 /* ============================================================ AUDIO (music + sfx, fully synthesized) */
 let actx=null, masterGain=null, musicGain=null, sfxGain=null;
@@ -791,7 +814,9 @@ function maybeShowTutorial(){
   tut._t=setTimeout(close,3200);
 }
 function gameOver(){ state.running=false; stopEngine(); sfx.over();
-  if(state.score>state.best){ state.best=Math.floor(state.score); try{ localStorage.setItem("xzilla_best",String(state.best)); }catch(e){} }
+  if(state.score>state.best){ state.best=Math.floor(state.score); try{ localStorage.setItem("xzilla_best",String(state.best)); }catch(e){}
+    // back the new record up to Telegram CloudStorage so it follows the user across devices
+    try{ if(typeof Telegram!=="undefined" && Telegram.WebApp && Telegram.WebApp.CloudStorage){ Telegram.WebApp.CloudStorage.setItem("xzilla_best", String(state.best)); } }catch(e){} }
   document.getElementById("finalScore").textContent=Math.floor(state.score); document.getElementById("finalKills").textContent=state.kills;
   document.getElementById("bestScore").textContent=state.best; document.getElementById("gameOverScreen").classList.remove("hidden"); el.hud.classList.add("hidden");
   document.getElementById("pauseBtn").classList.add("hidden"); }
@@ -862,6 +887,6 @@ document.querySelectorAll("#startScreen .btn").forEach(b=>{
 document.addEventListener("visibilitychange",()=>{ if(document.hidden&&state.running) pauseGame(); });
 document.getElementById("bestScore").textContent=state.best;
 </script>
-<script src="game.js?v=8"></script>
+<script src="game.js?v=9"></script>
 </body>
 </html>
