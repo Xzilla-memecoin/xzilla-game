@@ -677,28 +677,30 @@ window._adsPayload = "WwogIHsKICAgICJpZCI6ICJ4emlsbGEtaG9tZSIsCiAgICAidGV4dCI6IC
   }
   function renderLeaderboard(){
     const best = state.best||0;
-    // The "you" row's rank must reflect the score actually shown in that row
-    // (myBest.score), not the separately-stored state.best — otherwise a stale high
-    // best could tag a low shown score with too high a rank (e.g. premature APEX).
-    const myTitle = titleForScore(myBest ? myBest.score : best);
+    let cur=null, next=null;                              // current + next milestone vs the player's best
+    for(const t of SCORE_TITLES){
+      if(best>=t.score && (!cur  || t.score>cur.score))  cur=t;
+      if(t.score>best && (!next || t.score<next.score))  next=t;
+    }
+    const floor = cur ? cur.score : 0;
+    const progPct = next ? Math.max(0, Math.min(100, ((best-floor)/(next.score-floor))*100)) : 100;
     $("leaderboardInner").innerHTML =
-      '<h2 class="pnl-title" style="border-color:'+MAG+'">DEGEN RANKINGS</h2>'+
-      (myBest
-        ? '<div class="lrow you">'+
-            '<span class="lrank">\u2605</span>'+
-            '<span class="lname">'+escapeHtml(myBest.name)+(myTitle?' \u00b7 <span style="color:'+GOLD+'">'+myTitle.name+'</span>':'')+'</span>'+
-            '<b>'+fmt(myBest.score)+'</b></div>'+
-          '<div class="sub" style="margin-top:6px">THIS WEEK: <b style="color:'+CYAN+'">'+fmt(weekBest)+'</b> pts \u00b7 resets every week</div>'
-        : '<div class="sub">Play a run to set your first score.</div>')+
-      '<h2 class="pnl-title" style="border-color:'+GOLD+';margin-top:18px;">RANK MILESTONES</h2>'+
-      '<div class="sub" style="margin-bottom:8px;">Best run: '+fmt(best)+' pts</div>'+
+      '<h2 class="pnl-title" style="border-color:'+GOLD+';margin-top:4px;">RANK MILESTONES</h2>'+
+      '<div class="sub" style="margin-bottom:8px;">Your best: '+fmt(best)+' pts \u00b7 <span style="color:'+GOLD+'">'+(cur?cur.name:"UNRANKED")+'</span></div>'+
       SCORE_TITLES.map(t=>{
         const reached = best>=t.score;
         return '<div class="lrow" style="'+(reached?'border-color:'+GOLD+';background:rgba(255,210,63,.08);':'opacity:.55;')+'">'+
           '<span class="lrank" style="color:'+(reached?GOLD:'#9fb6c9')+'">'+(reached?"\u2605":"\u2022")+'</span>'+
           '<span class="lname">'+t.name+'</span>'+
           '<b style="color:'+(reached?GOLD:'#9fb6c9')+'">'+fmt(t.score)+'</b></div>';
-      }).join("");
+      }).join("")+
+      // bottom: progress toward the next milestone
+      (next
+        ? '<div class="mrow" style="margin-top:12px;border-color:'+GOLD+'">'+
+            '<div class="mtop"><span>NEXT \u00b7 '+next.name+'</span><b style="color:'+GOLD+'">'+fmt(next.score)+'</b></div>'+
+            '<div class="mbar"><i style="width:'+progPct.toFixed(0)+'%;background:'+GOLD+'"></i></div>'+
+            '<div class="msub">'+fmt(best)+' / '+fmt(next.score)+' \u00b7 '+fmt(next.score-best)+' to go</div></div>'
+        : '<div class="mrow done" style="margin-top:12px;border-color:'+TEAL+'"><div class="mtop"><span>MAX RANK REACHED \u2605</span><b style="color:'+TEAL+'">XZILLA LEGEND</b></div></div>');
   }
   function renderSkins(){
     $("skinsInner").innerHTML =
@@ -1332,14 +1334,15 @@ window._adsPayload = "WwogIHsKICAgICJpZCI6ICJ4emlsbGEtaG9tZSIsCiAgICAidGV4dCI6IC
       _renderLeaderboard();
       const host=$("leaderboardInner"); if(!host) return;
 
-      // GLOBAL TOP 10 (when a backend is configured) — prepend above the local rankings.
+      // GLOBAL TOP 10 — the leaderboard. Prepended above the milestones ladder.
       if(lbApi() && !host.querySelector("#lbTop")){
         const box=document.createElement("div"); box.id="lbTop";
-        box.innerHTML='<h2 class="pnl-title" style="border-color:'+CYAN+'">TOP 10 DEGENS</h2>'+
+        box.innerHTML='<h2 class="pnl-title" style="border-color:'+CYAN+';margin-top:4px;">TOP 10 DEGENS</h2>'+
           '<div class="sub" id="lbTopList">Loading global rankings…</div>';
         host.insertBefore(box, host.firstChild);
         const mine = myBest && myBest.name;
-        fetch(lbApi()+"/top").then(r=>r.json()).then(d=>{
+        // no-store: always pull the freshest board so a cached response can't show stale order
+        fetch(lbApi()+"/top", { cache:"no-store" }).then(r=>r.json()).then(d=>{
           const list=(d && d.top) || []; const el=$("lbTopList"); if(!el) return;
           if(!list.length){ el.textContent="No scores yet — be the first to rank!"; return; }
           el.className=""; el.innerHTML=list.map((e,i)=>{

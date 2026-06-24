@@ -32,7 +32,7 @@ function cors(origin){
 function json(data, status, origin){
   return new Response(JSON.stringify(data), {
     status: status || 200,
-    headers: { "content-type": "application/json", ...cors(origin) },
+    headers: { "content-type": "application/json", "Cache-Control": "no-store", ...cors(origin) },
   });
 }
 
