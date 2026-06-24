@@ -1,0 +1,673 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover" />
+<title>XZILLA: 3D Scam Destroyer</title>
+
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@500;700;900&family=Press+Start+2P&display=swap" rel="stylesheet">
+
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div id="game"></div>
+  <div id="fatal"></div>
+  <div id="vignette"></div>
+  <div id="crt"></div>
+
+  <div id="hud" class="hidden">
+    <div class="hud-block">
+      <span class="hud-label">SCORE</span>
+      <span id="score">0</span>
+      <span id="combo">COMBO x1</span>
+    </div>
+    <div class="hud-block hud-right">
+      <span class="hud-label">XZILLA HP</span>
+      <span id="lives">🟢🟢🟢</span>
+      <span id="vipBadge">★ VIP HODLER ★</span>
+      <div id="bagWrap"><span class="hud-label">XP</span><span id="bagHud">0</span></div>
+    </div>
+  </div>
+
+  <div id="popups"></div>
+  <div id="banner"></div>
+  <button id="soundBtn" class="hidden">🔊</button>
+  <button id="tiltBtn" class="hidden">📱⇄</button>
+  <button id="pauseBtn" class="hidden">⏸</button>
+
+  <div id="tabbar" class="hidden">
+    <button class="tab on" data-tab="PLAY">PLAY</button>
+    <button class="tab" data-tab="WALLET">WALLET</button>
+    <button class="tab" data-tab="MISSIONS">QUESTS</button>
+    <button class="tab" data-tab="LEADERBOARD">RANKS</button>
+    <button class="tab" data-tab="SKINS">SKINS</button>
+  </div>
+
+  <div id="startScreen" class="overlay">
+    <img id="heroImg" alt="Xzilla" src="https://raw.githubusercontent.com/Xzilla-memecoin/xzilla-game/main/images/mainImage.webp" />
+    <div class="logo"><span class="sub">3D SCAM DESTROYER</span></div>
+    <p class="tag">The kaiju that hunts the chain. Smash <b class="good">SCAMMERS</b>, paid KOLs &amp; ruggers
+      for points — but never crush a loyal <b class="bad">HODLER</b>. Three strikes and you're rugged.</p>
+    <button id="startBtn" class="btn">▶ START GAME</button>
+    <button id="connectBtn" class="btn secondary small" style="margin-top:18px;">CONNECT YOUR XZILLA HODL WALLET FOR SCORE MULTIPLIERS</button>
+    <div id="walletInfo" class="wallet">Wallet not connected</div>
+    <div id="vipStatus" class="status-line"></div>
+  </div>
+
+  <div id="walletPanel" class="overlay panel hidden"><div class="panelInner" id="walletInner"></div></div>
+  <div id="missionsPanel" class="overlay panel hidden"><div class="panelInner" id="missionsInner"></div></div>
+  <div id="leaderboardPanel" class="overlay panel hidden"><div class="panelInner" id="leaderboardInner"></div></div>
+  <div id="skinsPanel" class="overlay panel hidden"><div class="panelInner" id="skinsInner"></div></div>
+
+  <div id="pauseScreen" class="overlay hidden">
+    <div class="go-title" style="color:var(--cyan);text-shadow:0 0 16px var(--cyan);">⏸ PAUSED</div>
+    <button id="resumeBtn" class="btn">▶ RESUME</button>
+    <button id="quitBtn" class="btn secondary small" style="margin-top:18px;">🏠 QUIT TO MENU</button>
+  </div>
+
+  <div id="gameOverScreen" class="overlay hidden">
+    <div class="go-title">GAME OVER</div>
+    <div class="stat">SCORE <span id="finalScore" class="num">0</span></div>
+    <div class="stat">SCAMS DESTROYED <span id="finalKills" class="num">0</span></div>
+    <div class="stat best">BEST <span id="bestScore" class="num">0</span></div>
+    <div class="go-buttons"><button id="retryBtn" class="btn">▶ PLAY AGAIN</button></div>
+  </div>
+
+  <script>
+    (function(){
+      function show(m){ var d=document.getElementById("fatal"); if(d){ d.style.display="block"; d.textContent="\u26a0 "+m; } }
+      window.__showFatal=show;
+      window.addEventListener("error",function(e){ show((e.message||"Script error")+(e.lineno?(" (line "+e.lineno+")"):"")); });
+      window.addEventListener("unhandledrejection",function(e){ show("Promise: "+((e.reason&&e.reason.message)||e.reason)); });
+    })();
+  </script>
+  <!-- ===================== LIBRARIES ===================== -->
+  <script src="https://telegram.org/js/telegram-web-app.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+  <script>typeof THREE==="undefined"&&document.write('<scr'+'ipt src="https://cdn.jsdelivr.net/npm/three@0.128.0/build/three.min.js"><\/scr'+'ipt>');</script>
+  <!-- Solana web3 (IIFE build exposes window.solanaWeb3) -->
+  <script src="https://unpkg.com/@solana/web3.js@1.95.3/lib/index.iife.min.js"></script>
+  <!-- Postprocessing (bloom) — matches three r128 -->
+  <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/shaders/CopyShader.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/shaders/LuminosityHighPassShader.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/postprocessing/EffectComposer.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/postprocessing/RenderPass.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/postprocessing/ShaderPass.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/postprocessing/UnrealBloomPass.js"></script>
+<script id="xzilla-sprites">window.XZILLA_SPRITES={"honeypot":"https://raw.githubusercontent.com/Xzilla-memecoin/xzilla-game/main/images/honeybot.webp","fakedrop":"https://raw.githubusercontent.com/Xzilla-memecoin/xzilla-game/main/images/fake_drop.webp","rugboss":"https://raw.githubusercontent.com/Xzilla-memecoin/xzilla-game/main/images/rug_boss.webp"};</script>
+
+<script>
+/* ============================================================
+   CONFIG  ── paste your own values here
+   ============================================================ */
+const XZILLA_BACK_IMAGE_URL = "https://raw.githubusercontent.com/Xzilla-memecoin/xzilla-game/main/images/Xrider.webp";
+// Bad guys / holders are drawn procedurally for now. Paste your own
+// CORS-enabled PNG URLs here later and they'll override the art:
+const ASSET_BASE = "https://raw.githubusercontent.com/Xzilla-memecoin/xzilla-game/main/images/";
+const HOLDER_IMAGE_URL  = ASSET_BASE + "hodler.webp";
+
+/* ----- optional custom audio -------------------------------------------- *
+ * Paste direct URLs (mp3/ogg/wav — same hosting trick as the images above:
+ * e.g. upload to the GitHub repo under an "audio/" folder and use the raw
+ * URL) to replace the built-in synthesized music/engine with your own
+ * recordings or Suno-generated tracks. Both should be seamless loops.
+ * Leave either one "" to keep the synthesized version for that slot. ----- */
+const MUSIC_URL  = "";   // 🎵 your own looping background track
+const ENGINE_URL = "";   // 🏍 your own looping motorcycle engine sound
+
+const XZILLA_MINT_ADDRESS = "YOUR_XZILLA_MINT_ADDRESS_HERE";
+const SOLANA_RPC          = "https://api.mainnet-beta.solana.com";
+const FORCE_VIP_FOR_DEMO  = true;
+
+const CFG = { lives:3, baseSpeed:9, speedRampPerSec:0.18, baseSpawnGap:0.92, minSpawnGap:0.34,
+  holderChance:0.32, powerupChance:0.05, scammerPoints:10, vipMultiplier:1.2, playerSpeedLerp:0.22 };
+
+/* ============================================================ STATE */
+const state = { running:false, score:0, lives:CFG.lives, combo:0, kills:0, wave:1, vip:false, best:0,
+  speed:CFG.baseSpeed, spawnGap:CFG.baseSpawnGap, spawnTimer:0, elapsed:0, playerTargetX:0, shake:0, soundOn:true };
+try { state.best = parseInt(localStorage.getItem("xzilla_best")||"0",10)||0; } catch(e){}
+
+/* ============================================================ TELEGRAM */
+let tg=null;
+try{ tg = (window.Telegram&&window.Telegram.WebApp)?window.Telegram.WebApp:null;
+  if(tg){ tg.ready(); tg.expand(); tg.setHeaderColor&&tg.setHeaderColor("#070318"); tg.setBackgroundColor&&tg.setBackgroundColor("#070318"); }
+}catch(e){}
+
+/* ============================================================ AUDIO (music + sfx, fully synthesized) */
+let actx=null, masterGain=null, musicGain=null, sfxGain=null;
+let customMusicBuffer=null, customEngineBuffer=null;
+(function preloadCustomAudio(){
+  function load(url, assign){
+    if(!url) return;
+    try{
+      const decodeCtx = new (window.AudioContext||window.webkitAudioContext)();
+      fetch(url).then(r=>r.arrayBuffer()).then(buf=>decodeCtx.decodeAudioData(buf)).then(decoded=>{
+        assign(decoded); try{ decodeCtx.close(); }catch(_){}
+      }).catch(()=>{ /* bad URL/format — silently keep the built-in synth sound */ });
+    }catch(e){}
+  }
+  load(MUSIC_URL,  b=>customMusicBuffer=b);
+  load(ENGINE_URL, b=>customEngineBuffer=b);
+})();
+function audioInit(){
+  try{
+    if(!actx){
+      actx=new (window.AudioContext||window.webkitAudioContext)();
+      masterGain=actx.createGain(); masterGain.gain.value=state.soundOn?1:0; masterGain.connect(actx.destination);
+      musicGain=actx.createGain();  musicGain.gain.value=0.30; musicGain.connect(masterGain);
+      sfxGain=actx.createGain();    sfxGain.gain.value=0.9;  sfxGain.connect(masterGain);
+    }
+    if(actx.state==="suspended") actx.resume();
+  }catch(e){}
+}
+/* Some mobile browsers/WebViews (notably first playback in a fresh page) have a
+ * noticeable "cold start" latency the very first time real audio output begins —
+ * it can take a few seconds before sound is actually audible. Creating + resuming
+ * the AudioContext on the very first tap anywhere (start screen, wallet button,
+ * whatever) — rather than waiting until Start is pressed — lets that warm-up
+ * latency happen quietly in the background while the player is still reading the
+ * start screen, instead of being heard as "no sound for the first few seconds". */
+(function warmupAudio(){
+  let done=false;
+  function go(){ if(done) return; done=true; audioInit();
+    try{ blip(440,0.05,"sine",0.0001); }catch(e){}   // forces real audio output to actually begin now
+    document.removeEventListener("pointerdown",go,true);
+    document.removeEventListener("touchstart",go,true);
+    document.removeEventListener("keydown",go,true);
+  }
+  document.addEventListener("pointerdown",go,true);
+  document.addEventListener("touchstart",go,true);
+  document.addEventListener("keydown",go,true);
+})();
+/* ---- V2 (V-twin) engine: looping uneven-fire exhaust pulses ---- */
+let engine=null;
+function buildVTwinBuffer(){
+  // one full crank cycle: two firing pulses unevenly spaced (Harley-style 315/405 deg)
+  const sr=actx.sampleRate, cyc=0.5, len=(sr*cyc)|0;
+  const buf=actx.createBuffer(1,len,sr), d=buf.getChannelData(0);
+  const fires=[0.0, 0.4375];        // uneven gap -> potato-potato lope
+  for(const f of fires){
+    const start=(f*len)|0, dur=(0.13*sr)|0;
+    for(let i=0;i<dur && start+i<len;i++){
+      const env=Math.exp(-i/(0.018*sr));            // sharp thump decay
+      const ph=i/sr;
+      const tone=Math.sin(2*Math.PI*70*ph)+0.6*Math.sin(2*Math.PI*140*ph)
+                +0.3*(Math.random()*2-1);           // body + grit
+      d[start+i]+=tone*env*0.5;
+    }
+  }
+  return buf;
+}
+function startEngine(){
+  if(!actx||engine) return;
+  try{
+    const src=actx.createBufferSource(); src.buffer=customEngineBuffer||buildVTwinBuffer(); src.loop=true;
+    src.playbackRate.value=1.0;
+    const lpf=actx.createBiquadFilter(); lpf.type="lowpass"; lpf.frequency.value=320; lpf.Q.value=2;
+    const sub=actx.createOscillator(), subG=actx.createGain();
+    sub.type="sine"; sub.frequency.value=33; subG.gain.value=0.10;   // underlying rumble
+    const vca=actx.createGain();
+    src.connect(lpf); lpf.connect(vca); sub.connect(subG); subG.connect(vca); vca.connect(sfxGain);
+    const t=actx.currentTime; vca.gain.setValueAtTime(0.0001,t); vca.gain.linearRampToValueAtTime(0.22,t+0.4);
+    src.start(); sub.start();
+    engine={src,sub,subG,lpf,vca};
+  }catch(e){}
+}
+function setEnginePitch(speed){
+  if(!engine||!actx) return;
+  try{ const t=actx.currentTime, k=Math.min(speed*8,1.7);
+    engine.src.playbackRate.setTargetAtTime(1.0+k,t,0.1);   // revs up = faster lope
+    engine.lpf.frequency.setTargetAtTime(320+k*260,t,0.1);
+    engine.sub.frequency.setTargetAtTime(33+k*18,t,0.1);
+  }catch(e){}
+}
+function stopEngine(){
+  if(!engine||!actx) return;
+  try{ const t=actx.currentTime; engine.vca.gain.cancelScheduledValues(t);
+    engine.vca.gain.setValueAtTime(engine.vca.gain.value,t); engine.vca.gain.linearRampToValueAtTime(0.0001,t+0.5);
+    const e=engine; setTimeout(()=>{try{e.src.stop();e.sub.stop();}catch(_){}} ,560);
+    engine=null;
+  }catch(e){}
+}
+function blip(freq,dur,type,vol,dest){
+  if(!actx) return;
+  try{ const o=actx.createOscillator(), g=actx.createGain();
+    o.type=type||"square"; o.frequency.value=freq;
+    g.gain.setValueAtTime(vol||0.12, actx.currentTime);
+    g.gain.exponentialRampToValueAtTime(0.0001, actx.currentTime+(dur||0.12));
+    o.connect(g); g.connect(dest||sfxGain); o.start(); o.stop(actx.currentTime+(dur||0.12));
+  }catch(e){}
+}
+const sfx = {
+  catch(c){ const base=520+Math.min(c,15)*30; blip(base,0.08,"square",0.12); blip(base*1.5,0.10,"square",0.08); },
+  hit(){ blip(150,0.28,"sawtooth",0.2); blip(70,0.32,"sawtooth",0.14); },
+  power(){ blip(660,0.08,"square",0.14); setTimeout(()=>blip(990,0.10,"square",0.12),70); setTimeout(()=>blip(1320,0.12,"square",0.1),150); },
+  wave(){ blip(523,0.1,"square",0.13); setTimeout(()=>blip(784,0.14,"square",0.12),90); setTimeout(()=>blip(1046,0.18,"square",0.1),190); },
+  over(){ blip(300,0.2,"sawtooth",0.16); setTimeout(()=>blip(180,0.45,"sawtooth",0.16),160); },
+};
+// ---- looping synthwave track (A-minor: Am F C G) ----
+const PROG=[ {b:55.00,t:[220.00,261.63,329.63]}, {b:43.65,t:[174.61,220.00,261.63]},
+             {b:65.41,t:[261.63,329.63,392.00]}, {b:49.00,t:[196.00,246.94,293.66]} ];
+let music={playing:false,step:0,next:0,timer:null,bpm:126}; let beatT=-9;
+function mVoice(type,freq,t,dur,vol,lpf){
+  const o=actx.createOscillator(), g=actx.createGain(); o.type=type; o.frequency.value=freq; let node=o;
+  if(lpf){ const f=actx.createBiquadFilter(); f.type="lowpass"; f.frequency.value=lpf; o.connect(f); node=f; }
+  g.gain.setValueAtTime(0.0001,t); g.gain.exponentialRampToValueAtTime(vol,t+0.012);
+  g.gain.exponentialRampToValueAtTime(0.0001,t+dur); node.connect(g); g.connect(musicGain);
+  o.start(t); o.stop(t+dur+0.03);
+}
+function mKick(t){ const o=actx.createOscillator(), g=actx.createGain();
+  o.frequency.setValueAtTime(140,t); o.frequency.exponentialRampToValueAtTime(45,t+0.12);
+  g.gain.setValueAtTime(0.8,t); g.gain.exponentialRampToValueAtTime(0.0001,t+0.2);
+  o.connect(g); g.connect(musicGain); o.start(t); o.stop(t+0.22); beatT=t; }
+function mNoise(t,dur,vol,type,freq){
+  const len=Math.max(1,(actx.sampleRate*dur)|0), b=actx.createBuffer(1,len,actx.sampleRate), d=b.getChannelData(0);
+  for(let i=0;i<len;i++) d[i]=Math.random()*2-1;
+  const s=actx.createBufferSource(); s.buffer=b; const f=actx.createBiquadFilter(); f.type=type; f.frequency.value=freq;
+  const g=actx.createGain(); g.gain.setValueAtTime(vol,t); g.gain.exponentialRampToValueAtTime(0.0001,t+dur);
+  s.connect(f); f.connect(g); g.connect(musicGain); s.start(t); s.stop(t+dur); }
+function scheduleStep(step,t){
+  const bar=Math.floor(step/16)%4, sib=step%16, ch=PROG[bar];
+  if(sib%4===0) mKick(t);
+  if(sib===4||sib===12) mNoise(t,0.18,0.45,"bandpass",1900);   // snare
+  if(sib%2===1) mNoise(t,0.035,0.14,"highpass",8000);          // hat
+  if(sib===0||sib===8||sib===14) mVoice("sawtooth",ch.b,t,0.34,0.5,520); // bass
+  if(sib%2===0){ const n=ch.t[((step/2)|0)%3]; mVoice("square",n,t,0.13,0.16,2600); } // arp
+}
+function musicTick(){ if(!music.playing||!actx) return;
+  while(music.next < actx.currentTime+0.12){ scheduleStep(music.step,music.next);
+    music.next += (60/music.bpm)/4; music.step=(music.step+1)%64; }
+  music.timer=setTimeout(musicTick,25); }
+function startMusic(){ if(!actx||music.playing) return;
+  if(customMusicBuffer){
+    const src=actx.createBufferSource(); src.buffer=customMusicBuffer; src.loop=true;
+    src.connect(musicGain); src.start(); music.playing=true; music.customSrc=src; return;
+  }
+  music.playing=true; music.step=0; music.next=actx.currentTime+0.1; musicTick(); }
+
+/* ============================================================ THREE: RENDERER */
+if(typeof THREE==="undefined"){ window.__showFatal&&window.__showFatal("Three.js engine failed to load (CDN blocked?). Game cannot start."); throw new Error("THREE not loaded"); }
+const container=document.getElementById("game");
+const renderer=new THREE.WebGLRenderer({ antialias:true, alpha:false });
+renderer.setPixelRatio(Math.min(window.devicePixelRatio||1,2));
+renderer.outputEncoding=THREE.sRGBEncoding;
+container.appendChild(renderer.domElement);
+
+const scene=new THREE.Scene();
+scene.fog=new THREE.Fog(0x2a0b40, 22, 60);
+const camera=new THREE.PerspectiveCamera(62,1,0.1,140);
+const CAM={x:0,y:5,z:16}; const PLAYER_Z=8, SPAWN_Z=-30;
+let playHalfWidth=3;
+function placeCamera(dx,dy){ camera.position.set(CAM.x+(dx||0),CAM.y+(dy||0),CAM.z); camera.lookAt(0,2.4,-12); }
+
+/* ============================================================ CANVAS-ART HELPERS */
+function tex(draw){ const S=256,c=document.createElement("canvas");c.width=c.height=S;const x=c.getContext("2d");draw(x,S);
+  const t=new THREE.CanvasTexture(c); t.encoding=THREE.sRGBEncoding; return t; }
+function radialGlow(color){ const S=128,c=document.createElement("canvas");c.width=c.height=S;const x=c.getContext("2d");
+  const g=x.createRadialGradient(S/2,S/2,3,S/2,S/2,S/2); g.addColorStop(0,color+"ff");g.addColorStop(.4,color+"66");g.addColorStop(1,color+"00");
+  x.fillStyle=g; x.fillRect(0,0,S,S); return new THREE.CanvasTexture(c); }
+function glowBack(x,S,color,r){ const g=x.createRadialGradient(S/2,S/2,8,S/2,S/2,r||120);
+  g.addColorStop(0,color+"aa");g.addColorStop(.55,color+"33");g.addColorStop(1,color+"00"); x.fillStyle=g; x.fillRect(0,0,S,S); }
+function spark(x,X,Y,r){ x.save(); x.fillStyle="#fff"; x.shadowColor="#fff"; x.shadowBlur=10; x.beginPath();
+  for(let i=0;i<8;i++){ const a=i*Math.PI/4, rr=i%2?r*0.4:r; x.lineTo(X+Math.cos(a)*rr,Y+Math.sin(a)*rr);} x.closePath(); x.fill(); x.restore(); }
+
+function drawHolder(x,S){
+  glowBack(x,S,"#21e6ff",122);
+  const cx=S/2, w=72, top=S/2-72, gir=S/2-16, bot=S/2+92;
+  x.save(); x.shadowColor="#21e6ff"; x.shadowBlur=26;
+  const grad=x.createLinearGradient(0,top,0,bot); grad.addColorStop(0,"#eafdff");grad.addColorStop(.42,"#5ef0ff");grad.addColorStop(1,"#0a9fc8");
+  x.fillStyle=grad; x.beginPath(); x.moveTo(cx-w*0.5,top); x.lineTo(cx+w*0.5,top); x.lineTo(cx+w,gir); x.lineTo(cx,bot); x.lineTo(cx-w,gir); x.closePath(); x.fill(); x.restore();
+  x.strokeStyle="rgba(255,255,255,.5)"; x.lineWidth=2; x.beginPath();
+  x.moveTo(cx-w*0.5,top); x.lineTo(cx-w*0.16,gir); x.lineTo(cx,bot);
+  x.moveTo(cx+w*0.5,top); x.lineTo(cx+w*0.16,gir); x.lineTo(cx,bot);
+  x.moveTo(cx-w,gir); x.lineTo(cx-w*0.16,gir); x.lineTo(cx-w*0.5,top);
+  x.moveTo(cx+w,gir); x.lineTo(cx+w*0.16,gir); x.moveTo(cx-w*0.16,gir); x.lineTo(cx+w*0.16,gir); x.stroke();
+  x.strokeStyle="#fff"; x.lineWidth=3; x.shadowColor="#9ff6ff"; x.shadowBlur=12; x.beginPath();
+  x.moveTo(cx-w*0.5,top); x.lineTo(cx+w*0.5,top); x.lineTo(cx+w,gir); x.lineTo(cx,bot); x.lineTo(cx-w,gir); x.closePath(); x.stroke(); x.shadowBlur=0;
+  spark(x,cx+36,top+20,8); spark(x,cx-30,gir+26,5);
+}
+function horn(x,X,Y,dir){ x.beginPath(); x.moveTo(X,Y); x.quadraticCurveTo(X+dir*10,Y-46,X+dir*30,Y-30); x.quadraticCurveTo(X+dir*16,Y-16,X,Y); x.fill(); }
+function evilEye(x,X,Y,cfg){ x.fillStyle="#fff"; x.shadowColor="#fff"; x.shadowBlur=6; x.beginPath(); x.ellipse(X,Y,15,12,0,0,7); x.fill(); x.shadowBlur=0;
+  x.fillStyle=cfg.eye||"#ff2b2b"; if(cfg.slit){ x.beginPath(); x.ellipse(X,Y,4,11,0,0,7); x.fill(); } else { x.beginPath(); x.arc(X,Y,6,0,7); x.fill(); } }
+function drawScammer(x,S,cfg){
+  glowBack(x,S,cfg.c1,118); const cx=S/2,cy=S/2,R=78;
+  if(cfg.horns){ x.fillStyle=cfg.c2; x.shadowColor=cfg.c2; x.shadowBlur=14; horn(x,cx-R*0.62,cy-R*0.66,-1); horn(x,cx+R*0.62,cy-R*0.66,1); x.shadowBlur=0; }
+  const g=x.createRadialGradient(cx-22,cy-26,8,cx,cy,R); g.addColorStop(0,cfg.c2);g.addColorStop(.5,cfg.c1);g.addColorStop(1,"#180006");
+  x.save(); x.shadowColor=cfg.c1; x.shadowBlur=26; x.fillStyle=g; x.beginPath(); x.arc(cx,cy,R,0,7); x.fill(); x.restore();
+  x.strokeStyle=cfg.c2; x.lineWidth=4; x.shadowColor=cfg.c2; x.shadowBlur=12; x.beginPath(); x.arc(cx,cy,R,0,7); x.stroke(); x.shadowBlur=0;
+  const ey=cy-10, ex=27; evilEye(x,cx-ex,ey,cfg); evilEye(x,cx+ex,ey,cfg);
+  x.strokeStyle="#180006"; x.lineWidth=7; x.lineCap="round"; x.beginPath();
+  x.moveTo(cx-ex-18,ey-17); x.lineTo(cx-ex+14,ey-4); x.moveTo(cx+ex+18,ey-17); x.lineTo(cx+ex-14,ey-4); x.stroke();
+  x.strokeStyle="#180006"; x.lineWidth=5; x.beginPath(); let mx=cx-36,my=cy+36; x.moveTo(mx,my);
+  for(let i=0;i<8;i++){ mx+=9; my+=(i%2?9:-9); x.lineTo(mx,my);} x.stroke();
+  if(cfg.nose){ x.fillStyle="#ff3b3b"; x.shadowColor="#ff3b3b"; x.shadowBlur=12; x.beginPath(); x.arc(cx,cy+12,10,0,7); x.fill(); x.shadowBlur=0; }
+}
+function drawShield(x,S){ glowBack(x,S,"#39ff7a",110); const cx=S/2,cy=S/2;
+  const g=x.createLinearGradient(0,cy-72,0,cy+86); g.addColorStop(0,"#bfffd6");g.addColorStop(1,"#0fbf5a");
+  x.save(); x.shadowColor="#39ff7a"; x.shadowBlur=22; x.fillStyle=g; x.beginPath();
+  x.moveTo(cx,cy-72); x.lineTo(cx+58,cy-48); x.lineTo(cx+58,cy+18); x.quadraticCurveTo(cx+58,cy+66,cx,cy+88);
+  x.quadraticCurveTo(cx-58,cy+66,cx-58,cy+18); x.lineTo(cx-58,cy-48); x.closePath(); x.fill(); x.restore();
+  x.strokeStyle="#eafff2"; x.lineWidth=4; x.stroke();
+  x.strokeStyle="#063d1f"; x.lineWidth=10; x.lineCap="round"; x.beginPath(); x.moveTo(cx-22,cy+6); x.lineTo(cx-4,cy+26); x.lineTo(cx+28,cy-20); x.stroke(); }
+function drawBomb(x,S){ glowBack(x,S,"#ffd23f",112); const cx=S/2,cy=S/2;
+  x.save(); x.shadowColor="#ffd23f"; x.shadowBlur=24; x.fillStyle="#ffd23f"; x.beginPath();
+  for(let i=0;i<16;i++){ const a=i*Math.PI/8, r=i%2?40:80; x.lineTo(cx+Math.cos(a)*r,cy+Math.sin(a)*r);} x.closePath(); x.fill();
+  x.fillStyle="#ff7a1f"; x.beginPath(); x.arc(cx,cy,32,0,7); x.fill(); x.restore();
+  x.fillStyle="#180006"; x.font="bold 34px Orbitron, sans-serif"; x.textAlign="center"; x.textBaseline="middle"; x.fillText("$",cx,cy+1); }
+function drawXzillaFallback(x,S){ glowBack(x,S,"#39ff7a",118); const cx=S/2,cy=S/2,R=72;
+  x.save(); x.shadowColor="#39ff7a"; x.shadowBlur=22; x.fillStyle="#143b1f"; x.beginPath(); x.arc(cx,cy,R,0,7); x.fill(); x.restore();
+  x.fillStyle="#39ff7a"; for(let i=0;i<10;i++){ const a=i/10*7; x.beginPath(); x.moveTo(cx+Math.cos(a)*R,cy+Math.sin(a)*R);
+    x.lineTo(cx+Math.cos(a)*(R+18),cy+Math.sin(a)*(R+18)); x.lineTo(cx+Math.cos(a+0.25)*R,cy+Math.sin(a+0.25)*R); x.closePath(); x.fill(); }
+  x.fillStyle="#aaff66"; x.beginPath(); x.ellipse(cx-22,cy-6,10,14,0,0,7); x.ellipse(cx+22,cy-6,10,14,0,0,7); x.fill(); }
+
+/* ============================================================ WORLD: sky, sun, grids, stars */
+(function buildSky(){ const c=document.createElement("canvas"); c.width=16; c.height=256; const x=c.getContext("2d");
+  const g=x.createLinearGradient(0,0,0,256); g.addColorStop(0,"#070318");g.addColorStop(.45,"#1b0a3a");g.addColorStop(.72,"#4a1163");g.addColorStop(.88,"#a01e7a");g.addColorStop(1,"#ff2bd6");
+  x.fillStyle=g; x.fillRect(0,0,16,256); scene.background=new THREE.CanvasTexture(c); })();
+
+const sun=new THREE.Sprite(new THREE.SpriteMaterial({ map:tex((x,S)=>{
+  x.save(); x.beginPath(); x.arc(S/2,S/2,S/2-6,0,7); x.clip();
+  const g=x.createLinearGradient(0,0,0,S); g.addColorStop(0,"#fff2a8");g.addColorStop(.4,"#ffd23f");g.addColorStop(.7,"#ff5ea8");g.addColorStop(1,"#ff2bd6");
+  x.fillStyle=g; x.fillRect(0,0,S,S);
+  x.globalCompositeOperation="destination-out"; x.fillStyle="#000";
+  for(let i=0;i<8;i++){ const yy=S*0.5+i*13; x.fillRect(0,yy,S,Math.max(2,7-i*0.7)); } x.restore();
+}), transparent:true, depthWrite:false, fog:false }));
+sun.scale.set(30,30,1); sun.position.set(0,30,-58); scene.add(sun);
+const sunGlow=new THREE.Sprite(new THREE.SpriteMaterial({ map:radialGlow("#ff7ad0"), transparent:true, blending:THREE.AdditiveBlending, depthWrite:false, fog:false, opacity:0.65 }));
+sunGlow.scale.set(70,70,1); sunGlow.position.set(0,30,-59); scene.add(sunGlow);
+
+const grid=new THREE.GridHelper(180,90,0xff39e6,0x361a5e); grid.position.set(0,-1.4,-6); grid.material.transparent=true; grid.material.opacity=0.6; scene.add(grid);
+const grid2=new THREE.GridHelper(180,90,0x21e6ff,0x14304a); grid2.position.set(0,15,-6); grid2.material.transparent=true; grid2.material.opacity=0.22; scene.add(grid2);
+
+(function stars(){ const g=new THREE.BufferGeometry(), N=420, p=new Float32Array(N*3);
+  for(let i=0;i<N;i++){ p[i*3]=(Math.random()-0.5)*150; p[i*3+1]=Math.random()*46+6; p[i*3+2]=-Math.random()*80-8; }
+  g.setAttribute("position",new THREE.BufferAttribute(p,3));
+  scene.add(new THREE.Points(g,new THREE.PointsMaterial({color:0xbfe6ff,size:0.4,transparent:true,opacity:0.85,fog:false}))); })();
+
+/* ============================================================ MATERIALS */
+function matFromDraw(draw){ return new THREE.SpriteMaterial({ map:tex(draw), transparent:true, depthWrite:false }); }
+function matURLorDraw(url,draw){ const m=matFromDraw(draw);
+  if(url && !/YOUR_/.test(url) && url.length>4){ const l=new THREE.TextureLoader(); l.setCrossOrigin("anonymous");
+    l.load(url,t=>{ t.encoding=THREE.sRGBEncoding; m.map=t; m.needsUpdate=true; },undefined,()=>{}); } return m; }
+
+const SCAMMERS=[
+  {label:"PAID KOL",c1:"#ff7a1f",c2:"#ffd23f",eye:"#7a1f00",nose:true, url:ASSET_BASE+"paid_kol.webp"},
+  {label:"RUGGER",  c1:"#9b2bff",c2:"#d08bff",eye:"#2a0044",horns:true, url:ASSET_BASE+"rugger.webp"},
+  {label:"SNAKE",   c1:"#ff2bd6",c2:"#ff8be8",eye:"#5a004a",slit:true,  url:ASSET_BASE+"snake.webp"},
+  {label:"FUDSTER", c1:"#ff3b5c",c2:"#ff9a3a",eye:"#5a0010",horns:true, url:ASSET_BASE+"fudster.webp"},
+];
+const matScammers=SCAMMERS.map(cfg=>matURLorDraw(cfg.url,(x,S)=>drawScammer(x,S,cfg)));
+const matHolder=matURLorDraw(HOLDER_IMAGE_URL, drawHolder);
+const matShield=matFromDraw(drawShield);
+const matBomb=matFromDraw(drawBomb);
+
+/* ============================================================ PLAYER + VIP glow */
+const matXzilla=matURLorDraw(XZILLA_BACK_IMAGE_URL, drawXzillaFallback);
+const player=new THREE.Sprite(matXzilla); player.scale.set(3.0,3.0,1); player.position.set(0,0.9,PLAYER_Z); scene.add(player);
+let runPhase=0, prevPX=0, lean=0, pop=1;
+const vipGlow=new THREE.Sprite(new THREE.SpriteMaterial({ map:radialGlow("#ffd23f"), transparent:true, blending:THREE.AdditiveBlending, depthWrite:false, opacity:0 }));
+vipGlow.scale.set(4.6,4.6,1); vipGlow.position.copy(player.position); vipGlow.position.z-=0.1; scene.add(vipGlow);
+
+/* ============================================================ ENTITY POOL */
+const TYPE={SCAMMER:0,HOLDER:1,SHIELD:2,BOMB:3};
+const pool=[], active=[];
+function getEntity(){ let e=pool.pop(); if(!e){ e={sprite:new THREE.Sprite(matHolder),type:0,prevZ:0,dead:false}; scene.add(e.sprite);} e.sprite.visible=true; e.dead=false; return e; }
+function freeEntity(e){ e.sprite.visible=false; const i=active.indexOf(e); if(i>=0) active.splice(i,1); pool.push(e); }
+function spawn(){ const e=getEntity(), r=Math.random();
+  if(r<CFG.powerupChance){ e.type=Math.random()<0.5?TYPE.SHIELD:TYPE.BOMB; e.sprite.material=(e.type===TYPE.SHIELD)?matShield:matBomb; e.sprite.scale.set(2.2,2.2,1); }
+  else if(r<CFG.powerupChance+CFG.holderChance){ e.type=TYPE.HOLDER; e.sprite.material=matHolder; e.sprite.scale.set(2.5,2.5,1); }
+  else { e.type=TYPE.SCAMMER; e.sprite.material=matScammers[(Math.random()*matScammers.length)|0]; e.sprite.scale.set(2.5,2.5,1); }
+  e.sprite.position.set((Math.random()*2-1)*playHalfWidth, 0.9, SPAWN_Z); e.prevZ=SPAWN_Z; active.push(e); }
+
+/* ============================================================ RESIZE */
+function getViewportSize(){
+  const vv = window.visualViewport;
+  const w = (vv && vv.width) || window.innerWidth;
+  // prefer Telegram's own settled viewport height; visualViewport next (tracks on-screen
+  // keyboard / mobile browser chrome show-hide better than window.innerHeight); innerHeight last
+  const h = (tg && (tg.viewportStableHeight||tg.viewportHeight)) || (vv && vv.height) || window.innerHeight;
+  return {w,h};
+}
+window.getViewportSize = getViewportSize;
+function resize(){ const {w,h}=getViewportSize();
+  renderer.setSize(w,h,true); camera.aspect=w/h; camera.updateProjectionMatrix();
+  const dist=CAM.z-PLAYER_Z, visH=2*Math.tan(THREE.MathUtils.degToRad(camera.fov)/2)*dist;
+  playHalfWidth=(visH*camera.aspect)/2*0.86; placeCamera(); }
+window.addEventListener("resize",resize);
+if(window.visualViewport) window.visualViewport.addEventListener("resize",resize);
+if(tg&&tg.onEvent){ try{ tg.onEvent("viewportChanged",resize); }catch(e){} }
+resize();
+// Telegram's WebView (and some Android browser chrome) can settle to its final
+// height a moment after load, without firing another resize/viewportChanged
+// event — re-measure a few times early on to catch that, which is what was
+// leaving part of the canvas cut off on some Android devices.
+[60,250,600,1200].forEach(ms=>setTimeout(resize,ms));
+
+/* ============================================================ INPUT */
+function pointerToWorldX(clientX){ const nx=(clientX/window.innerWidth)*2-1; return THREE.MathUtils.clamp(nx*playHalfWidth,-playHalfWidth,playHalfWidth); }
+let dragging=false;
+function onDown(x){ if(!state.running) return; dragging=true; state.playerTargetX=pointerToWorldX(x); }
+function onMove(x){ if(!state.running||!dragging) return; state.playerTargetX=pointerToWorldX(x); }
+function onUp(){ dragging=false; }
+renderer.domElement.addEventListener("touchstart",e=>{ e.preventDefault(); onDown(e.touches[0].clientX); },{passive:false});
+renderer.domElement.addEventListener("touchmove", e=>{ e.preventDefault(); onMove(e.touches[0].clientX); },{passive:false});
+renderer.domElement.addEventListener("touchend",  e=>{ e.preventDefault(); onUp(); },{passive:false});
+// desktop: relative mouse movement steers (no click-and-hold). Using the cursor's
+// ABSOLUTE position used to "freeze" the ship whenever the mouse reached the edge
+// of the browser viewport (or strayed outside it entirely) — no more mousemove
+// events fire out there, so the target position simply stopped updating. Tracking
+// movementX deltas instead means tiny wiggles near the middle of the screen are
+// enough; the cursor never needs to approach the edge in the first place.
+const MOUSE_SENSITIVITY = 0.022;
+window.addEventListener("mousemove",e=>{ if(!state.running) return;
+  state.playerTargetX = THREE.MathUtils.clamp(state.playerTargetX + (e.movementX||0)*MOUSE_SENSITIVITY, -playHalfWidth, playHalfWidth); });
+
+/* ============================================================ TILT CONTROLS (phone gyro) */
+const tiltBtn = document.getElementById("tiltBtn");
+const isTouchDevice = ("ontouchstart" in window) || navigator.maxTouchPoints > 0;
+const hasOrientation = typeof window.DeviceOrientationEvent !== "undefined";
+let tiltEnabled = false, tiltCenter = null;
+const TILT_SENSITIVITY = 0.16; // world-units per degree of tilt past center; tune to taste
+
+function onTilt(e){
+  if(!tiltEnabled || !state.running || dragging) return;     // a finger-drag always wins while it's active
+  const g = e.gamma; if(g===null || g===undefined) return;    // some devices report null before first real reading
+  if(tiltCenter===null){ tiltCenter=g; return; }               // first reading after enabling = "neutral" pose
+  const delta = g - tiltCenter;
+  state.playerTargetX = THREE.MathUtils.clamp(delta*TILT_SENSITIVITY, -playHalfWidth, playHalfWidth);
+}
+function setTiltLabel(){ /* icon-only now — color (.on class) signals state, not text */ }
+function enableTilt(){
+  window.addEventListener("deviceorientation", onTilt);
+  tiltEnabled = true; tiltCenter = null; setTiltLabel();
+  if(tiltBtn) tiltBtn.classList.add("on");
+}
+function disableTilt(){
+  tiltEnabled = false; setTiltLabel();
+  if(tiltBtn) tiltBtn.classList.remove("on");
+}
+if(tiltBtn && isTouchDevice && hasOrientation){
+  tiltBtn.classList.remove("hidden");
+  tiltBtn.addEventListener("click", async ()=>{
+    if(tiltEnabled){ disableTilt(); return; }
+    // iOS 13+ requires an explicit permission grant from a real tap — this click is that tap.
+    try{
+      if(typeof DeviceOrientationEvent.requestPermission === "function"){
+        const res = await DeviceOrientationEvent.requestPermission();
+        if(res === "granted") enableTilt(); else toast("Tilt permission denied",RED);
+      } else { enableTilt(); }
+    }catch(e){ toast("Tilt unavailable on this device",RED); }
+  });
+}
+
+window.addEventListener("keydown",e=>{ if(!state.running) return;
+  if(e.key==="ArrowLeft") state.playerTargetX=Math.max(-playHalfWidth,state.playerTargetX-playHalfWidth*0.22);
+  if(e.key==="ArrowRight") state.playerTargetX=Math.min(playHalfWidth,state.playerTargetX+playHalfWidth*0.22); });
+
+/* ============================================================ EFFECTS */
+const particles=[];
+const partMat=new THREE.SpriteMaterial({ map:radialGlow("#ffffff"), transparent:true, blending:THREE.AdditiveBlending, depthWrite:false });
+function burst(x,y,z,color,count){ for(let i=0;i<count;i++){ const m=partMat.clone(); m.color=new THREE.Color(color);
+  const s=new THREE.Sprite(m); s.scale.set(0.8,0.8,1); s.position.set(x,y,z); scene.add(s);
+  particles.push({sprite:s,vx:(Math.random()-0.5)*9,vy:(Math.random()-0.5)*9,vz:(Math.random()-0.5)*7,life:0.65}); } }
+function updateParticles(dt){ for(let i=particles.length-1;i>=0;i--){ const p=particles[i]; p.life-=dt;
+  p.sprite.position.x+=p.vx*dt; p.sprite.position.y+=p.vy*dt; p.sprite.position.z+=p.vz*dt;
+  const k=Math.max(p.life/0.65,0); p.sprite.material.opacity=k; p.sprite.scale.setScalar(0.8*k+0.15);
+  if(p.life<=0){ scene.remove(p.sprite); p.sprite.material.dispose(); particles.splice(i,1); } } }
+const popupsEl=document.getElementById("popups");
+function popup(worldPos,text,color){ const v=worldPos.clone().project(camera);
+  const sx=(v.x*0.5+0.5)*window.innerWidth, sy=(-v.y*0.5+0.5)*window.innerHeight;
+  const el=document.createElement("div"); el.className="popup"; el.textContent=text; el.style.left=sx+"px"; el.style.top=sy+"px"; el.style.color=color;
+  popupsEl.appendChild(el); setTimeout(()=>el.remove(),900); }
+function shake(a){ state.shake=Math.max(state.shake,a); }
+function footPuff(){ const px=player.position.x;
+  for(let i=0;i<2;i++){ const m=partMat.clone(); m.color=new THREE.Color("#cbb8ff");
+    const s=new THREE.Sprite(m); s.scale.set(0.5,0.5,1); s.position.set(px+(Math.random()-0.5)*0.7,-0.3,PLAYER_Z+0.4); scene.add(s);
+    particles.push({sprite:s,vx:(Math.random()-0.5)*1.6,vy:Math.random()*1.0+0.2,vz:2+Math.random()*2,life:0.4}); } }
+function flashColor(c,a){ const f=document.createElement("div");
+  f.style.cssText="position:fixed;inset:0;z-index:24;pointer-events:none;background:radial-gradient(ellipse at center,rgba(0,0,0,0) 40%,"+c+" 100%);opacity:"+a+";transition:opacity .3s;";
+  document.body.appendChild(f); requestAnimationFrame(()=>{ f.style.opacity="0"; }); setTimeout(()=>f.remove(),320); }
+
+/* ============================================================ HUD */
+const el={ score:document.getElementById("score"), lives:document.getElementById("lives"), combo:document.getElementById("combo"),
+  hud:document.getElementById("hud"), vipBadge:document.getElementById("vipBadge"), banner:document.getElementById("banner"), sound:document.getElementById("soundBtn") };
+function renderLives(){ el.lives.textContent="🟢".repeat(Math.max(state.lives,0))+"⚫".repeat(Math.max(CFG.lives-state.lives,0)); }
+function renderScore(){ el.score.textContent=Math.floor(state.score); }
+function renderCombo(){ if(state.combo>1){ el.combo.textContent="COMBO x"+state.combo; el.combo.style.opacity="1"; } else el.combo.style.opacity="0"; }
+function showBanner(t){ el.banner.textContent=t; el.banner.classList.remove("banner-show"); void el.banner.offsetWidth; el.banner.classList.add("banner-show"); }
+
+/* ============================================================ SCORING / COLLISIONS */
+function addScore(base,worldPos){ const mult=(state.combo>1?state.combo:1)*(state.vip?CFG.vipMultiplier:1); const gain=Math.round(base*mult);
+  state.score+=gain; renderScore(); popup(worldPos,"+"+gain,state.vip?"#ffd23f":"#39ff7a");
+  const nw=1+Math.floor(state.score/150); if(nw>state.wave){ state.wave=nw; sfx.wave(); showBanner("WAVE "+state.wave); } }
+function loseLife(worldPos){ state.lives--; state.combo=0; renderCombo(); renderLives(); sfx.hit(); shake(1.0); flashColor("rgba(255,59,92,.55)",0.8);
+  if(worldPos) popup(worldPos,"-1 HP","#ff3b5c"); if(tg&&tg.HapticFeedback){ try{ tg.HapticFeedback.notificationOccurred("error"); }catch(e){} }
+  if(state.lives<=0) gameOver(); }
+let shieldActive=false;
+function resolve(e){ const p=e.sprite.position.clone();
+  if(e.type===TYPE.SCAMMER){ state.combo++; state.kills++; sfx.catch(state.combo); burst(p.x,p.y,p.z,SCAMMERS[0].c1,11); addScore(CFG.scammerPoints,p); renderCombo();
+    pop=1.22; if(state.combo>0&&state.combo%5===0){ showBanner(state.combo+" COMBO!"); flashColor("rgba(57,255,122,.35)",0.5); }
+    if(tg&&tg.HapticFeedback){ try{ tg.HapticFeedback.impactOccurred("light"); }catch(e){} } }
+  else if(e.type===TYPE.HOLDER){ if(shieldActive){ shieldActive=false; burst(p.x,p.y,p.z,"#39ff7a",12); popup(p,"BLOCKED!","#39ff7a"); sfx.power(); } else loseLife(p); }
+  else if(e.type===TYPE.SHIELD){ shieldActive=true; burst(p.x,p.y,p.z,"#39ff7a",12); popup(p,"SHIELD!","#39ff7a"); sfx.power(); }
+  else if(e.type===TYPE.BOMB){ sfx.power(); burst(p.x,p.y,p.z,"#ffd23f",18); shake(0.6); flashColor("rgba(255,210,63,.4)",0.6); popup(p,"LIQUIDATED!","#ffd23f");
+    for(let i=active.length-1;i>=0;i--){ const a=active[i]; if(a!==e&&a.type===TYPE.SCAMMER&&!a.dead){ a.dead=true; const ap=a.sprite.position.clone(); burst(ap.x,ap.y,ap.z,"#ff2bd6",6); state.kills++; addScore(CFG.scammerPoints,ap); freeEntity(a);} } }
+  e.dead=true; freeEntity(e); }
+
+/* ============================================================ MAIN LOOP */
+const clock=new THREE.Clock(); let gridOffset=0;
+function loop(){ requestAnimationFrame(loop); const dt=Math.min(clock.getDelta(),0.05); const now=performance.now()*0.001;
+  const scroll=dt*(state.running?state.speed:3.5); gridOffset=(gridOffset+scroll)%2; grid.position.z=-6+gridOffset; grid2.position.z=-6+gridOffset;
+  const since=actx?(actx.currentTime-beatT):9, pulse=Math.max(0,1-since*6);
+  grid.material.opacity=0.5+0.32*pulse; grid2.material.opacity=0.16+0.18*pulse;
+  sunGlow.material.opacity=0.5+0.4*pulse; sunGlow.scale.setScalar(66+10*pulse);
+  if(state.vip){ vipGlow.material.opacity=0.42+0.26*Math.sin(now*4.4); vipGlow.scale.setScalar(4.4+0.3*Math.sin(now*4.4)); }
+  vipGlow.position.x=player.position.x; vipGlow.position.y=player.position.y;
+  const vx=player.position.x-prevPX; prevPX=player.position.x; const moving=Math.abs(vx)>0.002;
+  const cadence=state.running?(moving?17:12):9; runPhase+=dt*cadence;
+  // chopper idle vibration (no jumping): tiny high-freq jitter on y + scale
+  const vib=state.running?(Math.sin(now*47)*0.012+Math.sin(now*83)*0.006):0;
+  player.position.y=0.9+vib;
+  const sx=1+vib*0.4, sy=1-vib*0.4; pop+=(1-pop)*0.18;
+  player.scale.set(3.0*sx*pop, 3.0*sy*pop, 1);
+  // chopper bank: steer intent (target vs pos) + velocity, smoothed
+  const steer=(state.playerTargetX-player.position.x);
+  const want=-(steer*0.30+vx*7); const targetLean=Math.max(-0.5,Math.min(0.5,want));
+  lean+=(targetLean-lean)*0.14;
+  player.material.rotation=lean+vib*0.5;
+  if(typeof setEnginePitch==="function") setEnginePitch(Math.abs(vx));
+
+  if(state.running){
+    state.elapsed+=dt; state.speed=CFG.baseSpeed+state.elapsed*CFG.speedRampPerSec; state.spawnGap=Math.max(CFG.minSpawnGap,CFG.baseSpawnGap-state.elapsed*0.012);
+    player.position.x+=(state.playerTargetX-player.position.x)*CFG.playerSpeedLerp; player.position.x=THREE.MathUtils.clamp(player.position.x,-playHalfWidth,playHalfWidth);
+    state.spawnTimer-=dt; if(state.spawnTimer<=0){ spawn(); state.spawnTimer=state.spawnGap*(0.7+Math.random()*0.6); }
+    const catchX=1.85, catchZ=1.6;
+    for(let i=active.length-1;i>=0;i--){ const e=active[i]; if(e.dead) continue; e.prevZ=e.sprite.position.z; e.sprite.position.z+=state.speed*dt; const z=e.sprite.position.z;
+      if(e.prevZ<PLAYER_Z+catchZ && z>=PLAYER_Z-catchZ){ if(Math.abs(e.sprite.position.x-player.position.x)<catchX){ resolve(e); continue; } }
+      if(z>CAM.z+1){ if(e.type===TYPE.SCAMMER){ state.combo=0; renderCombo(); } freeEntity(e); } } }
+
+  updateParticles(dt);
+  const bob=pulse*0.10; if(state.shake>0.001){ const s=state.shake; placeCamera((Math.random()-0.5)*s,(Math.random()-0.5)*s*0.6+bob); state.shake*=0.86; } else placeCamera(0,bob);
+  if(window.__frame) window.__frame(dt);
+  if(window.__composer) window.__composer.render(); else renderer.render(scene,camera); }
+loop();
+
+/* ============================================================ GAME FLOW */
+function resetGame(){ for(let i=active.length-1;i>=0;i--) freeEntity(active[i]);
+  Object.assign(state,{score:0,lives:CFG.lives,combo:0,kills:0,wave:1,speed:CFG.baseSpeed,spawnGap:CFG.baseSpawnGap,spawnTimer:0,elapsed:0,playerTargetX:0,shake:0});
+  shieldActive=false; player.position.x=0; renderScore(); renderLives(); renderCombo(); }
+function startGame(){ audioInit(); startMusic(); startEngine(); resetGame();
+  document.getElementById("startScreen").classList.add("hidden"); document.getElementById("gameOverScreen").classList.add("hidden");
+  document.getElementById("pauseScreen").classList.add("hidden");
+  el.hud.classList.remove("hidden"); el.sound.classList.remove("hidden"); el.vipBadge.style.display=state.vip?"inline-block":"none"; vipGlow.material.opacity=0; state.running=true;
+  document.getElementById("pauseBtn").classList.remove("hidden"); }
+function gameOver(){ state.running=false; stopEngine(); sfx.over();
+  if(state.score>state.best){ state.best=Math.floor(state.score); try{ localStorage.setItem("xzilla_best",String(state.best)); }catch(e){} }
+  document.getElementById("finalScore").textContent=Math.floor(state.score); document.getElementById("finalKills").textContent=state.kills;
+  document.getElementById("bestScore").textContent=state.best; document.getElementById("gameOverScreen").classList.remove("hidden"); el.hud.classList.add("hidden");
+  document.getElementById("pauseBtn").classList.add("hidden"); }
+
+/* ============================================================ PAUSE */
+let isPaused = false;
+function pauseGame(){
+  if(!state.running || isPaused) return;
+  isPaused = true; state.running = false;
+  try{ if(actx && actx.state==="running") actx.suspend(); }catch(e){}   // freezes music + engine + sfx in place
+  document.getElementById("pauseScreen").classList.remove("hidden");
+}
+function resumeGame(){
+  if(!isPaused) return;
+  isPaused = false; state.running = true;
+  try{ if(actx && actx.state==="suspended") actx.resume(); }catch(e){}
+  document.getElementById("pauseScreen").classList.add("hidden");
+}
+function quitToMenu(){
+  isPaused = false; state.running = false;
+  try{ if(actx && actx.state==="suspended") actx.resume(); }catch(e){}
+  stopEngine();
+  document.getElementById("pauseScreen").classList.add("hidden");
+  document.getElementById("gameOverScreen").classList.add("hidden");
+  el.hud.classList.add("hidden"); document.getElementById("pauseBtn").classList.add("hidden");
+  document.getElementById("startScreen").classList.remove("hidden");
+}
+document.getElementById("pauseBtn").addEventListener("click",pauseGame);
+document.getElementById("resumeBtn").addEventListener("click",resumeGame);
+document.getElementById("quitBtn").addEventListener("click",quitToMenu);
+window.addEventListener("keydown",e=>{ if(e.key==="Escape"||e.key===" "){
+  if(isPaused) resumeGame(); else if(state.running) pauseGame(); } });
+
+/* ============================================================ WALLET + TOKEN CHECK */
+function shortKey(k){ return k.slice(0,4)+"…"+k.slice(-4); }
+async function checkTokenBalance(connection,ownerPubkeyStr,mint){ try{
+  if(!window.solanaWeb3||/YOUR_/.test(mint)) return 0;
+  const owner=new solanaWeb3.PublicKey(ownerPubkeyStr), mintKey=new solanaWeb3.PublicKey(mint);
+  const res=await connection.getParsedTokenAccountsByOwner(owner,{mint:mintKey}); let total=0;
+  res.value.forEach(a=>{ total+=a.account.data.parsed.info.tokenAmount.uiAmount||0; }); return total; }catch(e){ return 0; } }
+async function connectWallet(){ audioInit();
+  const info=document.getElementById("walletInfo"), vipEl=document.getElementById("vipStatus"),
+    startBtn=document.getElementById("startBtn"), connectBtn=document.getElementById("connectBtn");
+  info.textContent="Connecting…"; info.classList.add("blink"); let pubkey=null;
+  try{ if(window.solana&&window.solana.isPhantom){ const r=await window.solana.connect(); pubkey=r.publicKey.toString(); } }catch(e){}
+  if(!pubkey){ try{ pubkey=solanaWeb3.Keypair.generate().publicKey.toString(); }catch(e){ pubkey="MockWa11et"+Math.random().toString(36).slice(2,10); } }
+  info.classList.remove("blink"); info.textContent="✔ "+shortKey(pubkey); connectBtn.classList.add("hidden");
+  vipEl.textContent="Checking $XZILLA balance…"; let balance=0;
+  try{ const conn=new solanaWeb3.Connection(SOLANA_RPC,"confirmed"); balance=await checkTokenBalance(conn,pubkey,XZILLA_MINT_ADDRESS); }catch(e){}
+  state.vip = balance>0 || FORCE_VIP_FOR_DEMO;
+  if(state.vip){ el.vipBadge.style.display="inline-block"; vipEl.style.color="#ffd23f";
+    vipEl.textContent = balance>0 ? ("★ VIP HODLER — "+balance.toLocaleString()+" $XZILLA · 1.2x") : "★ VIP HODLER unlocked (demo) · 1.2x score"; }
+  else { vipEl.style.color="#9fb6c9"; vipEl.textContent="No $XZILLA found — standard mode"; }
+  }
+
+/* ============================================================ WIRING */
+document.getElementById("connectBtn").addEventListener("click",connectWallet);
+document.getElementById("startBtn").addEventListener("click",startGame);
+document.getElementById("retryBtn").addEventListener("click",startGame);
+el.sound.addEventListener("click",()=>{ state.soundOn=!state.soundOn; el.sound.textContent=state.soundOn?"🔊":"🔇"; audioInit(); if(masterGain) masterGain.gain.value=state.soundOn?1:0; });
+document.addEventListener("visibilitychange",()=>{ if(document.hidden&&state.running) pauseGame(); });
+document.getElementById("bestScore").textContent=state.best;
+</script>
+<script src="game.js"></script>
+</body>
+</html>
