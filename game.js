@@ -686,7 +686,7 @@ window._adsPayload = "WwogIHsKICAgICJpZCI6ICJ4emlsbGEtaG9tZSIsCiAgICAidGV4dCI6IC
       (myBest
         ? '<div class="lrow you">'+
             '<span class="lrank">\u2605</span>'+
-            '<span class="lname">'+myBest.name+(myTitle?' \u00b7 <span style="color:'+GOLD+'">'+myTitle.name+'</span>':'')+'</span>'+
+            '<span class="lname">'+escapeHtml(myBest.name)+(myTitle?' \u00b7 <span style="color:'+GOLD+'">'+myTitle.name+'</span>':'')+'</span>'+
             '<b>'+fmt(myBest.score)+'</b></div>'+
           '<div class="sub" style="margin-top:6px">THIS WEEK: <b style="color:'+CYAN+'">'+fmt(weekBest)+'</b> pts \u00b7 resets every week</div>'
         : '<div class="sub">Play a run to set your first score.</div>')+
