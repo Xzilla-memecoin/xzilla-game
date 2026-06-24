@@ -11,7 +11,7 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@500;700;900&family=Press+Start+2P&display=swap" rel="stylesheet">
 
-<link rel="stylesheet" href="styles.css?v=12">
+<link rel="stylesheet" href="styles.css?v=13">
 </head>
 <body>
   <div id="game"></div>
@@ -53,7 +53,7 @@
          half of the landscape split (title stays above the image in both orientations). -->
     <div class="heroWrap">
       <h1 class="game-title">XZILLA:<span class="title-accent"> RUG SMASHER</span></h1>
-      <img id="heroImg" alt="Xzilla" src="https://raw.githubusercontent.com/Xzilla-memecoin/xzilla-game/main/images/mainImage.webp?v=12" />
+      <img id="heroImg" alt="Xzilla" src="https://raw.githubusercontent.com/Xzilla-memecoin/xzilla-game/main/images/mainImage.webp?v=13" />
     </div>
     <!-- .startCol is display:contents in portrait (no layout change) and becomes the
          RIGHT column of the side-by-side split in mobile landscape (see styles.css). -->
@@ -603,31 +603,43 @@ const tiltBtn = document.getElementById("tiltBtn");
 const isTouchDevice = ("ontouchstart" in window) || navigator.maxTouchPoints > 0;
 const hasOrientation = typeof window.DeviceOrientationEvent !== "undefined";
 let tiltEnabled = false, tiltCenter = null, tiltAvailable = false;
-const TILT_SENSITIVITY = 0.16; // world-units per degree of tilt past center; tune to taste
+// Tilt steering is NORMALISED: ±maxDeg of tilt past the neutral pose maps to the FULL
+// lane width (playHalfWidth), so it always reaches the edges no matter how wide the
+// lane is. That's the landscape fix — a fixed per-degree sensitivity under-reacted there
+// because the landscape lane is wider (aspect>=1), so max tilt only moved you part-way.
+// Landscape also gets a smaller max angle for sharp, snappy arcade response.
+const TILT_DEADZONE_DEG     = 2.5;   // center slack — bike stays perfectly straight when ~level
+const TILT_MAX_DEG_PORTRAIT  = 28;   // ~28° tilt = full-lock steering in portrait
+const TILT_MAX_DEG_LANDSCAPE = 18;   // ~18° = full-lock in landscape (≈ sharper, snappier)
 
-// deviceorientation angles are reported in the DEVICE frame, so the axis that maps
-// to left/right STEERING changes with screen orientation: it's gamma in portrait but
-// beta in landscape (and the sign flips depending on which way you rotated). Picking
-// the right axis per orientation keeps steering responsive after a rotate instead of
-// going dead/locked in landscape.
+function isLandscape(){ return window.innerWidth > window.innerHeight; }
 function screenAngle(){
   const a = (screen.orientation && typeof screen.orientation.angle==="number") ? screen.orientation.angle
           : (typeof window.orientation==="number" ? window.orientation : 0);
   return ((a%360)+360)%360;
 }
+// deviceorientation angles are reported in the DEVICE frame, so the axis that maps to
+// left/right STEERING changes with screen orientation: gamma in portrait, beta when the
+// phone is held horizontally. screenAngle() only disambiguates the SIGN (which way it was
+// rotated) — the portrait/landscape choice itself uses innerWidth>innerHeight.
 function tiltSteerValue(e){
-  const a=screenAngle();
-  if(a===90)  return (e.beta ==null ? null :  e.beta);    // landscape
-  if(a===270) return (e.beta ==null ? null : -e.beta);    // landscape (rotated the other way)
-  if(a===180) return (e.gamma==null ? null : -e.gamma);   // upside-down portrait
-  return       (e.gamma==null ? null :  e.gamma);         // upright portrait
+  if(isLandscape()){
+    if(e.beta==null) return null;
+    return (screenAngle()===270) ? -e.beta : e.beta;        // forward/back tilt = steering when horizontal
+  }
+  if(e.gamma==null) return null;
+  return (screenAngle()===180) ? -e.gamma : e.gamma;        // upright vs upside-down portrait
 }
 function onTilt(e){
   if(!tiltEnabled || !state.running || dragging) return;     // a finger-drag always wins while it's active
   const g = tiltSteerValue(e); if(g===null) return;          // that axis not reported yet on this device
   if(tiltCenter===null){ tiltCenter=g; return; }             // first reading after enable/rotate = "neutral" pose
-  const delta = g - tiltCenter;
-  state.playerTargetX = THREE.MathUtils.clamp(delta*TILT_SENSITIVITY, -playHalfWidth, playHalfWidth);
+  let delta = g - tiltCenter;                                // degrees of tilt past neutral
+  if(Math.abs(delta) < TILT_DEADZONE_DEG){ state.playerTargetX = 0; return; }   // deadzone: hold dead straight
+  delta = delta>0 ? delta-TILT_DEADZONE_DEG : delta+TILT_DEADZONE_DEG;          // smooth onset just past the deadzone
+  const maxDeg = isLandscape() ? TILT_MAX_DEG_LANDSCAPE : TILT_MAX_DEG_PORTRAIT;
+  const norm = THREE.MathUtils.clamp(delta / maxDeg, -1, 1); // -1..+1, full lock at ±maxDeg
+  state.playerTargetX = norm * playHalfWidth;                // full lane at a modest tilt, any lane width
 }
 // On rotation the steering axis AND the neutral pose change — null the center so the
 // next reading recalibrates, preventing the tilt controls from locking or going dead.
@@ -923,6 +935,6 @@ document.querySelectorAll("#startScreen .btn").forEach(b=>{
 document.addEventListener("visibilitychange",()=>{ if(document.hidden&&state.running) pauseGame(); });
 document.getElementById("bestScore").textContent=state.best;
 </script>
-<script src="game.js?v=12"></script>
+<script src="game.js?v=13"></script>
 </body>
 </html>
