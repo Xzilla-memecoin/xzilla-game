@@ -4,14 +4,14 @@
 <meta charset="UTF-8" />
 <!-- Telegram Web App SDK — loaded first so window.Telegram.WebApp (incl. CloudStorage) is ready before any init code runs. -->
 <script src="https://telegram.org/js/telegram-web-app.js"></script>
-<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
 <title>XZILLA: 3D Scam Destroyer</title>
 
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@500;700;900&family=Press+Start+2P&display=swap" rel="stylesheet">
 
-<link rel="stylesheet" href="styles.css?v=11">
+<link rel="stylesheet" href="styles.css?v=12">
 </head>
 <body>
   <div id="game"></div>
@@ -53,7 +53,7 @@
          half of the landscape split (title stays above the image in both orientations). -->
     <div class="heroWrap">
       <h1 class="game-title">XZILLA:<span class="title-accent"> RUG SMASHER</span></h1>
-      <img id="heroImg" alt="Xzilla" src="https://raw.githubusercontent.com/Xzilla-memecoin/xzilla-game/main/images/mainImage.webp?v=11" />
+      <img id="heroImg" alt="Xzilla" src="https://raw.githubusercontent.com/Xzilla-memecoin/xzilla-game/main/images/mainImage.webp?v=12" />
     </div>
     <!-- .startCol is display:contents in portrait (no layout change) and becomes the
          RIGHT column of the side-by-side split in mobile landscape (see styles.css). -->
@@ -162,8 +162,12 @@ try { state.best = parseInt(localStorage.getItem("xzilla_best")||"0",10)||0; } c
 /* ============================================================ TELEGRAM */
 let tg=null;
 try{ tg = (window.Telegram&&window.Telegram.WebApp)?window.Telegram.WebApp:null;
-  if(tg){ tg.ready(); tg.expand(); tg.setHeaderColor&&tg.setHeaderColor("#070318"); tg.setBackgroundColor&&tg.setBackgroundColor("#070318"); }
+  if(tg){ tg.expand(); tg.ready(); tg.setHeaderColor&&tg.setHeaderColor("#070318"); tg.setBackgroundColor&&tg.setBackgroundColor("#070318"); }
 }catch(e){}
+// Kill native pinch / double-tap zoom inside the WebApp so the canvas can't be
+// scaled/shifted out of its locked bounds. Multi-touch is blocked at the root;
+// user-scalable=no in the viewport meta covers double-tap.
+document.documentElement.addEventListener('touchstart', (e)=>{ if(e.touches.length>1) e.preventDefault(); }, { passive:false });
 
 /* ---- CloudStorage: pull the cross-device best at launch and reconcile with local ----
  * Telegram CloudStorage persists per-user across devices; localStorage is per-device.
@@ -522,23 +526,23 @@ function spawn(){ const e=getEntity(), r=Math.random();
 
 /* ============================================================ RESIZE */
 function getViewportSize(){
+  // SOURCE OF TRUTH = the game container's real rendered box. CSS pins #game to
+  // 100vw × --tg-viewport-stable-height (Telegram's header-aware inner height), so
+  // reading it back guarantees the WebGL buffer + camera aspect match the display
+  // exactly — no stretch, no zoom inside the Mini App. Fall back to the visual
+  // viewport / Telegram height before the first layout (or outside Telegram).
+  if(container && container.clientWidth && container.clientHeight)
+    return { w: container.clientWidth, h: container.clientHeight };
   const vv = window.visualViewport;
   const w = (vv && vv.width) || window.innerWidth;
-  // Fill the FULL rendered webview height so no black gap appears below the canvas.
-  // Telegram's viewportStableHeight is frequently SHORTER than the painted area,
-  // which left a gap at the bottom; visualViewport.height is the true visible height
-  // (and tracks the on-screen keyboard). Fall back to innerHeight, then Telegram.
   const h = (vv && vv.height) || window.innerHeight || (tg && (tg.viewportStableHeight||tg.viewportHeight)) || 0;
   return {w,h};
 }
 window.getViewportSize = getViewportSize;
 function resize(){ const {w,h}=getViewportSize();
-  // FIX (mobile cut-off): #game is position:fixed with no CSS width/height, and
-  // #game canvas is forced to 100% of it. Without sizing the container here it
-  // collapses and the canvas only partially fills the screen. Size it to the
-  // (visual) viewport every resize so the canvas fills the screen exactly.
-  container.style.width = w + "px";
-  container.style.height = h + "px";
+  // #game is sized entirely by CSS now (100vw × --tg-viewport-stable-height, !important),
+  // so we no longer set its inline width/height here — we just match the renderer buffer
+  // and camera to that real box (w,h from getViewportSize) so nothing stretches.
   const aspect = w/h;
   // PORTRAIT ZOOM-OUT: Three's PerspectiveCamera FOV is VERTICAL, so the horizontal
   // field of view = vertical·aspect. On tall/narrow phones (aspect<1) that collapses
@@ -919,6 +923,6 @@ document.querySelectorAll("#startScreen .btn").forEach(b=>{
 document.addEventListener("visibilitychange",()=>{ if(document.hidden&&state.running) pauseGame(); });
 document.getElementById("bestScore").textContent=state.best;
 </script>
-<script src="game.js?v=11"></script>
+<script src="game.js?v=12"></script>
 </body>
 </html>
