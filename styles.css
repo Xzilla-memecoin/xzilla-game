@@ -227,4 +227,9 @@
     #startScreen #startBtn{ font-size:12px; padding:13px 22px; }
     #startScreen #connectBtn{ margin-top:8px !important; font-size:8px; padding:9px 12px; }
     #startScreen .wallet, #startScreen .status-line{ font-size:9px; margin-top:4px; }
+    /* In the split layout the action buttons live on the RIGHT, so move the floating
+       sound/tilt toggles to the bottom-LEFT (over the non-interactive hero art) where
+       they stay completely clear of the menu buttons and wallet text. */
+    #soundBtn{ left:14px; right:auto; }
+    #tiltBtn{ left:14px; right:auto; }
   }
