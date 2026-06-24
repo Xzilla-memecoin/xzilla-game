@@ -9,7 +9,7 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@500;700;900&family=Press+Start+2P&display=swap" rel="stylesheet">
 
-<link rel="stylesheet" href="styles.css?v=7">
+<link rel="stylesheet" href="styles.css?v=8">
 </head>
 <body>
   <div id="game"></div>
@@ -22,6 +22,7 @@
       <span class="hud-label">SCORE</span>
       <span id="score">0</span>
       <span id="combo">COMBO x1</span>
+      <div id="comboBar"><i></i></div>
     </div>
     <div class="hud-block hud-right">
       <span class="hud-label">XZILLA HP</span>
@@ -50,7 +51,7 @@
          half of the landscape split (title stays above the image in both orientations). -->
     <div class="heroWrap">
       <h1 class="game-title">XZILLA:<span class="title-accent"> RUG SMASHER</span></h1>
-      <img id="heroImg" alt="Xzilla" src="https://raw.githubusercontent.com/Xzilla-memecoin/xzilla-game/main/images/mainImage.webp?v=7" />
+      <img id="heroImg" alt="Xzilla" src="https://raw.githubusercontent.com/Xzilla-memecoin/xzilla-game/main/images/mainImage.webp?v=8" />
     </div>
     <!-- .startCol is display:contents in portrait (no layout change) and becomes the
          RIGHT column of the side-by-side split in mobile landscape (see styles.css). -->
@@ -64,6 +65,18 @@
       <div id="vipStatus" class="status-line"></div>
     </div>
   </div>
+
+  <!-- First-run tutorial: shown once over the first run, auto-dismisses after ~3.2s or on tap. -->
+  <div id="tutorial" class="hidden">
+    <div class="tut-card">
+      <div class="tut-row"><span class="tut-ic">👆</span> DRAG to dodge &amp; smash</div>
+      <div class="tut-row"><span class="tut-ic">📱</span> Tap <b>TILT</b> to steer by leaning</div>
+      <div class="tut-row tut-tip">Smash <b class="good">SCAMMERS</b> · dodge <b class="bad">HODLERS</b></div>
+      <div class="tut-dismiss">tap to start</div>
+    </div>
+  </div>
+  <!-- Full-screen rank-up celebration flash (driven by game.js milestone crossing). -->
+  <div id="rankFlash" class="hidden"><span id="rankFlashTxt"></span></div>
 
   <div id="walletPanel" class="overlay panel hidden"><div class="panelInner" id="walletInner"></div></div>
   <div id="missionsPanel" class="overlay panel hidden"><div class="panelInner" id="missionsInner"></div></div>
@@ -134,11 +147,13 @@ const SOLANA_RPC          = "https://api.mainnet-beta.solana.com";
 const FORCE_VIP_FOR_DEMO  = true;
 
 const CFG = { lives:3, baseSpeed:9, speedRampPerSec:0.18, baseSpawnGap:0.92, minSpawnGap:0.34,
-  holderChance:0.32, powerupChance:0.05, scammerPoints:10, vipMultiplier:1.2, playerSpeedLerp:0.22 };
+  holderChance:0.32, powerupChance:0.05, scammerPoints:10, vipMultiplier:1.2, playerSpeedLerp:0.22,
+  comboWindow:2.6 };   // seconds before an un-fed combo decays back to zero
 
 /* ============================================================ STATE */
 const state = { running:false, score:0, lives:CFG.lives, combo:0, kills:0, wave:1, vip:false, best:0,
-  speed:CFG.baseSpeed, spawnGap:CFG.baseSpawnGap, spawnTimer:0, elapsed:0, playerTargetX:0, shake:0, soundOn:true };
+  speed:CFG.baseSpeed, spawnGap:CFG.baseSpawnGap, spawnTimer:0, elapsed:0, playerTargetX:0, shake:0, soundOn:true,
+  comboUntil:0 };      // performance.now()*0.001 deadline at which the current combo expires
 try { state.best = parseInt(localStorage.getItem("xzilla_best")||"0",10)||0; } catch(e){}
 
 /* ============================================================ TELEGRAM */
@@ -283,7 +298,24 @@ const sfx = {
   power(){ blip(660,0.08,"square",0.14); setTimeout(()=>blip(990,0.10,"square",0.12),70); setTimeout(()=>blip(1320,0.12,"square",0.1),150); },
   wave(){ blip(523,0.1,"square",0.13); setTimeout(()=>blip(784,0.14,"square",0.12),90); setTimeout(()=>blip(1046,0.18,"square",0.1),190); },
   over(){ blip(300,0.2,"sawtooth",0.16); setTimeout(()=>blip(180,0.45,"sawtooth",0.16),160); },
+  // triumphant 4-note climb for crossing a rank milestone
+  rankup(){ blip(523,0.12,"square",0.16); setTimeout(()=>blip(659,0.12,"square",0.16),95);
+    setTimeout(()=>blip(784,0.14,"square",0.16),195); setTimeout(()=>blip(1046,0.26,"square",0.15),300); },
+  // light, bright tick for a near-miss dodge
+  nearmiss(){ blip(880,0.05,"triangle",0.10); setTimeout(()=>blip(1320,0.06,"triangle",0.08),45); },
 };
+/* Unified haptics: native Vibration API (Android/most webviews) + Telegram's
+ * HapticFeedback when running inside Telegram. Safe no-op where unsupported.
+ * kind: "impact" (gameplay tap) or a notification type: "success"/"warning"/"error". */
+function buzz(pattern, kind){
+  try{ if(navigator.vibrate) navigator.vibrate(pattern); }catch(e){}
+  try{ if(tg&&tg.HapticFeedback){
+    if(kind==="impact") tg.HapticFeedback.impactOccurred("medium");
+    else if(kind==="light") tg.HapticFeedback.impactOccurred("light");
+    else if(kind) tg.HapticFeedback.notificationOccurred(kind);
+  } }catch(e){}
+}
+window.__buzz = buzz; window.__sfx = sfx;
 // ---- looping synthwave track (A-minor: Am F C G) ----
 const PROG=[ {b:55.00,t:[220.00,261.63,329.63]}, {b:43.65,t:[174.61,220.00,261.63]},
              {b:65.41,t:[261.63,329.63,392.00]}, {b:49.00,t:[196.00,246.94,293.66]} ];
@@ -456,7 +488,7 @@ vipGlow.scale.set(4.6,4.6,1); vipGlow.position.copy(player.position); vipGlow.po
 /* ============================================================ ENTITY POOL */
 const TYPE={SCAMMER:0,HOLDER:1,SHIELD:2,BOMB:3};
 const pool=[], active=[];
-function getEntity(){ let e=pool.pop(); if(!e){ e={sprite:new THREE.Sprite(matHolder),type:0,prevZ:0,dead:false}; scene.add(e.sprite);} e.sprite.visible=true; e.dead=false; return e; }
+function getEntity(){ let e=pool.pop(); if(!e){ e={sprite:new THREE.Sprite(matHolder),type:0,prevZ:0,dead:false}; scene.add(e.sprite);} e.sprite.visible=true; e.dead=false; e._nm=false; return e; }
 function freeEntity(e){ e.sprite.visible=false; const i=active.indexOf(e); if(i>=0) active.splice(i,1); pool.push(e); }
 function spawn(){ const e=getEntity(), r=Math.random();
   if(r<CFG.powerupChance){ e.type=Math.random()<0.5?TYPE.SHIELD:TYPE.BOMB; e.sprite.material=(e.type===TYPE.SHIELD)?matShield:matBomb; e.sprite.scale.set(2.2,2.2,1); }
@@ -667,7 +699,9 @@ const el={ score:document.getElementById("score"), lives:document.getElementById
   hud:document.getElementById("hud"), vipBadge:document.getElementById("vipBadge"), banner:document.getElementById("banner"), sound:document.getElementById("soundBtn") };
 function renderLives(){ el.lives.textContent="🟢".repeat(Math.max(state.lives,0))+"⚫".repeat(Math.max(CFG.lives-state.lives,0)); }
 function renderScore(){ el.score.textContent=Math.floor(state.score); }
-function renderCombo(){ if(state.combo>1){ el.combo.textContent="COMBO x"+state.combo; el.combo.style.opacity="1"; } else el.combo.style.opacity="0"; }
+const comboBar=document.getElementById("comboBar"), comboBarFill=comboBar?comboBar.querySelector("i"):null;
+function renderCombo(){ if(state.combo>1){ el.combo.textContent="COMBO x"+state.combo; el.combo.style.opacity="1"; if(comboBar) comboBar.style.opacity="1"; }
+  else { el.combo.style.opacity="0"; if(comboBar) comboBar.style.opacity="0"; } }
 function showBanner(t){ el.banner.textContent=t; el.banner.classList.remove("banner-show"); void el.banner.offsetWidth; el.banner.classList.add("banner-show"); }
 
 /* ============================================================ SCORING / COLLISIONS */
@@ -675,7 +709,7 @@ function addScore(base,worldPos){ const mult=(state.combo>1?state.combo:1)*(stat
   state.score+=gain; renderScore(); popup(worldPos,"+"+gain,state.vip?"#ffd23f":"#39ff7a");
   const nw=1+Math.floor(state.score/150); if(nw>state.wave){ state.wave=nw; sfx.wave(); showBanner("WAVE "+state.wave); } }
 function loseLife(worldPos){ state.lives--; state.combo=0; renderCombo(); renderLives(); sfx.hit(); shake(1.0); flashColor("rgba(255,59,92,.55)",0.8);
-  if(worldPos) popup(worldPos,"-1 HP","#ff3b5c"); if(tg&&tg.HapticFeedback){ try{ tg.HapticFeedback.notificationOccurred("error"); }catch(e){} }
+  if(worldPos) popup(worldPos,"-1 HP","#ff3b5c"); buzz([60,40,90],"error");
   if(state.lives<=0) gameOver(); }
 let shieldActive=false;
 function resolve(e){ const p=e.sprite.position.clone();
@@ -689,7 +723,7 @@ function resolve(e){ const p=e.sprite.position.clone();
   e.dead=true; freeEntity(e); }
 
 /* ============================================================ MAIN LOOP */
-const clock=new THREE.Clock(); let gridOffset=0;
+const clock=new THREE.Clock(); let gridOffset=0; let _lastCombo=0;
 function loop(){ requestAnimationFrame(loop); const dt=Math.min(clock.getDelta(),0.05); const now=performance.now()*0.001;
   const scroll=dt*(state.running?state.speed:3.5); gridOffset=(gridOffset+scroll)%2; grid.position.z=-6+gridOffset; grid2.position.z=-6+gridOffset;
   const since=actx?(actx.currentTime-beatT):9, pulse=Math.max(0,1-since*6);
@@ -715,10 +749,19 @@ function loop(){ requestAnimationFrame(loop); const dt=Math.min(clock.getDelta()
     state.elapsed+=dt; state.speed=CFG.baseSpeed+state.elapsed*CFG.speedRampPerSec; state.spawnGap=Math.max(CFG.minSpawnGap,CFG.baseSpawnGap-state.elapsed*0.012);
     player.position.x+=(state.playerTargetX-player.position.x)*CFG.playerSpeedLerp; player.position.x=THREE.MathUtils.clamp(player.position.x,-playHalfWidth,playHalfWidth);
     state.spawnTimer-=dt; if(state.spawnTimer<=0){ spawn(); state.spawnTimer=state.spawnGap*(0.7+Math.random()*0.6); }
-    const catchX=1.85, catchZ=1.6;
+    const catchX=1.85, catchZ=1.6, nearX=catchX+1.05;   // nearX: outer band that still counts as a "by-a-hair" dodge
     for(let i=active.length-1;i>=0;i--){ const e=active[i]; if(e.dead) continue; e.prevZ=e.sprite.position.z; e.sprite.position.z+=state.speed*dt; const z=e.sprite.position.z;
-      if(e.prevZ<PLAYER_Z+catchZ && z>=PLAYER_Z-catchZ){ if(Math.abs(e.sprite.position.x-player.position.x)<catchX){ resolve(e); continue; } }
-      if(z>CAM.z+1){ if(e.type===TYPE.SCAMMER){ state.combo=0; renderCombo(); } freeEntity(e); } } }
+      if(e.prevZ<PLAYER_Z+catchZ && z>=PLAYER_Z-catchZ){ const dx=Math.abs(e.sprite.position.x-player.position.x);
+        if(dx<catchX){ resolve(e); continue; }
+        // near-miss: a dangerous item swept past just outside the catch radius without a hit
+        else if(dx<nearX && !e._nm){ e._nm=true; if(window.__nearMiss) window.__nearMiss(e,dx); } }
+      if(z>CAM.z+1){ if(e.type===TYPE.SCAMMER){ state.combo=0; renderCombo(); } e._nm=false; freeEntity(e); } }
+    // combo decay: any increase in the streak this frame refreshes the deadline; if it lapses, the streak drops
+    if(state.combo>_lastCombo) state.comboUntil=now+CFG.comboWindow;
+    _lastCombo=state.combo;
+    if(state.combo>1 && now>state.comboUntil){ state.combo=0; _lastCombo=0; renderCombo(); }
+    if(comboBarFill){ const left=Math.max(0,Math.min(1,(state.comboUntil-now)/CFG.comboWindow));
+      comboBarFill.style.width=(left*100)+"%"; comboBarFill.style.background= left<0.34?"#ff3b5c":(left<0.66?"#ffd23f":"#39ff7a"); } }
 
   updateParticles(dt);
   const bob=pulse*0.10; if(state.shake>0.001){ const s=state.shake; placeCamera((Math.random()-0.5)*s,(Math.random()-0.5)*s*0.6+bob); state.shake*=0.86; } else placeCamera(0,bob);
@@ -728,13 +771,25 @@ loop();
 
 /* ============================================================ GAME FLOW */
 function resetGame(){ for(let i=active.length-1;i>=0;i--) freeEntity(active[i]);
-  Object.assign(state,{score:0,lives:CFG.lives,combo:0,kills:0,wave:1,speed:CFG.baseSpeed,spawnGap:CFG.baseSpawnGap,spawnTimer:0,elapsed:0,playerTargetX:0,shake:0});
-  shieldActive=false; player.position.x=0; renderScore(); renderLives(); renderCombo(); }
+  Object.assign(state,{score:0,lives:CFG.lives,combo:0,kills:0,wave:1,speed:CFG.baseSpeed,spawnGap:CFG.baseSpawnGap,spawnTimer:0,elapsed:0,playerTargetX:0,shake:0,comboUntil:0});
+  _lastCombo=0; shieldActive=false; player.position.x=0; renderScore(); renderLives(); renderCombo(); }
 function startGame(){ audioInit(); startMusic(); startEngine(); resetGame();
   document.getElementById("startScreen").classList.add("hidden"); document.getElementById("gameOverScreen").classList.add("hidden");
   document.getElementById("pauseScreen").classList.add("hidden");
   el.hud.classList.remove("hidden"); /* sound toggle is always visible now */ el.vipBadge.style.display=state.vip?"inline-block":"none"; vipGlow.material.opacity=0; state.running=true;
-  document.getElementById("pauseBtn").classList.remove("hidden"); }
+  document.getElementById("pauseBtn").classList.remove("hidden");
+  maybeShowTutorial(); }
+/* First-run only: a brief controls hint over the live run. Stored so it never nags again. */
+function maybeShowTutorial(){
+  let seen=false; try{ seen=localStorage.getItem("xzilla_tut")==="1"; }catch(e){}
+  if(seen) return;
+  const tut=document.getElementById("tutorial"); if(!tut) return;
+  try{ localStorage.setItem("xzilla_tut","1"); }catch(e){}
+  tut.classList.remove("hidden"); tut.classList.add("show");
+  const close=()=>{ tut.classList.remove("show"); tut.classList.add("hidden"); tut.removeEventListener("pointerdown",close); clearTimeout(tut._t); };
+  tut.addEventListener("pointerdown",close);
+  tut._t=setTimeout(close,3200);
+}
 function gameOver(){ state.running=false; stopEngine(); sfx.over();
   if(state.score>state.best){ state.best=Math.floor(state.score); try{ localStorage.setItem("xzilla_best",String(state.best)); }catch(e){} }
   document.getElementById("finalScore").textContent=Math.floor(state.score); document.getElementById("finalKills").textContent=state.kills;
@@ -807,6 +862,6 @@ document.querySelectorAll("#startScreen .btn").forEach(b=>{
 document.addEventListener("visibilitychange",()=>{ if(document.hidden&&state.running) pauseGame(); });
 document.getElementById("bestScore").textContent=state.best;
 </script>
-<script src="game.js?v=7"></script>
+<script src="game.js?v=8"></script>
 </body>
 </html>

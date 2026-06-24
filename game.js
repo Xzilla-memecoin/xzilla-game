@@ -54,12 +54,20 @@ window._adsPayload = "WwogIHsKICAgICJpZCI6ICJ4emlsbGEtaG9tZSIsCiAgICAidGV4dCI6IC
     {id:"violet",  name:"DEGEN VIOLET",  tint:MAG,    cost:1500},
     {id:"cyan",    name:"PAPERHAND ICE", tint:CYAN,   cost:4000},
     {id:"gold",    name:"PUMP GOLD",     tint:GOLD,   cost:9000},
-    {id:"blood",   name:"RUG RED",       tint:RED,    cost:18000},
-    {id:"toxic",   name:"ONCHAIN GLOW",  tint:TEAL,   cost:32000}
+    // RANK REWARDS — earned by reaching a milestone (best score), not bought with XP.
+    {id:"blood",   name:"RUG RED",       tint:RED,    cost:0, rankReq:3500,  rankName:"WHALE WRECKER"},
+    {id:"toxic",   name:"ONCHAIN GLOW",  tint:TEAL,   cost:0, rankReq:12000, rankName:"APEX PREDATOR"}
   ];
   function applySkin(){
     const s = SKINS.find(s=>s.id===econ.skin);
     try { player.material.color = new THREE.Color(s && s.tint ? s.tint : "#ffffff"); } catch(e){}
+  }
+  // Auto-grant rank-reward skins once the player's best score clears the threshold.
+  function syncRankSkins(){
+    let changed=false;
+    SKINS.forEach(s=>{ if(s.rankReq && (state.best||0)>=s.rankReq && !econ.skins.includes(s.id)){
+      econ.skins.push(s.id); changed=true; toast("Rank reward unlocked: "+s.name+" skin",GOLD); } });
+    if(changed) saveEcon();
   }
 
   /* ------------------------------ missions -------------------------------- */
@@ -72,6 +80,40 @@ window._adsPayload = "WwogIHsKICAgICJpZCI6ICJ4emlsbGEtaG9tZSIsCiAgICAidGV4dCI6IC
   let missions = store.get("xz_missions", null);
   if(!Array.isArray(missions)) missions = DEFAULT_MISSIONS.map(m=>({...m}));
   function saveMissions(){ store.set("xz_missions", missions); }
+
+  /* ------------------------- daily challenge ------------------------------ */
+  /* A single goal that refreshes each calendar day (deterministic from the date,
+   * so it's stable across reloads) and pays out XP once on completion. Progress is
+   * tallied from each run's stats at game over. */
+  const DAILY_POOL = [
+    {type:"kills", goal:80,   reward:2500, text:g=>"Smash "+g+" scammers today"},
+    {type:"score", goal:6000, reward:3000, text:g=>"Score "+fmt(g)+" in a single run"},
+    {type:"boss",  goal:3,    reward:4000, text:g=>"Defeat "+g+" Rug Bosses today"},
+    {type:"combo", goal:15,   reward:3500, text:g=>"Land an x"+g+" combo"}
+  ];
+  const todayStr = () => new Date().toDateString();
+  let daily = store.get("xz_daily", null);
+  function rollDaily(){
+    const day=todayStr();
+    const seed=[...day].reduce((a,c)=>a+c.charCodeAt(0),0);   // date-derived pick → same all day
+    const pick=DAILY_POOL[seed%DAILY_POOL.length];
+    daily={day, type:pick.type, goal:pick.goal, reward:pick.reward, text:pick.text(pick.goal), prog:0, done:false};
+    store.set("xz_daily", daily);
+  }
+  function ensureDaily(){ if(!daily || daily.day!==todayStr()) rollDaily(); }
+  function progressDaily(){
+    ensureDaily(); if(daily.done) return;
+    if(daily.type==="kills")      daily.prog += run.kills;
+    else if(daily.type==="boss")  daily.prog += run.boss;
+    else if(daily.type==="score") daily.prog = Math.max(daily.prog, run.score);
+    else if(daily.type==="combo") daily.prog = Math.max(daily.prog, run.combo);
+    if(daily.prog>=daily.goal){
+      daily.done=true; econ.tokens+=daily.reward; saveEcon(); updateHUDtokens();
+      toast("Daily challenge complete! +"+fmt(daily.reward)+" XP",GOLD);
+      try{ window.__buzz && window.__buzz([40,30,80],"success"); }catch(_){}
+    }
+    store.set("xz_daily", daily);
+  }
 
   /* ----------------------------- leaderboard ------------------------------ */
   /* run-score milestones — purely cosmetic titles, separate from the wallet-holdings VIP tiers */
@@ -104,11 +146,13 @@ window._adsPayload = "WwogIHsKICAgICJpZCI6ICJ4emlsbGEtaG9tZSIsCiAgICAidGV4dCI6IC
   // No fake rivals, no per-run spam — just your single best score on record, with
   // your real Telegram name when the game is opened inside Telegram.
   let myBest = store.get("xz_mybest", null);
+  let weekBest = store.get("xz_weekbest", 0);   // best of the CURRENT week (reset by weeklyReset)
   function pushScore(score){
     const s = Math.round(score);
     if(!myBest || s>myBest.score) myBest = {name:tgName(), score:s};
     else myBest.name = tgName();   // keep the name fresh even on a non-record run
     store.set("xz_mybest", myBest);
+    if(s>weekBest){ weekBest=s; store.set("xz_weekbest", weekBest); }
   }
 
   /* ------------------------- per-run stat tracking ------------------------ */
@@ -506,8 +550,18 @@ window._adsPayload = "WwogIHsKICAgICJpZCI6ICJ4emlsbGEtaG9tZSIsCiAgICAidGV4dCI6IC
   }
 
   function renderMissions(){
+    ensureDaily();
+    const dpct=Math.min(100,(daily.prog/daily.goal)*100);
+    const dailyHtml =
+      '<h2 class="pnl-title" style="border-color:'+GOLD+'">DAILY CHALLENGE</h2>'+
+      '<div class="dailyTop">🔥 STREAK <b>'+(econ.streak||0)+' day'+((econ.streak||0)===1?'':'s')+'</b></div>'+
+      '<div class="mrow'+(daily.done?' done':'')+'" style="border-color:'+(daily.done?TEAL:GOLD)+'">'+
+        '<div class="mtop"><span>'+daily.text+'</span><b style="color:'+(daily.done?TEAL:GOLD)+'">'+(daily.done?"DONE":"+"+fmt(daily.reward))+'</b></div>'+
+        '<div class="mbar"><i style="width:'+dpct+'%;background:'+(daily.done?TEAL:GOLD)+'"></i></div>'+
+        '<div class="msub">'+fmt(Math.min(daily.prog,daily.goal))+' / '+fmt(daily.goal)+' · resets daily</div></div>';
     $("missionsInner").innerHTML =
-      '<h2 class="pnl-title" style="border-color:'+TEAL+'">BOUNTIES</h2>'+
+      dailyHtml +
+      '<h2 class="pnl-title" style="border-color:'+TEAL+';margin-top:16px;">BOUNTIES</h2>'+
       missions.map(m=>{
         const pct=Math.min(100,(m.prog/m.goal)*100);
         return '<div class="mrow'+(m.done?' done':'')+'">'+
@@ -528,7 +582,8 @@ window._adsPayload = "WwogIHsKICAgICJpZCI6ICJ4emlsbGEtaG9tZSIsCiAgICAidGV4dCI6IC
         ? '<div class="lrow you">'+
             '<span class="lrank">\u2605</span>'+
             '<span class="lname">'+myBest.name+(myTitle?' \u00b7 <span style="color:'+GOLD+'">'+myTitle.name+'</span>':'')+'</span>'+
-            '<b>'+fmt(myBest.score)+'</b></div>'
+            '<b>'+fmt(myBest.score)+'</b></div>'+
+          '<div class="sub" style="margin-top:6px">THIS WEEK: <b style="color:'+CYAN+'">'+fmt(weekBest)+'</b> pts \u00b7 resets every week</div>'
         : '<div class="sub">Play a run to set your first score.</div>')+
       '<h2 class="pnl-title" style="border-color:'+GOLD+';margin-top:18px;">RANK MILESTONES</h2>'+
       '<div class="sub" style="margin-bottom:8px;">Best run: '+fmt(best)+' pts</div>'+
@@ -544,18 +599,23 @@ window._adsPayload = "WwogIHsKICAgICJpZCI6ICJ4emlsbGEtaG9tZSIsCiAgICAidGV4dCI6IC
     $("skinsInner").innerHTML =
       '<h2 class="pnl-title" style="border-color:'+TEAL+'">SKIN SHOP · '+abbr(econ.tokens)+' XP</h2>'+
       '<div class="sgrid">'+ SKINS.map(s=>{
-        const owned=econ.skins.includes(s.id), eq=econ.skin===s.id, can=econ.tokens>=s.cost;
+        const owned=econ.skins.includes(s.id), eq=econ.skin===s.id;
+        const rankLocked = !!s.rankReq && !owned;                 // earned by rank, not yet reached
+        const can = !rankLocked && econ.tokens>=s.cost;
         const tint=s.tint||"#39ff7a";
-        return '<div class="scard'+(eq?' eq':'')+'" style="border-color:'+(eq?TEAL:"#2a2150")+'">'+
-          '<div class="sprev" style="filter:drop-shadow(0 0 12px '+tint+')">🦖</div>'+
+        const label = eq?"EQUIPPED" : owned?"EQUIP" : rankLocked?("🔒 "+s.rankName) : s.cost===0?"FREE":fmt(s.cost);
+        const bcol  = eq?TEAL : owned?MAG : rankLocked?GOLD : can?TEAL:"#444";
+        return '<div class="scard'+(eq?' eq':'')+(rankLocked?' locked':'')+'" style="border-color:'+(eq?TEAL:rankLocked?"rgba(255,210,63,.4)":"#2a2150")+'">'+
+          '<div class="sprev" style="filter:drop-shadow(0 0 12px '+tint+')'+(rankLocked?';opacity:.5':'')+'">🦖</div>'+
           '<div class="sname">'+s.name+'</div>'+
-          '<button class="sbuy" data-skin="'+s.id+'" '+(!owned&&!can?"disabled":"")+
-            ' style="border-color:'+(eq?TEAL:owned?MAG:can?TEAL:"#444")+';background:'+(eq?TEAL:"transparent")+';color:'+(eq?"#04130a":"#fff")+'">'+
-            (eq?"EQUIPPED":owned?"EQUIP":s.cost===0?"FREE":fmt(s.cost))+'</button></div>';
+          '<button class="sbuy" data-skin="'+s.id+'" '+(!owned&&!can&&!rankLocked?"disabled":"")+
+            ' style="border-color:'+bcol+';background:'+(eq?TEAL:"transparent")+';color:'+(eq?"#04130a":rankLocked?GOLD:"#fff")+';font-size:'+(rankLocked?"7px":"8px")+'">'+
+            label+'</button></div>';
       }).join("")+'</div>';
     $("skinsInner").querySelectorAll(".sbuy").forEach(b=>b.onclick=()=>{
       const s=SKINS.find(s=>s.id===b.dataset.skin);
       if(econ.skins.includes(s.id)){ econ.skin=s.id; }
+      else if(s.rankReq){ toast("Reach "+s.rankName+" to unlock this skin",RED); return; }
       else if(econ.tokens>=s.cost){ econ.tokens-=s.cost; econ.skins.push(s.id); econ.skin=s.id; toast("Unlocked "+s.name,TEAL); }
       else { toast("Not enough XP",RED); return; }
       saveEcon(); applySkin(); updateHUDtokens(); renderSkins();
@@ -590,6 +650,8 @@ window._adsPayload = "WwogIHsKICAgICJpZCI6ICJ4emlsbGEtaG9tZSIsCiAgICAidGV4dCI6IC
     });
     saveMissions(); saveEcon();
     pushScore(state.score);
+    progressDaily();      // tally the daily challenge from this run
+    syncRankSkins();      // unlock any rank-reward skins the new best just earned
     // augment game over screen
     const go=$("gameOverScreen");
     // EARNED-XP line lives inside .go-stats so it joins the stats row in landscape.
@@ -903,7 +965,34 @@ window._adsPayload = "WwogIHsKICAgICJpZCI6ICJ4emlsbGEtaG9tZSIsCiAgICAidGV4dCI6IC
       }
       // rank-milestone callout — once per run, the first time you cross a new title threshold
       const t = titleForScore(state.score);
-      if(t && t.name!==run.lastTitle){ run.lastTitle=t.name; showBanner("\u2605 "+t.name); sfx.wave(); flashColor("rgba(255,210,63,.3)",0.5); }
+      if(t && t.name!==run.lastTitle){ run.lastTitle=t.name; rankUpCelebration(t.name); }
+    };
+
+    /* Loud, full-screen rank-up moment: banner + flash overlay + particles + climb sfx + buzz. */
+    function rankUpCelebration(name){
+      showBanner("\u2605 RANK UP \u2605");
+      try{ (window.__sfx&&window.__sfx.rankup)?window.__sfx.rankup():sfx.wave(); }catch(_){}
+      flashColor("rgba(255,210,63,.45)",0.72); shake(0.95);
+      try{ burst(player.position.x, player.position.y+0.5, PLAYER_Z, GOLD, 30);
+           burst(player.position.x, player.position.y+0.5, PLAYER_Z, MAG, 18); }catch(_){}
+      try{ window.__buzz && window.__buzz([40,30,60,30,110],"success"); }catch(_){}
+      const rf=$("rankFlash"), tx=$("rankFlashTxt");
+      if(rf && tx){ tx.textContent="\u2605 "+name+" \u2605";
+        rf.classList.remove("hidden","show"); void rf.offsetWidth; rf.classList.add("show");
+        clearTimeout(rf._t); rf._t=setTimeout(()=>{ rf.classList.remove("show"); rf.classList.add("hidden"); }, 1500); }
+    }
+
+    /* NEAR-MISS bonus: a dangerous item (HODLER / HONEYPOT) swept past just outside the
+     * catch radius. Rewards threading the needle with a little score + juice. Hooked from
+     * the base collision loop in index.html via window.__nearMiss. */
+    window.__nearMiss = function(e){
+      if(!(e.type===TYPE.HOLDER || e.type===TYPE.HONEYPOT)) return;
+      const p=e.sprite.position.clone();
+      const bonus=Math.round(8 * tierScoreMult() * (powActive(px.x2Until)?2:1));
+      state.score+=bonus; renderScore();
+      popup(p,"NEAR MISS +"+bonus,CYAN); burst(p.x,p.y,p.z,CYAN,6); pop=Math.max(pop,1.12);
+      try{ window.__sfx && window.__sfx.nearmiss && window.__sfx.nearmiss(); }catch(_){}
+      try{ window.__buzz && window.__buzz(16,"light"); }catch(_){}
     };
 
     window.resolve = function(e){
@@ -931,7 +1020,7 @@ window._adsPayload = "WwogIHsKICAgICJpZCI6ICJ4emlsbGEtaG9tZSIsCiAgICAidGV4dCI6IC
         for(let i=active.length-1;i>=0;i--){ const a=active[i];
           if(a!==e && a.type===TYPE.SCAMMER && !a.dead){ a.dead=true;
             const ap=a.sprite.position.clone(); burst(ap.x,ap.y,ap.z,MAG,5); freeEntity(a); } }
-        try{ if(tg&&tg.HapticFeedback) tg.HapticFeedback.notificationOccurred("success"); }catch(_){}
+        try{ window.__buzz ? window.__buzz([60,40,120],"success") : (tg&&tg.HapticFeedback&&tg.HapticFeedback.notificationOccurred("success")); }catch(_){}
         e.dead=true; freeEntity(e); updateHUDtokens(); return;
       }
 
@@ -966,6 +1055,7 @@ window._adsPayload = "WwogIHsKICAgICJpZCI6ICJ4emlsbGEtaG9tZSIsCiAgICAidGV4dCI6IC
       if(e.type===TYPE.SHIELD){ shieldActive=true; burst(p.x,p.y,p.z,TEAL,12); popup(p,"SHIELD!",TEAL); try{sfx.power();}catch(_){} e.dead=true; freeEntity(e); return; }
       if(e.type===TYPE.BOMB){
         try{sfx.power();}catch(_){} burst(p.x,p.y,p.z,GOLD,18); shake(0.7); flashColor("rgba(255,210,63,.4)",0.6); popup(p,"LIQUIDATED!",GOLD);
+        try{ window.__buzz && window.__buzz([30,20,60],"impact"); }catch(_){}
         for(let i=active.length-1;i>=0;i--){ const a=active[i]; if(a!==e&&a.type===TYPE.SCAMMER&&!a.dead){
           a.dead=true; const ap=a.sprite.position.clone(); burst(ap.x,ap.y,ap.z,MAG,6); state.kills++; run.kills++; window.addScore(CFG.scammerPoints,ap); freeEntity(a); } }
         e.dead=true; freeEntity(e); updateHUDtokens(); return;
@@ -1175,8 +1265,9 @@ window._adsPayload = "WwogIHsKICAgICJpZCI6ICJ4emlsbGEtaG9tZSIsCiAgICAidGV4dCI6IC
       const wk = Math.floor(Date.now()/6048e5); // ~1 week buckets
       if(store.get("xz_lb_week",null)!==wk){
         store.set("xz_lb_week", wk);
-        // keep the player's best, refresh the seeded rivals slightly
-        // (purely cosmetic churn; a real backend would replace this)
+        // new week → reset the weekly best so the weekly board starts fresh. The
+        // all-time best (myBest) is untouched. A real backend would sync rivals here.
+        weekBest = 0; store.set("xz_weekbest", 0);
       }
     })();
 
@@ -1766,5 +1857,6 @@ window._adsPayload = "WwogIHsKICAgICJpZCI6ICJ4emlsbGEtaG9tZSIsCiAgICAidGV4dCI6IC
 
   /* -------------------------------- boot ---------------------------------- */
   applySkin(); updateVip(); updateHUDtokens(); checkStreak();
+  ensureDaily(); syncRankSkins();   // refresh today's challenge + grant any earned rank skins
   $("tabbar").classList.remove("hidden"); showTab("PLAY");
 })();

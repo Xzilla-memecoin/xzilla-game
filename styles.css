@@ -257,3 +257,40 @@
   @media (pointer:coarse) and (orientation:portrait){
     .orient-hint{ display:block; }
   }
+
+  /* === ANCHOR: GAME-FEEL UI === */
+  /* Combo decay bar — under the combo text in the HUD; width/colour set each frame. */
+  #comboBar{ width:74px; height:4px; margin-top:3px; border-radius:3px; background:rgba(255,255,255,.14);
+    overflow:hidden; opacity:0; transition:opacity .2s; }
+  #comboBar i{ display:block; height:100%; width:100%; background:var(--toxic); border-radius:3px;
+    transition:width .08s linear, background .2s; }
+
+  /* First-run tutorial overlay */
+  #tutorial{ position:fixed; inset:0; z-index:55; display:flex; align-items:center; justify-content:center;
+    background:rgba(7,3,24,.55); opacity:0; transition:opacity .25s; pointer-events:auto; }
+  #tutorial.show{ opacity:1; }
+  .tut-card{ background:rgba(10,6,25,.94); border:2px solid var(--toxic); border-radius:14px; padding:20px 24px;
+    font-family:'Orbitron',sans-serif; color:#fff; max-width:300px; text-align:center; box-shadow:0 0 30px rgba(57,255,122,.4); }
+  .tut-row{ font-size:13px; margin:8px 0; letter-spacing:.4px; }
+  .tut-ic{ font-size:18px; margin-right:6px; }
+  .tut-tip{ font-size:11px; opacity:.85; margin-top:12px; }
+  .tut-tip b.good{ color:var(--magenta); } .tut-tip b.bad{ color:var(--cyan); }
+  .tut-dismiss{ margin-top:14px; font-family:'Press Start 2P'; font-size:9px; color:var(--toxic);
+    animation:blink 1s steps(2,start) infinite; }
+
+  /* Full-screen rank-up celebration flash */
+  #rankFlash{ position:fixed; inset:0; z-index:54; display:flex; align-items:center; justify-content:center;
+    pointer-events:none; opacity:0; }
+  #rankFlash.show{ animation:rankPop 1.5s ease-out forwards; }
+  #rankFlashTxt{ font-family:'Press Start 2P'; font-size:22px; color:var(--gold); text-align:center;
+    text-shadow:0 0 18px var(--gold), 0 0 42px var(--magenta);
+    background:radial-gradient(ellipse at center, rgba(255,210,63,.18) 0%, rgba(0,0,0,0) 70%); padding:46px 28px; }
+  @keyframes rankPop{ 0%{opacity:0;transform:scale(.5)} 15%{opacity:1;transform:scale(1.16)}
+    70%{opacity:1;transform:scale(1)} 100%{opacity:0;transform:scale(1.3)} }
+
+  /* Daily-challenge streak line + rank-locked skin card */
+  .dailyTop{ display:flex; justify-content:space-between; align-items:center; font-family:'Orbitron';
+    font-size:12px; color:var(--gold); margin:2px 0 8px; padding:0 2px; }
+  .dailyTop b{ color:#fff; }
+  .scard.locked{ opacity:.9; }
+  @media (max-width:400px){ #rankFlashTxt{ font-size:17px; } }
