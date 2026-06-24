@@ -1914,6 +1914,61 @@ window._adsPayload = "WwogIHsKICAgICJpZCI6ICJ4emlsbGEtaG9tZSIsCiAgICAidGV4dCI6IC
     renderLives();
   })();
 
+  /* ===================================================================== *
+   *  REAR-TIRE SPIN ILLUSION                                               *
+   *  Xrider.webp is a single billboarded THREE.Sprite, so there is no 2D   *
+   *  draw call / destination-rect to distort. Instead we overlay a thin    *
+   *  sprite that samples ONLY the bottom 30% of the SAME texture (cloned   *
+   *  UVs) and pulse its height with a speed-driven sine, anchored at the   *
+   *  contact patch — this reads as a rolling tire while the rider's jacket *
+   *  + head (the top 70%) never move. Freezes instantly at 0 speed/crash.  *
+   * ===================================================================== */
+  (function tireSpin(){
+    if(typeof THREE==="undefined" || typeof player==="undefined" || typeof scene==="undefined") return;
+    const TIRE_FRAC = 0.30;                                   // bottom 30% of the player texture = the rear tire
+    const mat  = new THREE.SpriteMaterial({ transparent:true, depthWrite:false });
+    const tire = new THREE.Sprite(mat); tire.visible=false; scene.add(tire);
+    let tireSpinTime = 0, srcMap = null;
+
+    function syncMap(){                                        // clone the player's CURRENT texture with a bottom-slice UV
+      const m = player.material && player.material.map;
+      if(m && m !== srcMap){
+        srcMap = m;
+        const c = m.clone(); c.needsUpdate = true;
+        c.wrapS = c.wrapT = THREE.ClampToEdgeWrapping;
+        c.offset.set(0, 0); c.repeat.set(1, TIRE_FRAC);       // sample v = 0..0.30 (bottom of the sprite)
+        if(THREE.sRGBEncoding) c.encoding = THREE.sRGBEncoding;
+        mat.map = c; mat.needsUpdate = true;
+      }
+    }
+
+    const prevFrame = window.__frame;
+    window.__frame = function(dt){
+      if(prevFrame) prevFrame(dt);
+      // accumulate ONLY while moving — the instant the run stops (crash/menu/pause) the
+      // tire locks (tireSpinTime frozen) and the overlay hides, so it sits static.
+      if(state.running) tireSpinTime += state.speed * 0.05;
+      tire.visible = !!state.running;
+      if(!state.running) return;
+      mat.color && player.material && player.material.color && mat.color.copy(player.material.color); // match skin tint
+      syncMap();
+      if(!mat.map) return;
+
+      // Read the player's CURRENT applied transform (index.html's loop set it before __frame),
+      // so we inherit its squash (pop/vib) and lean automatically.
+      const H = player.scale.y, W = player.scale.x, rot = player.material.rotation || 0;
+      const spinOffset = Math.sin(tireSpinTime);              // -1..1
+      const amp  = Math.min(0.09, state.speed * 0.006);       // tiny, speed-scaled vertical deform
+      const baseH = H * (TIRE_FRAC + 0.02);                   // +2% so a compressed frame still covers the static tire
+      const tireH = baseH * (1 + spinOffset * amp);
+      const oy = -H * 0.5 + tireH * 0.5;                      // offset from player center so the BOTTOM edge stays planted
+      // rotate that offset by the bike's lean so the tire tracks the bank
+      tire.position.set(player.position.x - oy*Math.sin(rot), player.position.y + oy*Math.cos(rot), player.position.z + 0.01);
+      tire.scale.set(W, tireH, 1);
+      mat.rotation = rot;
+    };
+  })();
+
   /* -------------------------------- boot ---------------------------------- */
   applySkin(); updateVip(); updateHUDtokens(); checkStreak();
   ensureDaily(); syncRankSkins();   // refresh today's challenge + grant any earned rank skins
