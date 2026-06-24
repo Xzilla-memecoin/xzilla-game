@@ -11,7 +11,7 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@500;700;900&family=Press+Start+2P&display=swap" rel="stylesheet">
 
-<link rel="stylesheet" href="styles.css?v=13">
+<link rel="stylesheet" href="styles.css?v=14">
 </head>
 <body>
   <div id="game"></div>
@@ -53,7 +53,7 @@
          half of the landscape split (title stays above the image in both orientations). -->
     <div class="heroWrap">
       <h1 class="game-title">XZILLA:<span class="title-accent"> RUG SMASHER</span></h1>
-      <img id="heroImg" alt="Xzilla" src="https://raw.githubusercontent.com/Xzilla-memecoin/xzilla-game/main/images/mainImage.webp?v=13" />
+      <img id="heroImg" alt="Xzilla" src="https://raw.githubusercontent.com/Xzilla-memecoin/xzilla-game/main/images/mainImage.webp?v=14" />
     </div>
     <!-- .startCol is display:contents in portrait (no layout change) and becomes the
          RIGHT column of the side-by-side split in mobile landscape (see styles.css). -->
@@ -610,7 +610,7 @@ let tiltEnabled = false, tiltCenter = null, tiltAvailable = false;
 // Landscape also gets a smaller max angle for sharp, snappy arcade response.
 const TILT_DEADZONE_DEG     = 2.5;   // center slack — bike stays perfectly straight when ~level
 const TILT_MAX_DEG_PORTRAIT  = 28;   // ~28° tilt = full-lock steering in portrait
-const TILT_MAX_DEG_LANDSCAPE = 18;   // ~18° = full-lock in landscape (≈ sharper, snappier)
+const TILT_MAX_DEG_LANDSCAPE = 14;   // ~14° = full-lock in landscape (sharper, snappier)
 
 function isLandscape(){ return window.innerWidth > window.innerHeight; }
 function screenAngle(){
@@ -935,6 +935,6 @@ document.querySelectorAll("#startScreen .btn").forEach(b=>{
 document.addEventListener("visibilitychange",()=>{ if(document.hidden&&state.running) pauseGame(); });
 document.getElementById("bestScore").textContent=state.best;
 </script>
-<script src="game.js?v=13"></script>
+<script src="game.js?v=14"></script>
 </body>
 </html>
