@@ -21,33 +21,47 @@ window._adsPayload = "WwogIHsKICAgICJpZCI6ICJ4emlsbGEtaG9tZSIsCiAgICAidGV4dCI6IC
    state (start / pause / resume / crash) without any double-audio.
    ========================================================================== */
 (function engineAudio(){
-  let engineSound;
-  try { engineSound = new Audio('sounds/spinopel-the-accelerating-chopper-style-motorcycle-545712.mp3'); }
-  catch(_){ return; }
-  engineSound.loop = true;
-  engineSound.volume = 0.4;
-  engineSound.preload = "auto";
-  const maxSpeed = 24;          // reference top speed for the rev ramp (state.speed grows from baseSpeed 9)
-  let started = false;
+  const SRC = 'sounds/spinopel-the-accelerating-chopper-style-motorcycle-545712.mp3';
+  const BASE_VOL = 0.4;
+  const XFADE    = 0.6;          // seconds of head/tail OVERLAP that masks the loop seam → steady idle
+  const maxSpeed = 24;           // reference top speed for the rev ramp (state.speed grows from baseSpeed 9)
+  // A plain <audio loop> hard-cuts back to the start (the "re-accelerating" click). To get a
+  // steady idle we run TWO elements of the same clip and crossfade the tail of one into the head
+  // of the next, so there's never an audible seam.
+  let a, b;
+  try { a = new Audio(SRC); b = new Audio(SRC); } catch(_){ return; }
+  [a,b].forEach(e=>{ e.loop=false; e.preload="auto"; e.volume=0; });
+  let cur=a, nxt=b, started=false;
+  const vol  = () => (state.soundOn ? BASE_VOL : 0);                                  // 0 when muted via the toggle
+  const rate = () => (state.running && state.speed>0) ? 1.0 + Math.min(state.speed/maxSpeed,1)*0.25 : 1.0;
 
   // Run start = a real user gesture (the START tap), which clears the browser autoplay guard.
   window.startEngine = function(){
     started = true;
-    try{ engineSound.muted = !state.soundOn; engineSound.currentTime = 0; engineSound.play().catch(()=>{}); }catch(_){}
+    try{ cur.currentTime=0; cur.playbackRate=rate(); cur.volume=vol(); cur.play().catch(()=>{}); }catch(_){}
   };
-  // Crash / quit to menu: cut the engine dead so it doesn't roar over the scoreboard.
+  // Crash / quit to menu: cut both elements dead so nothing roars over the scoreboard.
   window.stopEngine = function(){
-    try{ engineSound.pause(); engineSound.currentTime = 0; }catch(_){}
+    try{ [a,b].forEach(e=>{ e.pause(); e.currentTime=0; e.volume=0; }); }catch(_){}
   };
-  // Called every frame from the loop: rev with screen speed, follow pause/resume + the mute toggle.
+  // Every frame from the loop: rev with screen speed, manage the crossfade loop + pause/resume + mute.
   window.setEnginePitch = function(){
     try{
-      engineSound.muted = !state.soundOn;
-      if(state.running){
-        if(started && engineSound.paused) engineSound.play().catch(()=>{});             // resume after a pause
-        if(state.speed > 0) engineSound.playbackRate = 1.0 + Math.min(state.speed/maxSpeed, 1) * 0.25;
-      } else if(!engineSound.paused){
-        engineSound.pause();                                                            // freeze over menu / pause / game over
+      if(!state.running){ if(!a.paused||!b.paused){ a.pause(); b.pause(); } return; }  // freeze over menu/pause/over
+      const v = vol(), r = rate();
+      if(started && cur.paused) cur.play().catch(()=>{});                              // resume after a pause
+      cur.playbackRate = r;
+      const dur = cur.duration;
+      if(dur && isFinite(dur) && cur.currentTime >= dur - XFADE){
+        // overlap the tail of `cur` with the head of `nxt`, ramping volumes across the seam
+        if(nxt.paused){ nxt.currentTime=0; nxt.play().catch(()=>{}); }
+        nxt.playbackRate = r;
+        const k = Math.min(1, (cur.currentTime - (dur - XFADE)) / XFADE);             // 0..1 fade progress
+        cur.volume = v*(1-k); nxt.volume = v*k;
+        if(k>=1){ cur.pause(); cur.currentTime=0; cur.volume=0; const t=cur; cur=nxt; nxt=t; }  // swap roles
+      } else {
+        cur.volume = v;
+        if(!nxt.paused){ nxt.pause(); nxt.currentTime=0; nxt.volume=0; }              // safety: clear any stray nxt
       }
     }catch(_){}
   };
