@@ -272,7 +272,8 @@ export default {
         rec.phantom_encryption_public_key = pk; rec.nonce = nonce; rec.data = data;
       }
       await env.LB.put(PCB_PREFIX + sid, JSON.stringify(rec), { expirationTtl: PCB_TTL });
-      return html(rec.errorCode ? "Connection cancelled" : "Wallet linked ✓");
+      const failMsg = "Connect failed (code " + rec.errorCode + ")" + (rec.errorMessage ? ": " + rec.errorMessage : "");
+      return html(rec.errorCode ? failMsg : "Wallet linked ✓");
     }
 
     // The Telegram client polls this until the result lands, then decrypts locally.

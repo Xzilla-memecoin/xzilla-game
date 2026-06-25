@@ -305,7 +305,7 @@
       try{ tg.openLink(link); }catch(_){ try{ window.open(link); }catch(__){} }
       const res = await pollResult(api, sid, 180000);
       if(!res){ if(window.__toast) window.__toast("Wallet connect timed out — tap connect to retry","#ff3b5c"); return false; }
-      if(res.errorCode){ if(window.__toast) window.__toast("Phantom: "+(res.errorMessage||"connection cancelled").slice(0,80),"#ff3b5c"); return false; }
+      if(res.errorCode){ if(window.__toast) window.__toast(("Phantom error "+res.errorCode+(res.errorMessage?": "+res.errorMessage:"")).slice(0,100),"#ff3b5c"); return false; }
       try{
         const shared = window.nacl.box.before(b58decode(res.phantom_encryption_public_key), kp.secretKey);
         const opened = window.nacl.box.open.after(b58decode(res.data), b58decode(res.nonce), shared);
