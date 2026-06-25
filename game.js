@@ -2214,9 +2214,12 @@ window._adsPayload = "WwogIHsKICAgICJpZCI6ICJ4emlsbGEtaG9tZSIsCiAgICAidGV4dCI6IC
       const ADS_WORKER   = _adsApi ? _adsApi+"/ads" : "";
       const ADS_FALLBACK = "https://raw.githubusercontent.com/Xzilla-memecoin/xzilla-game/main/ads.json";
       (function loadAdsConfig(){
+        let lastSig = null;   // skip re-applying identical configs (no needless redraw/flicker)
         function applyAds(data){
           let raw = Array.isArray(data) ? data : (data && Array.isArray(data.messages) ? data.messages : null);
           if(!raw) return false;
+          const sig = JSON.stringify(raw);
+          if(sig === lastSig) return true;   // unchanged → treat as applied, do nothing
           // each entry can be a plain string ("WAGMI") or
           // {"text":"WAGMI","color":"#21e6ff","imageUrl":"...","clickLink":"..."}
           const msgs=[], colors=[], imgs=[], links=[];
@@ -2231,6 +2234,7 @@ window._adsPayload = "WwogIHsKICAgICJpZCI6ICJ4emlsbGEtaG9tZSIsCiAgICAidGV4dCI6IC
             links.push((isObj && typeof item.clickLink==="string") ? item.clickLink : undefined);
           }
           if(!msgs.length) return false;
+          lastSig = sig;
           AD_MSGS.length=0; AD_MSGS.push(...msgs);
           AD_COLORS.length=0; AD_COLORS.push(...colors);
           AD_IMAGES.length=0; AD_IMAGES.push(...imgs);
@@ -2241,9 +2245,18 @@ window._adsPayload = "WwogIHsKICAgICJpZCI6ICJ4emlsbGEtaG9tZSIsCiAgICAidGV4dCI6IC
           return true;
         }
         const tryUrl = u => u ? fetch(u,{cache:"no-store"}).then(r=>r.ok?r.json():null) : Promise.resolve(null);
-        tryUrl(ADS_WORKER)
-          .then(d=>{ if(applyAds(d)) return; return tryUrl(ADS_FALLBACK).then(applyAds); })   // worker → github → built-in defaults
-          .catch(()=>{ /* keep built-in defaults */ });
+        function loadOnce(){
+          return tryUrl(ADS_WORKER)
+            .then(d=>{ if(applyAds(d)) return; return tryUrl(ADS_FALLBACK).then(applyAds); })   // worker → github → built-in defaults
+            .catch(()=>{ /* keep built-in defaults */ });
+        }
+        loadOnce();
+        // LIVE REFRESH: re-poll the Worker so newly published ads appear WITHOUT a reload.
+        // Only while the tab is visible (saves requests on backgrounded tabs); also refresh
+        // immediately when the player returns to the tab. applyAds() de-dupes unchanged data.
+        const pollAds = ()=>{ if(!document.hidden) tryUrl(ADS_WORKER).then(d=>{ if(d) applyAds(d); }).catch(()=>{}); };
+        setInterval(pollAds, 60000);
+        document.addEventListener("visibilitychange", ()=>{ if(!document.hidden) pollAds(); });
       })();
 
       /* ---------- slow parallax silhouette layers ---------- */

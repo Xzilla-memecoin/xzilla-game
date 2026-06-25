@@ -121,11 +121,18 @@ export default {
     // update via POST /ads is visible to players within seconds (vs. ~5 min on the
     // GitHub-raw CDN). Shape: { messages: [ "TEXT" | {text,color,imageUrl,clickLink} ] }.
     if(req.method === "GET" && url.pathname === "/ads"){
+      // 15s edge cache so many players polling doesn't hammer KV; purged on POST below.
+      // Public read-only data → ACAO:* (avoids per-origin cached-CORS issues).
+      const cacheKey = new Request(new URL("/ads", req.url).toString());
+      const hit = await caches.default.match(cacheKey);
+      if(hit) return hit;
       const v = await env.LB.get(ADS_KEY);
-      return new Response(v || '{"messages":[]}', {
+      const res = new Response(v || '{"messages":[]}', {
         status: 200,
-        headers: { "content-type": "application/json", "Cache-Control": "no-store", ...cors(origin) },
+        headers: { "content-type": "application/json", "Cache-Control": "public, max-age=15", "Access-Control-Allow-Origin": "*" },
       });
+      await caches.default.put(cacheKey, res.clone());
+      return res;
     }
 
     // -------- POST /ads  (admin: header x-admin-token === env.ADS_ADMIN_TOKEN) ----
@@ -141,6 +148,7 @@ export default {
                 : (parsed && Array.isArray(parsed.messages) ? parsed.messages : null);
       if(!arr) return json({ error: "expected an array or {messages:[...]}" }, 400, origin);
       await env.LB.put(ADS_KEY, JSON.stringify({ messages: arr }));
+      try{ await caches.default.delete(new Request(new URL("/ads", req.url).toString())); }catch(_){}   // purge edge cache so the update is live immediately
       return json({ ok: true, count: arr.length }, 200, origin);
     }
 
