@@ -160,15 +160,15 @@ window._adsPayload = "WwogIHsKICAgICJpZCI6ICJ4emlsbGEtaG9tZSIsCiAgICAidGV4dCI6IC
    * both the in-game score multiplier and the WALLET ladder. Ordered high → low. */
   const TIERS = [
     {min:10e6, m:2.0, l:"XZILLA",      c:GOLD},
-    {min:6e6,  m:1.9, l:"KRAKEN",      c:GOLD},
-    {min:4e6,  m:1.8, l:"WHALE",       c:MAG},
-    {min:2e6,  m:1.7, l:"SHARK",       c:MAG},
-    {min:1e6,  m:1.6, l:"DOLPHIN",     c:CYAN},
-    {min:5e5,  m:1.5, l:"BULL",        c:CYAN},
-    {min:25e4, m:1.4, l:"APE",         c:TEAL},
-    {min:1e5,  m:1.3, l:"FISH",        c:TEAL},
-    {min:5e4,  m:1.2, l:"CRAB",        c:"#9fb6c9"},
-    {min:1e4,  m:1.1, l:"SHRIMP",      c:"#9fb6c9"},
+    {min:9e6,  m:1.9, l:"KRAKEN",      c:GOLD},
+    {min:8e6,  m:1.8, l:"WHALE",       c:MAG},
+    {min:7e6,  m:1.7, l:"SHARK",       c:MAG},
+    {min:6e6,  m:1.6, l:"DOLPHIN",     c:CYAN},
+    {min:5e6,  m:1.5, l:"BULL",        c:CYAN},
+    {min:4e6,  m:1.4, l:"APE",         c:TEAL},
+    {min:3e6,  m:1.3, l:"FISH",        c:TEAL},
+    {min:2e6,  m:1.2, l:"CRAB",        c:"#9fb6c9"},
+    {min:1e6,  m:1.1, l:"SHRIMP",      c:"#9fb6c9"},
     {min:0,    m:1.0, l:"PAPER HANDS", c:"#9fb6c9"}
   ];
   function tierFor(h){ for(const t of TIERS){ if(h>=t.min) return t; } return TIERS[TIERS.length-1]; }
@@ -738,7 +738,7 @@ window._adsPayload = "WwogIHsKICAgICJpZCI6ICJ4emlsbGEtaG9tZSIsCiAgICAidGV4dCI6IC
 
   function renderWallet(){
     const t=tierFor(econ.holdings);
-    const tierLabel = mn => mn>=1e6 ? (mn/1e6)+"M+" : mn>=1e3 ? (mn/1e3)+"K+" : "&lt; 10K";
+    const tierLabel = mn => mn>=1e6 ? (mn/1e6)+"M+" : mn>=1e3 ? (mn/1e3)+"K+" : "&lt; 1M";
     const addr = (window.XZWallet && window.XZWallet.address) || null;
     const shortAddr = addr ? (addr.slice(0,4)+"…"+addr.slice(-4)) : "";
     $("walletInner").innerHTML =
