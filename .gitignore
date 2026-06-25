@@ -1,3 +1,6 @@
 # Local-only ad configuration — never commit; its contents are Base64-encoded
 # into window._adsPayload inside game.js at build/edit time.
 ads-config.json
+
+# Local safety backups of game.js / index.html (history lives in git).
+backup/

@@ -828,6 +828,7 @@ window._adsPayload = "WwogIHsKICAgICJpZCI6ICJ4emlsbGEtaG9tZSIsCiAgICAidGV4dCI6IC
     TYPE.PWR_SLOW = 8;   // slow-mo
     TYPE.PWR_X2   = 9;   // double score window
     TYPE.PWR_MAG  = 10;  // scammer magnet
+    TYPE.HEART    = 11;  // heart-shaped extra-life token (TEST)
 
     /* ----- upgrade tree (persisted, spent in XP) ----------------------------- */
     const UPGRADES = [
@@ -902,6 +903,19 @@ window._adsPayload = "WwogIHsKICAgICJpZCI6ICJ4emlsbGEtaG9tZSIsCiAgICAidGV4dCI6IC
     const matSlow  = spriteMat((x,S)=>chip(x,S,"#7df9ff","⏳"));
     const matX2    = spriteMat((x,S)=>chip(x,S,GOLD,"✕2"));
     const matMag   = spriteMat((x,S)=>chip(x,S,MAG,"🧲"));
+    // TEST: heart-shaped extra-life token (drawn, not a glyph chip)
+    const matHeart = spriteMat((x,S)=>{
+      const cx=S/2, cy=S*0.52, s=S*0.30;
+      x.save(); x.shadowColor=RED; x.shadowBlur=S*0.13; x.fillStyle="#ff4d6d";
+      x.beginPath();
+      x.moveTo(cx, cy + s*0.85);
+      x.bezierCurveTo(cx - s*1.5, cy - s*0.40, cx - s*0.6, cy - s*1.35, cx, cy - s*0.42);
+      x.bezierCurveTo(cx + s*0.6, cy - s*1.35, cx + s*1.5, cy - s*0.40, cx, cy + s*0.85);
+      x.closePath(); x.fill();
+      x.lineWidth=S*0.018; x.strokeStyle="#ffd1dc"; x.stroke(); x.restore();
+      x.fillStyle="rgba(255,255,255,.5)";
+      x.beginPath(); x.ellipse(cx - s*0.5, cy - s*0.32, s*0.26, s*0.40, -0.5, 0, 7); x.fill();
+    });
     // RUG BOSS — angrier whale variant in rug-red
     const matRug   = spriteMat((x,S)=>{ drawWhale(x,S);
       x.fillStyle="rgba(255,59,92,.28)"; x.fillRect(0,0,S,S);
@@ -996,10 +1010,13 @@ window._adsPayload = "WwogIHsKICAgICJpZCI6ICJ4emlsbGEtaG9tZSIsCiAgICAidGV4dCI6IC
       }
       const e=getEntity(), wp=waveProfile(), r=Math.random();
       let cum=0;
-      const place=(scale)=>{ e.hp=1;
+      const place=(scale)=>{ e.hp=1; e.bhits=0;   // bhits: tracer rounds taken (3 => effect)
         e.sprite.position.set((Math.random()*2-1)*playHalfWidth,0.9,SPAWN_Z);
         e.prevZ=SPAWN_Z; e.sprite.scale.set(scale,scale,1); active.push(e); };
 
+      // TEST: heart-shaped extra-life token — 2% of spawns
+      cum += 0.02;
+      if(r<cum){ e.type=TYPE.HEART; e.sprite.material=matHeart; place(2.3); return; }
       // power-up bucket
       cum += wp.powerChance;
       if(r<cum){
@@ -1027,7 +1044,9 @@ window._adsPayload = "WwogIHsKICAgICJpZCI6ICJ4emlsbGEtaG9tZSIsCiAgICAidGV4dCI6IC
 
     function spawnRug(){
       const e=getEntity();
-      px.rugMax = 3 + Math.floor(state.wave/4);   // grows over the run
+      // TEST: HP is scaled up so the auto-cannon visibly grinds the boss down
+      // (each tracer chips 1 HP at ~20 rounds/sec) instead of popping it instantly.
+      px.rugMax = (3 + Math.floor(state.wave/4)) * 8;   // grows over the run
       px.rugHp  = px.rugMax;
       e.type=TYPE.RUGBOSS; e.hp=px.rugHp; e.sprite.material=matRug;
       e.sprite.scale.set(6.8,6.8,1);
@@ -1100,33 +1119,173 @@ window._adsPayload = "WwogIHsKICAgICJpZCI6ICJ4emlsbGEtaG9tZSIsCiAgICAidGV4dCI6IC
       try{ window.__buzz && window.__buzz(16,"light"); }catch(_){}
     };
 
+    /* ===================================================================== *
+     *  AUTO-CANNON (TEST)                                                     *
+     *  While a RUG BOSS is on the field, a machine gun on the bike fires      *
+     *  non-stop until the boss is dead. Tracer rounds shred scammers + traps  *
+     *  and chip the boss's health, but PASS THROUGH hodlers and power-ups so  *
+     *  you can still collect the good stuff. Ramming the boss costs a life    *
+     *  (see resolve above) — the gun is the only way to take it down.         *
+     * ===================================================================== */
+    const CANNON = { pool:[], live:[], cd:0, rate:0.05, speed:48, mat:null };
+    // While ANY rug boss is on the field the whole game slows to this fraction of the
+    // live speed (a consistent "wave-4 first-boss" feel); normal speed resumes once it dies.
+    const BOSS_SLOW = 0.5;
+
+    /* Machine-gun audio — ONE-SHOT per bullet using sounds/shot.m4a. A small pool of
+     * <audio> elements is cycled round-robin so rapid fire can overlap. Plain <audio>
+     * (no fetch/decodeAudioData) so it works over http AND file://. Honors the mute
+     * toggle via state.soundOn. */
+    const GUN_VOL = 0.5;
+    const SHOT_SRC = 'sounds/shot.m4a';
+    const SHOT_POOL = []; let shotIdx = 0;
+    function shotInit(){
+      if(SHOT_POOL.length) return;
+      for(let i=0;i<8;i++){ try{ const a=new Audio(SHOT_SRC); a.preload='auto'; a.volume=0; SHOT_POOL.push(a); }catch(_){} }
+    }
+    function playShot(){
+      if(state.soundOn===false) return;
+      if(!SHOT_POOL.length){ shotInit(); if(!SHOT_POOL.length) return; }
+      const a=SHOT_POOL[(shotIdx++)%SHOT_POOL.length];
+      try{ a.currentTime=0; a.volume=GUN_VOL; a.play().catch(()=>{}); }catch(_){}
+    }
+    function gunOff(){ for(const a of SHOT_POOL){ try{ a.pause(); a.currentTime=0; }catch(_){} } }
+    shotInit();   // preload the pool so the first shots fire without delay
+
+    function cannonMat(){
+      if(CANNON.mat) return CANNON.mat;
+      const c=document.createElement("canvas"); c.width=c.height=32;
+      const g=c.getContext("2d");
+      const grd=g.createRadialGradient(16,16,0,16,16,16);
+      grd.addColorStop(0,"#fffbe0"); grd.addColorStop(0.35,GOLD); grd.addColorStop(1,"rgba(255,210,63,0)");
+      g.fillStyle=grd; g.beginPath(); g.arc(16,16,16,0,Math.PI*2); g.fill();
+      const t=new THREE.CanvasTexture(c); t.encoding=THREE.sRGBEncoding;
+      CANNON.mat=new THREE.SpriteMaterial({ map:t, transparent:true, depthWrite:false, blending:THREE.AdditiveBlending });
+      return CANNON.mat;
+    }
+    function getBullet(){
+      let b=CANNON.pool.pop();
+      if(!b){ b=new THREE.Sprite(cannonMat()); b.scale.set(0.85,0.85,1); scene.add(b); }
+      b.visible=true; CANNON.live.push(b); return b;
+    }
+    function freeBullet(b){ const i=CANNON.live.indexOf(b); if(i<0) return; b.visible=false; CANNON.live.splice(i,1); CANNON.pool.push(b); }
+    function clearBullets(){ for(let i=CANNON.live.length-1;i>=0;i--) freeBullet(CANNON.live[i]); CANNON.cd=0; }
+    function bossOnField(){ for(const a of active){ if(a && !a.dead && a.type===TYPE.RUGBOSS) return a; } return null; }
+
+    function fireBullet(boss){
+      const b=getBullet();
+      b.position.set(player.position.x, player.position.y+0.25, PLAYER_Z-0.6);
+      // gentle lock-on so the stream reliably connects with the weaving boss
+      b._vx=(boss.sprite.position.x-player.position.x)*0.85;
+      b._vz=-CANNON.speed;
+      burst(b.position.x,b.position.y,b.position.z,GOLD,2);   // muzzle spark
+      playShot();                                             // one-shot per bullet
+    }
+
+    // Gun the boss down. Each tracer chips 1 HP; this defeats it at 0 (mirrors the
+    // old ram-kill rewards). Returns true when the boss is destroyed this hit.
+    function damageBoss(e){
+      const p=e.sprite.position.clone();
+      const dropMult=(window.__dropMult||1)*tierDropMult();
+      px.rugHp--; updateRugBar();
+      burst(p.x,p.y,p.z,RED,8);
+      if(px.rugHp>0) return false;
+      // defeated
+      burst(p.x,p.y,p.z,MAG,46); burst(p.x,p.y,p.z,RED,40); burst(p.x,p.y,p.z,GOLD,24);
+      shake(1.8); flashColor("rgba(255,59,92,.5)",0.85);
+      const gain=Math.round(900*tierScoreMult()); state.score+=gain; renderScore();
+      const tok=Math.round(800*dropMult); econ.tokens+=tok; run.earned+=tok; run.boss++;
+      run.score=Math.max(run.score,state.score);
+      popup(p,"+"+gain,GOLD); bigBanner("RUG SHREDDED");
+      try{sfx.power();}catch(_){}
+      hideRugBar(); clearBullets(); gunOff();
+      for(let i=active.length-1;i>=0;i--){ const a=active[i];
+        if(a!==e && a.type===TYPE.SCAMMER && !a.dead){ a.dead=true;
+          const ap=a.sprite.position.clone(); burst(ap.x,ap.y,ap.z,MAG,5); freeEntity(a); } }
+      try{ window.__buzz ? window.__buzz([60,40,120],"success") : (tg&&tg.HapticFeedback&&tg.HapticFeedback.notificationOccurred("success")); }catch(_){}
+      e.dead=true; freeEntity(e); updateHUDtokens();
+      return true;
+    }
+
+    // Tracers pass through the good drops (power-ups + extra-life hearts) so you never
+    // shoot away a reward. HODLER / HONEYPOT / DECOY are NOT here on purpose — shooting
+    // those triggers their hazard effect after 3 rounds (see the collision branch below).
+    const BULLET_PASS = {};
+    [TYPE.SHIELD,TYPE.BOMB,TYPE.PWR_SLOW,TYPE.PWR_X2,TYPE.PWR_MAG,TYPE.HEART].forEach(t=>BULLET_PASS[t]=1);
+
+    window.updateCannon = function(dt){
+      // Freeze + flush + silence the gun whenever the run isn't live (pause / menu / over).
+      if(!state.running){ if(CANNON.live.length) clearBullets(); gunOff(); return; }
+      const boss=bossOnField();
+      if(boss){
+        CANNON.cd-=dt;
+        while(CANNON.cd<=0){ fireBullet(boss); CANNON.cd+=CANNON.rate; }   // playShot() per bullet
+      } else { if(CANNON.live.length) clearBullets(); gunOff(); }
+
+      for(let i=CANNON.live.length-1;i>=0;i--){ const b=CANNON.live[i];
+        b.position.x+=b._vx*dt; b.position.z+=b._vz*dt;
+        if(b.position.z<SPAWN_Z-8){ freeBullet(b); continue; }
+        let hit=false, bossKilled=false;
+        for(let j=active.length-1;j>=0;j--){ const a=active[j]; if(!a||a.dead) continue;
+          if(BULLET_PASS[a.type]) continue;
+          const ax=a.sprite.position.x, az=a.sprite.position.z;
+          const rad=(a.type===TYPE.RUGBOSS)?2.6:1.25;
+          if(Math.abs(b.position.x-ax)<rad && Math.abs(b.position.z-az)<rad){
+            if(a.type===TYPE.RUGBOSS){ bossKilled=damageBoss(a); hit=true; break; }
+            // Every OTHER target takes 3 tracer rounds; the 3rd triggers the SAME effect
+            // you'd get by colliding with it (friendly fire on hodler/honeypot included).
+            const ap=a.sprite.position.clone();
+            if((a.bhits=(a.bhits||0)+1) < 3){
+              burst(ap.x,ap.y,ap.z, (a.type===TYPE.HOLDER||a.type===TYPE.HONEYPOT)?RED:MAG, 3);
+              hit=true; break;
+            }
+            a.dead=true;
+            if(a.type===TYPE.SCAMMER){            // shredded -> combo + score, like catching it
+              state.combo++; state.kills++; run.kills++; if(state.combo>run.combo) run.combo=state.combo;
+              burst(ap.x,ap.y,ap.z,MAG,12); window.addScore(CFG.scammerPoints,ap); renderCombo();
+              try{sfx.catch(state.combo);}catch(_){}
+            } else if(a.type===TYPE.HOLDER){       // friendly fire -> hodler dies AND you lose a life
+              burst(ap.x,ap.y,ap.z,RED,14); popup(ap,"SHOT A HODLER!",RED); loseLife(ap);
+            } else if(a.type===TYPE.HONEYPOT){     // shot the trap -> it stings, lose a life
+              burst(ap.x,ap.y,ap.z,RED,14); popup(ap,"SHOT A HONEYPOT!",RED); loseLife(ap);
+            } else if(a.type===TYPE.DECOY){        // shot the fake airdrop -> combo wiped
+              state.combo=0; renderCombo(); burst(ap.x,ap.y,ap.z,CYAN,14); popup(ap,"COMBO LOST",CYAN);
+            }
+            freeEntity(a); try{sfx.catch(1);}catch(_){}
+            hit=true; break;
+          }
+        }
+        if(bossKilled) break;   // clearBullets() already flushed the pool
+        if(hit){ burst(b.position.x,b.position.y,b.position.z,GOLD,4); freeBullet(b); }
+      }
+    };
+
     window.resolve = function(e){
       const p=e.sprite.position.clone();
       const dropMult = (window.__dropMult||1) * tierDropMult();
 
       if(e.type===TYPE.RUGBOSS){
-        px.rugHp--; updateRugBar();
-        burst(p.x,p.y,p.z,RED,18); shake(0.7); flashColor("rgba(255,59,92,.3)",0.4);
-        try{sfx.catch(5);}catch(_){}
-        if(px.rugHp>0){
-          // survives the hit: bump it back to spawn depth so you chase it again
-          e.sprite.position.z = SPAWN_Z-4; e.prevZ=e.sprite.position.z;
-          popup(p,"-1 HP",RED); return;
+        // TEST MECHANIC: you can NO LONGER kill the boss by ramming it. Body contact
+        // costs a life (or eats a shield); the boss bounces back to spawn depth so the
+        // auto-cannon (see AUTO-CANNON below) can keep shredding it. The ONLY way to
+        // defeat the rug boss now is to gun it down via damageBoss().
+        if(shieldActive){
+          shieldActive=false; burst(p.x,p.y,p.z,TEAL,14); popup(p,"SHIELD ATE THE RAM",TEAL);
+          try{sfx.power();}catch(_){}
+        } else {
+          popup(p,"DON'T RAM THE RUG!",RED); loseLife(p);
         }
-        // defeated
-        burst(p.x,p.y,p.z,MAG,46); burst(p.x,p.y,p.z,RED,40); burst(p.x,p.y,p.z,GOLD,24);
-        shake(1.8); flashColor("rgba(255,59,92,.5)",0.85);
-        const gain=Math.round(900*tierScoreMult()); state.score+=gain; renderScore();
-        const tok=Math.round(800*dropMult); econ.tokens+=tok; run.earned+=tok; run.boss++;
-        run.score=Math.max(run.score,state.score);
-        popup(p,"+"+gain,GOLD); bigBanner("RUGGED THE RUGGER");
+        // shove it back undefeated — DO NOT damage, DO NOT free
+        e.sprite.position.z = SPAWN_Z-4; e.prevZ=e.sprite.position.z; e._nm=false;
+        return;
+      }
+
+      if(e.type===TYPE.HEART){               // TEST: extra-life pickup
+        state.lives++; renderLives();
+        burst(p.x,p.y,p.z,RED,18); popup(p,"+1 LIFE",RED); showBanner("EXTRA LIFE");
         try{sfx.power();}catch(_){}
-        hideRugBar();
-        for(let i=active.length-1;i>=0;i--){ const a=active[i];
-          if(a!==e && a.type===TYPE.SCAMMER && !a.dead){ a.dead=true;
-            const ap=a.sprite.position.clone(); burst(ap.x,ap.y,ap.z,MAG,5); freeEntity(a); } }
-        try{ window.__buzz ? window.__buzz([60,40,120],"success") : (tg&&tg.HapticFeedback&&tg.HapticFeedback.notificationOccurred("success")); }catch(_){}
-        e.dead=true; freeEntity(e); updateHUDtokens(); return;
+        try{ window.__buzz && window.__buzz([30,20,40],"success"); }catch(_){}
+        e.dead=true; freeEntity(e); return;
       }
 
       if(e.type===TYPE.HONEYPOT){            // looked grabbable, stings
@@ -1178,6 +1337,16 @@ window._adsPayload = "WwogIHsKICAgICJpZCI6ICJ4emlsbGEtaG9tZSIsCiAgICAidGV4dCI6IC
       const t=nowS();
       // slow-mo scales the live speed the base loop just set this frame
       if(powActive(px.slowUntil)) state.speed *= 0.5;
+      // TEST: while a rug boss is on the field, slow the whole game down. We scale CFG
+      // (NOT state.speed) because index.html recomputes state.speed from CFG and moves
+      // every enemy BEFORE this hook runs — so only a CFG change reaches the movement
+      // math (next frame). Restored the instant the boss dies.
+      if(state.running && bossOnField()){
+        if(CFG._baseSave===undefined){ CFG._baseSave=CFG.baseSpeed; CFG._rampSave=CFG.speedRampPerSec; }
+        CFG.baseSpeed=CFG._baseSave*BOSS_SLOW; CFG.speedRampPerSec=CFG._rampSave*BOSS_SLOW;
+      } else if(CFG._baseSave!==undefined){
+        CFG.baseSpeed=CFG._baseSave; CFG.speedRampPerSec=CFG._rampSave; CFG._baseSave=undefined;
+      }
       // magnet: ease scammers toward the player's lane
       if(powActive(px.magUntil)){
         for(const a of active){ if(a.type===TYPE.SCAMMER && !a.dead){
@@ -1190,6 +1359,8 @@ window._adsPayload = "WwogIHsKICAgICJpZCI6ICJ4emlsbGEtaG9tZSIsCiAgICAidGV4dCI6IC
       // not linger — hide it whenever there is no boss on the field.
       { const bar=$("rugBar");
         if(bar && bar.style.display!=="none" && !active.some(a=>a.type===TYPE.RUGBOSS||a.type===TYPE.BOSS)) hideRugBar(); }
+      // TEST: auto-cannon — fire + advance + collide tracer rounds while a boss lives
+      if(window.updateCannon) window.updateCannon(dt);
       // active-buff HUD ticker
       renderBuffs(t);
     };
