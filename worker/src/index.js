@@ -233,6 +233,59 @@ export default {
       }
     }
 
+    // ===================== Phantom deeplink relay (Telegram Mini App) ===========
+    // Inside Telegram there's no injected wallet and WalletConnect can't do
+    // Solana+Phantom, so the client uses Phantom's connect deeplink. Phantom can't
+    // redirect back INTO a Telegram Mini App, so it redirects here instead: we stash
+    // the (already end-to-end-encrypted) connect response under a client-chosen
+    // session id, and the still-open Telegram client polls /phantom-result for it.
+    // The payload is encrypted to the client's ephemeral key — useless to anyone
+    // else even if a sid leaked — so this relay is a dumb, short-lived mailbox.
+    const PCB_PREFIX = "pcb:";
+    const PCB_TTL    = 300;                       // seconds a pending result survives
+    const SID_RE     = /^[a-f0-9]{16,64}$/;       // client-generated hex session id
+    const PV_RE      = /^[1-9A-HJ-NP-Za-km-z]{1,200}$/;   // base58 phantom param shape
+
+    // Phantom redirects here after the user approves/rejects in the wallet app.
+    if(req.method === "GET" && url.pathname === "/phantom-cb"){
+      const sid = (url.searchParams.get("sid") || "").trim();
+      const html = (msg) => new Response(
+        "<!doctype html><meta name=viewport content='width=device-width,initial-scale=1'>"+
+        "<body style='background:#0b0f1a;color:#e8f6ff;font-family:system-ui,sans-serif;"+
+        "display:flex;align-items:center;justify-content:center;min-height:100vh;margin:0;text-align:center'>"+
+        "<div style='padding:24px'><div style='font-size:42px'>🦖</div>"+
+        "<h2 style='color:#21e6ff;margin:.4em 0'>"+msg+"</h2>"+
+        "<p style='opacity:.8'>You can close this and return to the XZILLA game in Telegram.</p></div>",
+        { status: 200, headers: { "content-type": "text/html; charset=utf-8", "Cache-Control": "no-store" } });
+      if(!SID_RE.test(sid)) return html("Invalid session");
+
+      const rec = {};
+      const ec = url.searchParams.get("errorCode");
+      if(ec){
+        rec.errorCode = String(ec).slice(0, 32);
+        rec.errorMessage = (url.searchParams.get("errorMessage") || "").slice(0, 200);
+      } else {
+        const pk = (url.searchParams.get("phantom_encryption_public_key") || "").trim();
+        const nonce = (url.searchParams.get("nonce") || "").trim();
+        const data = (url.searchParams.get("data") || "").trim();
+        if(!PV_RE.test(pk) || !PV_RE.test(nonce) || !PV_RE.test(data)) return html("Bad wallet response");
+        rec.phantom_encryption_public_key = pk; rec.nonce = nonce; rec.data = data;
+      }
+      await env.LB.put(PCB_PREFIX + sid, JSON.stringify(rec), { expirationTtl: PCB_TTL });
+      return html(rec.errorCode ? "Connection cancelled" : "Wallet linked ✓");
+    }
+
+    // The Telegram client polls this until the result lands, then decrypts locally.
+    if(req.method === "GET" && url.pathname === "/phantom-result"){
+      const sid = (url.searchParams.get("sid") || "").trim();
+      if(!SID_RE.test(sid)) return json({ error: "bad_sid" }, 400, origin);
+      const v = await env.LB.get(PCB_PREFIX + sid);
+      if(!v) return json({ ready: false }, 200, origin);
+      await env.LB.delete(PCB_PREFIX + sid);       // one-time read
+      let rec; try{ rec = JSON.parse(v); }catch(_){ rec = {}; }
+      return json({ ready: true, ...rec }, 200, origin);
+    }
+
     return json({ error: "not found" }, 404, origin);
   },
 };

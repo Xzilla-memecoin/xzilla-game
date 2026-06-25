@@ -125,6 +125,8 @@
        is read server-side via the Worker /balance endpoint (hidden Helius key) — never
        the flaky public RPC. Falls back to injected window.solana if the bundle is missing. -->
   <script src="vendor/appkit.bundle.js?v=1"></script>
+  <!-- NaCl box crypto — decrypts Phantom's deeplink connect response inside Telegram. -->
+  <script src="vendor/tweetnacl.min.js"></script>
   <script>
   (function(){
     const PROJECT_ID = "3fe5015730bb980ae61f4feeccd644fc";   // Reown dashboard project id
@@ -237,6 +239,87 @@
       }catch(_){ return false; }   // user rejected or no key
     }
 
+    // --- Phantom deeplink connect (Telegram Mini App) -------------------------
+    // No injected wallet exists in Telegram's webview and WalletConnect can't pair
+    // Phantom for Solana, so we use Phantom's connect deeplink. Phantom can't redirect
+    // back into a Mini App, so it redirects to the Worker relay (/phantom-cb); we poll
+    // /phantom-result, then decrypt the response locally with our ephemeral NaCl key.
+    const B58 = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
+    function b58encode(bytes){
+      let digits=[0];
+      for(let i=0;i<bytes.length;i++){ let carry=bytes[i];
+        for(let j=0;j<digits.length;j++){ carry+=digits[j]<<8; digits[j]=carry%58; carry=(carry/58)|0; }
+        while(carry){ digits.push(carry%58); carry=(carry/58)|0; } }
+      let str=""; for(let k=0;k<bytes.length && bytes[k]===0;k++) str+="1";
+      for(let q=digits.length-1;q>=0;q--) str+=B58[digits[q]];
+      return str;
+    }
+    function b58decode(str){
+      const bytes=[0];
+      for(let i=0;i<str.length;i++){ const val=B58.indexOf(str[i]); if(val<0) throw new Error("bad b58");
+        let carry=val;
+        for(let j=0;j<bytes.length;j++){ carry+=bytes[j]*58; bytes[j]=carry&0xff; carry>>=8; }
+        while(carry){ bytes.push(carry&0xff); carry>>=8; } }
+      for(let k=0;k<str.length && str[k]==="1";k++) bytes.push(0);
+      return new Uint8Array(bytes.reverse());
+    }
+    function inTelegram(){
+      const tg = window.Telegram && window.Telegram.WebApp;
+      return !!(tg && tg.platform && tg.platform !== "unknown");
+    }
+    function randomSid(){
+      const a=new Uint8Array(16); crypto.getRandomValues(a);
+      return [...a].map(b=>b.toString(16).padStart(2,"0")).join("");
+    }
+    function pollResult(api, sid, timeoutMs){
+      return new Promise(resolve=>{
+        const t0=Date.now();
+        const tick=async()=>{
+          if(Date.now()-t0>timeoutMs) return resolve(null);
+          try{
+            const r=await fetch(api+"/phantom-result?sid="+sid,{cache:"no-store"});
+            const d=await r.json();
+            if(d && d.ready) return resolve(d);
+          }catch(_){ }
+          setTimeout(tick, 1500);
+        };
+        tick();
+      });
+    }
+    async function phantomDeeplinkConnect(){
+      const tg = window.Telegram && window.Telegram.WebApp;
+      const api = (window.__LB_API||"").replace(/\/+$/,"");
+      if(!tg || !api || !window.nacl){
+        if(window.__toast) window.__toast("Telegram wallet connect unavailable — open the game in your browser to connect","#ff3b5c");
+        return false;
+      }
+      const kp  = window.nacl.box.keyPair();         // ephemeral, this attempt only
+      const sid = randomSid();
+      const redirect = api + "/phantom-cb?sid=" + sid;
+      const link = "https://phantom.app/ul/v1/connect"
+        + "?dapp_encryption_public_key=" + encodeURIComponent(b58encode(kp.publicKey))
+        + "&cluster=mainnet-beta"
+        + "&app_url=" + encodeURIComponent(location.origin)
+        + "&redirect_link=" + encodeURIComponent(redirect);
+      if(window.__toast) window.__toast("Opening Phantom — approve, then switch back to Telegram","#21e6ff");
+      try{ tg.openLink(link); }catch(_){ try{ window.open(link); }catch(__){} }
+      const res = await pollResult(api, sid, 180000);
+      if(!res){ if(window.__toast) window.__toast("Wallet connect timed out — tap connect to retry","#ff3b5c"); return false; }
+      if(res.errorCode){ if(window.__toast) window.__toast("Phantom: "+(res.errorMessage||"connection cancelled").slice(0,80),"#ff3b5c"); return false; }
+      try{
+        const shared = window.nacl.box.before(b58decode(res.phantom_encryption_public_key), kp.secretKey);
+        const opened = window.nacl.box.open.after(b58decode(res.data), b58decode(res.nonce), shared);
+        if(!opened) throw new Error("decrypt failed");
+        const payload = JSON.parse(new TextDecoder().decode(opened));
+        if(!payload.public_key) throw new Error("no pubkey");
+        await setAddress(payload.public_key);
+        return true;
+      }catch(e){
+        if(window.__toast) window.__toast("Couldn't read Phantom response — try again","#ff3b5c");
+        return false;
+      }
+    }
+
     window.XZWallet = {
       get address(){ return W.address; },
       get balance(){ return W.balance; },
@@ -248,7 +331,10 @@
         // instant and reliable, and sidesteps AppKit's flaky wallet-standard detection.
         // Poll up to ~1.2s so a slow-registering extension isn't missed.
         if(await waitForInjected(1200)) return injectedConnect();
-        // No extension (mobile browser / Telegram webview) → open the AppKit / WalletConnect
+        // Telegram Mini App → Phantom connect deeplink (WalletConnect can't pair
+        // Phantom for Solana inside Telegram's webview).
+        if(inTelegram()) return phantomDeeplinkConnect();
+        // Plain mobile browser / desktop without extension → AppKit / WalletConnect
         // modal. On desktop without the extension, scan the modal's QR with Phantom mobile.
         if(W.ready && W.appkit){
           try{
