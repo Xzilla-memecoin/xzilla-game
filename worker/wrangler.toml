@@ -12,3 +12,14 @@ kv_namespaces = [
 # BOT_TOKEN is a SECRET — do NOT put it in this file. Set it with:
 #   npx wrangler secret put BOT_TOKEN
 # (paste your @BotFather token when prompted)
+#
+# HELIUS_KEY is a SECRET — powers the /balance $XZILLA holder check. Set it with:
+#   npx wrangler secret put HELIUS_KEY
+# (paste the API key from your free https://helius.dev project)
+# Optional: override the token mint without a code change:
+#   [vars]
+#   XZILLA_MINT = "2VzDVUgzTHSf9qCPdkYBeMd2sK7m8t9GR2MN5kxRpump"
+#
+# ADS_ADMIN_TOKEN is a SECRET — gates POST /ads (instant in-game billboard updates).
+# Rotate it any time with:
+#   npx wrangler secret put ADS_ADMIN_TOKEN

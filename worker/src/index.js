@@ -21,6 +21,14 @@ const MAX_KEEP  = 200;
 const MAX_SCORE = 50000;   // sanity ceiling — a higher score on launch day means an exploit script → reject
 const RATE_MS   = 30000;   // minimum ms between accepted submits per user → blocks rapid API spam
 
+// $XZILLA SPL mint — the token whose balance sets a player's holder tier/multiplier.
+// Overridable via env.XZILLA_MINT if the mint ever changes.
+const XZILLA_MINT = "2VzDVUgzTHSf9qCPdkYBeMd2sK7m8t9GR2MN5kxRpump";
+const B58_RE = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/;   // base58 Solana address shape
+
+const ADS_KEY = "ads:v1";     // KV key holding the live billboard ad config
+const ADS_MAX_BYTES = 8000;   // reject oversized ad payloads
+
 function cors(origin){
   return {
     "Access-Control-Allow-Origin": origin || "*",
@@ -102,6 +110,77 @@ export default {
       if(changed) await env.LB.put(TOP_KEY, JSON.stringify(trimmed));   // only write the board when it actually changes
       const rank = trimmed.findIndex(e => e.id === id) + 1;
       return json({ ok: true, rank, top: trimmed.slice(0, 10).map(e => ({ name: e.name, score: e.score })) }, 200, origin);
+    }
+
+    // -------- GET /ads  (public, no-store) ---------------------------------------
+    // Live ad config for the in-game billboards. Served from KV with no caching so an
+    // update via POST /ads is visible to players within seconds (vs. ~5 min on the
+    // GitHub-raw CDN). Shape: { messages: [ "TEXT" | {text,color,imageUrl,clickLink} ] }.
+    if(req.method === "GET" && url.pathname === "/ads"){
+      const v = await env.LB.get(ADS_KEY);
+      return new Response(v || '{"messages":[]}', {
+        status: 200,
+        headers: { "content-type": "application/json", "Cache-Control": "no-store", ...cors(origin) },
+      });
+    }
+
+    // -------- POST /ads  (admin: header x-admin-token === env.ADS_ADMIN_TOKEN) ----
+    // Replace the live ad config. Body is the ads JSON (an array, or {messages:[...]}).
+    if(req.method === "POST" && url.pathname === "/ads"){
+      if(!env.ADS_ADMIN_TOKEN || req.headers.get("x-admin-token") !== env.ADS_ADMIN_TOKEN)
+        return json({ error: "unauthorized" }, 401, origin);
+      const text = await req.text();
+      if(text.length > ADS_MAX_BYTES) return json({ error: "too_large" }, 413, origin);
+      let parsed;
+      try{ parsed = JSON.parse(text); }catch(_){ return json({ error: "bad_json" }, 400, origin); }
+      const arr = Array.isArray(parsed) ? parsed
+                : (parsed && Array.isArray(parsed.messages) ? parsed.messages : null);
+      if(!arr) return json({ error: "expected an array or {messages:[...]}" }, 400, origin);
+      await env.LB.put(ADS_KEY, JSON.stringify({ messages: arr }));
+      return json({ ok: true, count: arr.length }, 200, origin);
+    }
+
+    // -------- GET /balance?address=<pubkey> --------------------------------------
+    // Server-side $XZILLA balance read via Helius (API key hidden in env.HELIUS_KEY).
+    // Keeps the RPC key off the client and sidesteps the public-RPC rate-limits/CORS
+    // that made the in-browser balance check fail. Returns { ok, balance, holder }.
+    if(req.method === "GET" && url.pathname === "/balance"){
+      const address = (url.searchParams.get("address") || "").trim();
+      if(!B58_RE.test(address)) return json({ error: "bad_address" }, 400, origin);
+      if(!env.HELIUS_KEY) return json({ error: "rpc_unconfigured" }, 500, origin);
+      const mint = env.XZILLA_MINT || XZILLA_MINT;
+
+      // short-lived edge cache so repeated taps don't hammer the Helius quota (per address)
+      const cacheKey = new Request(new URL("/balance?address=" + address, req.url).toString());
+      const cached = await caches.default.match(cacheKey);
+      if(cached) return cached;
+
+      try{
+        const rpcRes = await fetch("https://mainnet.helius-rpc.com/?api-key=" + env.HELIUS_KEY, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            jsonrpc: "2.0", id: 1, method: "getTokenAccountsByOwner",
+            params: [ address, { mint }, { encoding: "jsonParsed" } ],
+          }),
+        });
+        const data = await rpcRes.json();
+        if(data.error) return json({ error: "rpc_error", detail: data.error.message || "" }, 502, origin);
+        let balance = 0;
+        for(const acc of (data.result && data.result.value) || []){
+          const info = acc && acc.account && acc.account.data && acc.account.data.parsed && acc.account.data.parsed.info;
+          const amt = info && info.tokenAmount && info.tokenAmount.uiAmount;
+          if(typeof amt === "number") balance += amt;
+        }
+        const res = new Response(JSON.stringify({ ok: true, address, balance, holder: balance > 0 }), {
+          status: 200,
+          headers: { "content-type": "application/json", "Cache-Control": "public, max-age=30", ...cors(origin) },
+        });
+        await caches.default.put(cacheKey, res.clone());   // cache the success for 30s
+        return res;
+      }catch(_){
+        return json({ error: "rpc_unreachable" }, 502, origin);
+      }
     }
 
     return json({ error: "not found" }, 404, origin);

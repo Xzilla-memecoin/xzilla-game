@@ -116,6 +116,115 @@
   <script>typeof THREE==="undefined"&&document.write('<scr'+'ipt src="https://cdn.jsdelivr.net/npm/three@0.128.0/build/three.min.js"><\/scr'+'ipt>');</script>
   <!-- Solana web3 (IIFE build exposes window.solanaWeb3) -->
   <script src="https://unpkg.com/@solana/web3.js@1.95.3/lib/index.iife.min.js"></script>
+  <!-- ============ Reown AppKit (WalletConnect) — Solana wallet connect ============
+       window.XZWallet is the single source of truth for wallet connection. Works inside
+       Telegram AND in a normal browser via WalletConnect. AppKit is loaded from a
+       self-hosted bundle (vendor/appkit.bundle.js — built from @reown/appkit +
+       @reown/appkit-adapter-solana, see vendor/README.md) rather than a runtime CDN,
+       so deps are shared/resolved and there's no esm.sh fragility. The $XZILLA balance
+       is read server-side via the Worker /balance endpoint (hidden Helius key) — never
+       the flaky public RPC. Falls back to injected window.solana if the bundle is missing. -->
+  <script src="vendor/appkit.bundle.js?v=1"></script>
+  <script>
+  (function(){
+    const PROJECT_ID = "3fe5015730bb980ae61f4feeccd644fc";   // Reown dashboard project id
+    const listeners = [];
+    const W = { address:null, balance:null, ready:false, appkit:null, error:null };
+    let resolveReady; const readyPromise = new Promise(r => { resolveReady = r; });   // settles when init finishes (ok OR fail)
+
+    function notify(){ for(const fn of listeners){ try{ fn(W.address, W.balance); }catch(_){ } } }
+
+    // Verified $XZILLA balance for an address, read through the Cloudflare Worker.
+    async function balanceFor(address){
+      const api = (window.__LB_API||"").replace(/\/+$/,"");
+      if(!api) return null;
+      try{
+        const r = await fetch(api + "/balance?address=" + encodeURIComponent(address), { cache:"no-store" });
+        const d = await r.json();
+        return (d && typeof d.balance === "number") ? d.balance : null;   // null = couldn't read
+      }catch(_){ return null; }
+    }
+
+    async function setAddress(address){
+      const changed = address !== W.address;
+      W.address = address || null;
+      W.balance = W.address ? await balanceFor(W.address) : null;
+      if(changed || W.address) notify();
+    }
+
+    function initAppKit(){
+      try{
+        const AK = window.__AppKit;
+        if(!AK || typeof AK.createAppKit !== "function") throw new Error("AppKit bundle not loaded");
+        const modal = AK.createAppKit({
+          adapters: [ new AK.SolanaAdapter() ],
+          networks: [ AK.solana ],
+          projectId: PROJECT_ID,
+          metadata: {
+            name: "XZILLA: Rug Smasher",
+            description: "Solana lane-dodger — smash scams, hodl $XZILLA",
+            url: location.origin,
+            icons: ["https://raw.githubusercontent.com/Xzilla-memecoin/xzilla-game/main/images/mainImage.webp"]
+          },
+          features: { analytics:false, email:false, socials:[] }
+        });
+        W.appkit = modal; W.ready = true;
+        // fires on connect / disconnect / account switch
+        modal.subscribeProvider(s => { setAddress((s && s.isConnected && s.address) ? s.address : null); });
+        // pick up a session that was already connected on load
+        try{ if(modal.getIsConnected && modal.getIsConnected()) setAddress(modal.getAddress()); }catch(_){ }
+      }catch(e){
+        W.error = (e && e.message) ? e.message : String(e);
+        console.error("[XZWallet] AppKit init failed:", e);   // open DevTools console for the full stack
+      }finally{
+        resolveReady();
+      }
+    }
+    initAppKit();
+
+    // The injected Solana provider, if a wallet extension (Phantom/Solflare) is present.
+    function getInjected(){
+      if(window.phantom && window.phantom.solana) return window.phantom.solana;   // Phantom's namespaced provider
+      if(window.solflare && window.solflare.isSolflare) return window.solflare;
+      if(window.solana) return window.solana;                                       // generic injected provider
+      return null;
+    }
+    async function injectedConnect(){
+      const p = getInjected(); if(!p) return false;
+      try{
+        const r = await p.connect();
+        const pk = (r && r.publicKey) ? r.publicKey : p.publicKey;
+        if(!pk) return false;
+        await setAddress(pk.toString());
+        return true;
+      }catch(_){ return false; }   // user rejected or no key
+    }
+
+    window.XZWallet = {
+      get address(){ return W.address; },
+      get balance(){ return W.balance; },
+      get error(){ return W.error; },
+      onChange(fn){ if(typeof fn==="function"){ listeners.push(fn); if(W.address){ try{ fn(W.address, W.balance); }catch(_){ } } } },
+      async connect(){
+        await readyPromise;                        // wait out AppKit init (don't fail fast)
+        // Installed extension (Phantom/Solflare on desktop) → connect directly. This is
+        // instant and reliable, and sidesteps AppKit's flaky wallet-standard detection.
+        if(getInjected()) return injectedConnect();
+        // No extension (mobile browser / Telegram) → open the AppKit / WalletConnect modal.
+        if(W.ready && W.appkit){ try{ W.appkit.open(); return true; }catch(e){ W.error = (e&&e.message)||String(e); } }
+        const msg = W.error ? ("Wallet connector error: " + W.error) : "No wallet found — install Phantom or use WalletConnect";
+        if(window.__toast) window.__toast(msg.slice(0,110), "#ff3b5c");
+        return false;
+      },
+      async refresh(){ if(W.address){ W.balance = await balanceFor(W.address); notify(); } },
+      async disconnect(){
+        try{ const p=getInjected(); if(p && typeof p.disconnect==="function") await p.disconnect(); }catch(_){ }
+        try{ if(W.appkit && typeof W.appkit.disconnect==="function") await W.appkit.disconnect(); }catch(_){ }
+        await setAddress(null);   // clears address+balance and notifies listeners → UI + tier reset
+      }
+    };
+  })();
+  </script>
   <!-- Postprocessing (bloom) — matches three r128 -->
   <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/shaders/CopyShader.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/shaders/LuminosityHighPassShader.js"></script>
@@ -892,51 +1001,74 @@ async function checkTokenBalance(connection,ownerPubkeyStr,mint){ try{
   const owner=new solanaWeb3.PublicKey(ownerPubkeyStr), mintKey=new solanaWeb3.PublicKey(mint);
   const res=await connection.getParsedTokenAccountsByOwner(owner,{mint:mintKey}); let total=0;
   res.value.forEach(a=>{ total+=a.account.data.parsed.info.tokenAmount.uiAmount||0; }); return total; }catch(e){ return 0; } }
-async function connectWallet(){ audioInit();
+// Reflects the connected wallet / verified $XZILLA balance onto the start-screen UI.
+// Driven by window.XZWallet.onChange so BOTH connect buttons (here + WALLET panel)
+// converge on one code path. balance===null means "connected but balance unread".
+function applyWalletToStartUI(address, balance){
   const info=document.getElementById("walletInfo"), vipEl=document.getElementById("vipStatus"),
     connectBtn=document.getElementById("connectBtn");
-  // Real wallet required — no mock fallback. The game stays fully playable WITHOUT connecting.
-  if(!window.solana){
-    info.style.color="#ff3b5c"; info.textContent="No Solana wallet found — install Phantom to connect";
-    if(window.__toast) window.__toast("Install Phantom to connect","#ff3b5c");
+  info.classList.remove("blink");
+  if(!address){
+    state.walletConnected=false;
+    connectBtn.classList.remove("hidden");
+    // Wallet unlinked, but a verified tier may still be saved (we keep it on disconnect).
+    const savedMult = (window.__mult ? window.__mult() : 1);
+    if(savedMult > 1){
+      state.vip=true;
+      el.vipBadge.style.display="inline-block";
+      info.style.color="#9fb6c9"; info.textContent="Wallet unlinked · tier saved";
+      vipEl.style.color="#ffd23f"; vipEl.textContent="★ Saved tier active · "+savedMult+"x score — reconnect to re-verify";
+    } else {
+      state.vip=false; window.__holderVerified=false;
+      el.vipBadge.style.display="none";
+      info.style.color="#9fb6c9"; info.textContent="Wallet not connected";
+      vipEl.textContent="";
+    }
     return;
   }
-  info.classList.add("blink"); info.style.color="#21e6ff"; info.textContent="Connecting…";
-  let pubkey=null;
-  try{ const r=await window.solana.connect(); pubkey=r.publicKey.toString(); }
-  catch(e){ info.classList.remove("blink"); info.style.color="#ff3b5c"; info.textContent="Connection cancelled"; return; }
-  info.classList.remove("blink");
-  vipEl.style.color="#9fb6c9"; vipEl.textContent="Verifying $XZILLA balance…";
-  // ----- strict on-chain SPL holder check -----
-  try{
-    const connection = new solanaWeb3.Connection(SOLANA_RPC, "confirmed");
-    const ownerPublicKey = new solanaWeb3.PublicKey(pubkey);
-    const res = await connection.getParsedTokenAccountsByOwner(ownerPublicKey, { mint:new solanaWeb3.PublicKey(XZILLA_MINT) });
-    let uiAmount = 0;
-    (res && res.value ? res.value : []).forEach(a=>{ try{ uiAmount += a.account.data.parsed.info.tokenAmount.uiAmount||0; }catch(_){} });
-    if(uiAmount > 0){
-      // verified holder → unlock the multiplier
-      state.vip = true; state.walletConnected = true; window.__holderVerified = true;
-      el.vipBadge.style.display="inline-block";
-      info.style.color="#ffd23f"; info.textContent="Xzilla Holder: "+shortKey(pubkey)+" 🔥";
-      vipEl.style.color="#ffd23f"; vipEl.textContent="★ HOLDER VERIFIED — "+uiAmount.toLocaleString()+" $XZILLA · "+CFG.vipMultiplier+"x score";
-      connectBtn.classList.add("hidden");
-      if(window.__buzz) window.__buzz([40,30,80],"success");
-    } else {
-      // connected, but holds none → standard mode (still fully playable)
-      state.vip = false; state.walletConnected = false; window.__holderVerified = false;
-      el.vipBadge.style.display="none";
-      info.style.color="#ff3b5c"; info.textContent="Connected but NO tokens found! Buy $XZILLA for multipliers.";
-      vipEl.style.color="#9fb6c9"; vipEl.textContent="Standard mode — no multiplier";
-    }
-  } catch(e){
-    // RPC failure / timeout — never crash the UI; let them retry
-    state.vip = false; state.walletConnected = false;
-    info.style.color="#21e6ff"; info.textContent="✔ "+shortKey(pubkey);
-    if(window.__toast) window.__toast("Error verifying balance, please retry","#ff3b5c");
-    else { vipEl.style.color="#ff3b5c"; vipEl.textContent="Error verifying balance, please retry"; }
+  if(typeof balance!=="number"){
+    info.style.color="#21e6ff"; info.textContent="✔ "+shortKey(address);
+    vipEl.style.color="#ff3b5c"; vipEl.textContent="Couldn't read $XZILLA balance — tap connect to retry";
+    return;
+  }
+  if(balance > 0){
+    state.vip=true; state.walletConnected=true; window.__holderVerified=true;
+    el.vipBadge.style.display="inline-block";
+    // Use the SAME tiered multiplier that game.js actually applies to score (1x/1.2x/1.5x/3x),
+    // not the flat CFG.vipMultiplier — otherwise a whale sees 1.2x but plays at 3x.
+    const tier = (window.__tierFor ? window.__tierFor(balance) : null);
+    const mult = tier ? tier.m : CFG.vipMultiplier;
+    const tname = tier ? tier.l : "HOLDER";
+    info.style.color="#ffd23f"; info.textContent="Xzilla Holder: "+shortKey(address)+" 🔥";
+    vipEl.style.color="#ffd23f"; vipEl.textContent="★ "+tname+" — "+balance.toLocaleString()+" $XZILLA · "+mult+"x score";
+    connectBtn.classList.add("hidden");
+    if(window.__buzz) window.__buzz([40,30,80],"success");
+  } else {
+    state.vip=false; state.walletConnected=false; window.__holderVerified=false;
+    el.vipBadge.style.display="none";
+    info.style.color="#ff3b5c"; info.textContent="Connected — no $XZILLA found. Buy to unlock multipliers.";
+    vipEl.style.color="#9fb6c9"; vipEl.textContent="Standard mode — no multiplier";
   }
 }
+
+async function connectWallet(){ audioInit();
+  const info=document.getElementById("walletInfo");
+  if(!window.XZWallet){ if(window.__toast) window.__toast("Wallet connector loading — try again","#ffd23f"); return; }
+  info.classList.add("blink"); info.style.color="#21e6ff"; info.textContent="Opening wallet…";
+  const ok = await window.XZWallet.connect();   // injected if present, else WalletConnect modal
+  info.classList.remove("blink");
+  if(!ok){
+    info.style.color="#ff3b5c";
+    info.textContent = window.XZWallet.error ? "Connector error — tap to retry" : "No wallet found — tap to retry";
+  }
+  // on success, the UI updates via the XZWallet.onChange listener
+}
+
+// Register the start-screen UI listener once window.XZWallet exists (module script).
+(function wireStartWallet(){
+  if(window.XZWallet){ window.XZWallet.onChange(applyWalletToStartUI); }
+  else setTimeout(wireStartWallet, 120);
+})();
 
 /* ============================================================ WIRING */
 document.getElementById("connectBtn").addEventListener("click",connectWallet);
@@ -953,6 +1085,6 @@ document.querySelectorAll("#startScreen .btn").forEach(b=>{
 document.addEventListener("visibilitychange",()=>{ if(document.hidden&&state.running) pauseGame(); });
 document.getElementById("bestScore").textContent=state.best;
 </script>
-<script src="game.js?v=30"></script>
+<script src="game.js?v=35"></script>
 </body>
 </html>

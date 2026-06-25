@@ -94,6 +94,62 @@ window._adsPayload = "WwogIHsKICAgICJpZCI6ICJ4emlsbGEtaG9tZSIsCiAgICAidGV4dCI6IC
     store.set("xz_tokens",econ.tokens); store.set("xz_holdings",econ.holdings);
     store.set("xz_skins",econ.skins);   store.set("xz_skin",econ.skin);
     store.set("xz_streak",econ.streak); store.set("xz_streakDay",econ.streakDay);
+    cloudBackupEcon();
+  }
+
+  /* ---- cross-device cloud backup (Telegram CloudStorage) ----------------------
+   * localStorage is per-device: clearing the cache or switching phones wipes all
+   * earned XP, skins and upgrades. We mirror the whole economy to Telegram
+   * CloudStorage (synced per Telegram user across devices) and restore the newer
+   * snapshot on boot. Safely no-ops outside Telegram (e.g. local browser testing). */
+  const ECON_CLOUD_KEY = "xz_econ_v1";
+  const hasCloud = () => (typeof tg!=="undefined" && tg && tg.CloudStorage && tg.CloudStorage.setItem);
+  function econSnapshot(ts){
+    return { v:1, ts:ts,
+      tokens:econ.tokens, holdings:econ.holdings, skins:econ.skins, skin:econ.skin,
+      streak:econ.streak, streakDay:econ.streakDay, upg:store.get("xz_upg",{}),
+      missions:store.get("xz_missions",null), daily:store.get("xz_daily",null),
+      weekly:store.get("xz_weekly",null) };
+  }
+  let _cloudSaveT=null;
+  function cloudBackupEcon(){
+    const ts=Date.now(); store.set("xz_econ_ts", ts);   // stamp locally even offline so a later sync wins
+    if(!hasCloud()) return;
+    clearTimeout(_cloudSaveT);   // debounce: bundle bursts of saves into one write
+    _cloudSaveT=setTimeout(()=>{ try{
+      tg.CloudStorage.setItem(ECON_CLOUD_KEY, JSON.stringify(econSnapshot(ts)), function(){});
+    }catch(_){} }, 500);
+  }
+  function restoreEconFromCloud(done){
+    if(!(hasCloud() && tg.CloudStorage.getItem)){ done(); return; }
+    let finished=false; const finish=()=>{ if(!finished){ finished=true; done(); } };
+    setTimeout(finish, 1500);   // never hang the boot if CloudStorage never calls back
+    try{
+      tg.CloudStorage.getItem(ECON_CLOUD_KEY, function(err, value){
+        try{
+          const snap = (!err && value) ? JSON.parse(value) : null;
+          const localTs = parseInt(store.get("xz_econ_ts",0),10)||0;
+          if(snap && typeof snap.ts==="number" && snap.ts>localTs){
+            // cloud is newer than this device → restore it
+            if(typeof snap.tokens==="number")   econ.tokens=snap.tokens;
+            if(typeof snap.holdings==="number") econ.holdings=snap.holdings;
+            if(Array.isArray(snap.skins))       econ.skins=snap.skins;
+            if(typeof snap.skin==="string")     econ.skin=snap.skin;
+            if(typeof snap.streak==="number")   econ.streak=snap.streak;
+            if(snap.streakDay)                  econ.streakDay=snap.streakDay;
+            if(snap.upg) store.set("xz_upg", snap.upg);                 // re-applies on next launch
+            if(Array.isArray(snap.missions)){ store.set("xz_missions", snap.missions); missions=snap.missions; }
+            if(snap.daily){  store.set("xz_daily",  snap.daily);  daily=snap.daily; }
+            if(snap.weekly){ store.set("xz_weekly", snap.weekly); weekly=snap.weekly; }
+            store.set("xz_tokens",econ.tokens); store.set("xz_holdings",econ.holdings);
+            store.set("xz_skins",econ.skins);   store.set("xz_skin",econ.skin);
+            store.set("xz_streak",econ.streak); store.set("xz_streakDay",econ.streakDay);
+            store.set("xz_econ_ts", snap.ts);
+          }
+        }catch(_){}
+        finish();
+      });
+    }catch(_){ finish(); }
   }
   const fmt = n => Math.round(n).toLocaleString("en-US");
   const abbr = n => n>=1e6 ? (n/1e6).toFixed(n%1e6?1:0)+"M" : n>=1e3 ? (n/1e3).toFixed(0)+"K" : ""+n;
@@ -106,6 +162,7 @@ window._adsPayload = "WwogIHsKICAgICJpZCI6ICJ4emlsbGEtaG9tZSIsCiAgICAidGV4dCI6IC
     return       {m:1,   l:"PAPER HANDS", c:"#9fb6c9"};
   }
   window.__mult = () => tierFor(econ.holdings).m;
+  window.__tierFor = tierFor;   // shared with the start-screen UI so it shows the REAL tiered multiplier (not the flat 1.2x)
 
   /* -------------------------------- skins --------------------------------- */
   const SKINS = [
@@ -131,13 +188,28 @@ window._adsPayload = "WwogIHsKICAgICJpZCI6ICJ4emlsbGEtaG9tZSIsCiAgICAidGV4dCI6IC
 
   /* ------------------------------ missions -------------------------------- */
   const DEFAULT_MISSIONS = [
-    {id:"k", text:"Destroy 60 scammers",       goal:60,   prog:0, reward:1500, done:false, stat:"kills"},
-    {id:"b", text:"Beach 3 Glitch Whales",     goal:3,    prog:0, reward:6000, done:false, stat:"boss"},
-    {id:"c", text:"Land an x12 combo",         goal:12,   prog:0, reward:3000, done:false, stat:"combo"},
-    {id:"s", text:"Score 6,000 in one run",    goal:6000, prog:0, reward:5000, done:false, stat:"score"}
+    {id:"k",  text:"Destroy 60 scammers",        goal:60,    prog:0, reward:1500,  done:false, stat:"kills"},
+    {id:"k2", text:"Destroy 250 scammers",       goal:250,   prog:0, reward:4000,  done:false, stat:"kills"},
+    {id:"k3", text:"Destroy 1,000 scammers",     goal:1000,  prog:0, reward:12000, done:false, stat:"kills"},
+    {id:"b",  text:"Defeat 3 Rug Bosses",        goal:3,     prog:0, reward:3000,  done:false, stat:"boss"},
+    {id:"b2", text:"Defeat 15 Rug Bosses",       goal:15,    prog:0, reward:9000,  done:false, stat:"boss"},
+    {id:"c",  text:"Land an x12 combo",          goal:12,    prog:0, reward:2500,  done:false, stat:"combo"},
+    {id:"c2", text:"Land an x25 combo",          goal:25,    prog:0, reward:6000,  done:false, stat:"combo"},
+    {id:"s",  text:"Score 6,000 in one run",     goal:6000,  prog:0, reward:5000,  done:false, stat:"score"},
+    {id:"s2", text:"Score 12,000 in one run",    goal:12000, prog:0, reward:10000, done:false, stat:"score"},
+    {id:"s3", text:"Score 18,000 in one run",    goal:18000, prog:0, reward:18000, done:false, stat:"score"}
   ];
   let missions = store.get("xz_missions", null);
   if(!Array.isArray(missions)) missions = DEFAULT_MISSIONS.map(m=>({...m}));
+  else {
+    // migrate older saves to the full 10-bounty set: keep earned progress by id,
+    // refresh text/goal/reward (also retires the old "Beach 3 Glitch Whales" typo).
+    const prev={}; missions.forEach(m=>{ prev[m.id]=m; });
+    missions = DEFAULT_MISSIONS.map(d=>{
+      const ex=prev[d.id];
+      return ex ? {...d, prog:ex.prog||0, done:!!ex.done} : {...d};
+    });
+  }
   function saveMissions(){ store.set("xz_missions", missions); }
 
   /* ------------------------- daily challenge ------------------------------ */
@@ -172,6 +244,39 @@ window._adsPayload = "WwogIHsKICAgICJpZCI6ICJ4emlsbGEtaG9tZSIsCiAgICAidGV4dCI6IC
       try{ window.__buzz && window.__buzz([40,30,80],"success"); }catch(_){}
     }
     store.set("xz_daily", daily);
+  }
+
+  /* ------------------------- weekly challenge ----------------------------- */
+  /* A bigger goal that refreshes once per ~7-day bucket and pays a fat XP reward.
+   * Progress accumulates across every run in the week (kills/boss add up; score &
+   * combo take the best). Deterministic pick from the week bucket, like the daily. */
+  const WEEKLY_POOL = [
+    {type:"kills", goal:600,   reward:14000, text:g=>"Smash "+fmt(g)+" scammers this week"},
+    {type:"boss",  goal:20,    reward:16000, text:g=>"Defeat "+fmt(g)+" Rug Bosses this week"},
+    {type:"score", goal:12000, reward:15000, text:g=>"Score "+fmt(g)+" in a single run this week"},
+    {type:"combo", goal:25,    reward:13000, text:g=>"Land an x"+g+" combo this week"}
+  ];
+  const weekBucket = () => Math.floor(Date.now()/6048e5);   // ~1-week buckets (same as the weekly board)
+  let weekly = store.get("xz_weekly", null);
+  function rollWeekly(){
+    const wk=weekBucket();
+    const pick=WEEKLY_POOL[wk%WEEKLY_POOL.length];
+    weekly={week:wk, type:pick.type, goal:pick.goal, reward:pick.reward, text:pick.text(pick.goal), prog:0, done:false};
+    store.set("xz_weekly", weekly);
+  }
+  function ensureWeekly(){ if(!weekly || weekly.week!==weekBucket()) rollWeekly(); }
+  function progressWeekly(){
+    ensureWeekly(); if(weekly.done) return;
+    if(weekly.type==="kills")      weekly.prog += run.kills;
+    else if(weekly.type==="boss")  weekly.prog += run.boss;
+    else if(weekly.type==="score") weekly.prog = Math.max(weekly.prog, run.score);
+    else if(weekly.type==="combo") weekly.prog = Math.max(weekly.prog, run.combo);
+    if(weekly.prog>=weekly.goal){
+      weekly.done=true; econ.tokens+=weekly.reward; saveEcon(); updateHUDtokens();
+      toast("Weekly challenge complete! +"+fmt(weekly.reward)+" XP",GOLD);
+      try{ window.__buzz && window.__buzz([40,30,80],"success"); }catch(_){}
+    }
+    store.set("xz_weekly", weekly);
   }
 
   /* ----------------------------- leaderboard ------------------------------ */
@@ -509,7 +614,8 @@ window._adsPayload = "WwogIHsKICAgICJpZCI6ICJ4emlsbGEtaG9tZSIsCiAgICAidGV4dCI6IC
       state.combo++; state.kills++; run.kills++; if(state.combo>run.combo) run.combo=state.combo;
       try{sfx.catch(state.combo);}catch(_){}
       burst(p.x,p.y,p.z,MAG,14); window.addScore(CFG.scammerPoints,p); renderCombo();
-      econ.tokens+=2; run.earned+=2; pop=1.22;
+      const tok=Math.round(2*(window.__dropMult||1)); econ.tokens+=tok; run.earned+=tok; pop=1.22;  // DEGEN LUCK applies to smashed kills too, not just shot ones
+      updateHUDtokens();
       if(state.combo>0 && state.combo%5===0){ showBanner(state.combo+" COMBO!"); flashColor("rgba(57,255,122,.35)",0.5); shake(0.5); }
       try{ if(tg&&tg.HapticFeedback) tg.HapticFeedback.impactOccurred("light"); }catch(_){}
     } else if(e.type===TYPE.HOLDER){
@@ -622,6 +728,8 @@ window._adsPayload = "WwogIHsKICAgICJpZCI6ICJ4emlsbGEtaG9tZSIsCiAgICAidGV4dCI6IC
   function renderWallet(){
     const t=tierFor(econ.holdings);
     const rows=[[ "< 100K","1.0x",1],["100K – 1M","1.2x",1.2],["1M – 5M","1.5x",1.5],["5M – 10M+","3.0x",3]];
+    const addr = (window.XZWallet && window.XZWallet.address) || null;
+    const shortAddr = addr ? (addr.slice(0,4)+"…"+addr.slice(-4)) : "";
     $("walletInner").innerHTML =
       '<h2 class="pnl-title" style="border-color:'+MAG+'">SOLANA WALLET</h2>'+
       '<div class="wcard">'+
@@ -629,50 +737,74 @@ window._adsPayload = "WwogIHsKICAgICJpZCI6ICJ4emlsbGEtaG9tZSIsCiAgICAidGV4dCI6IC
         '<div class="wrow"><span>XP MULTIPLIER</span><b style="color:'+t.c+';font-size:22px">'+t.m+'x</b></div>'+
         '<div class="tierbadge" style="border-color:'+t.c+';color:'+t.c+'">'+t.l+'</div>'+
       '</div>'+
-      '<button class="btn pbtn" id="wConnect">CONNECT PHANTOM</button>'+
-      '<div class="sub">Connect to verify your on-chain $XZILLA — your real balance sets the tier.</div>'+
+      (addr
+        ? '<div class="wrow" style="justify-content:center;color:'+TEAL+';margin:4px 0 8px;">✓ CONNECTED · '+shortAddr+'</div>'+
+          '<button class="btn pbtn" id="wConnect">REFRESH BALANCE</button>'+
+          '<button class="btn secondary small" id="wDisconnect" style="margin-top:8px">DISCONNECT WALLET</button>'+
+          '<div class="sub">Tier set from your saved on-chain $XZILLA — you don\'t need to stay connected while playing. Refresh after buying more.</div>'
+        : '<button class="btn pbtn" id="wConnect">CONNECT WALLET</button>'+
+          '<div class="sub">Connect to verify your on-chain $XZILLA — your real balance sets the tier.</div>')+
       '<div class="ttable">'+ rows.map(r=>
         '<div class="trow'+(t.m===r[2]?' on':'')+'"><span>'+r[0]+'</span><b>'+r[1]+'</b></div>').join("")+
       '</div>';
-    $("wConnect").onclick = walletConnect;
+    // When connected, the button re-reads the balance; otherwise it opens the connect flow.
+    $("wConnect").onclick = addr
+      ? (async ()=>{ toast("Refreshing $XZILLA…",CYAN); await window.XZWallet.refresh(); })
+      : walletConnect;
+    if(addr && $("wDisconnect")) $("wDisconnect").onclick = ()=>{ if(window.XZWallet) window.XZWallet.disconnect(); };
   }
-  // Real Phantom connect + on-chain $XZILLA lookup; the actual balance drives the tier.
-  async function walletConnect(){
-    if(!window.solana){ toast("No Solana wallet found — install Phantom",RED); return; }
-    let pubkey=null;
-    try{ const r=await window.solana.connect(); pubkey=r.publicKey.toString(); }
-    catch(e){ toast("Connection cancelled",RED); return; }
-    toast("Verifying $XZILLA balance…",CYAN);
-    try{
-      const conn=new solanaWeb3.Connection(SOLANA_RPC,"confirmed");
-      const bal=await checkTokenBalance(conn, pubkey, XZILLA_MINT_ADDRESS);   // sums uiAmount for the mint
-      econ.holdings=Math.round(bal); window.__holderVerified = bal>0;
-      saveEcon(); updateVip(); updateHUDtokens(); renderWallet();
-      toast(bal>0 ? ("Verified — "+fmt(bal)+" $XZILLA") : "Connected — no $XZILLA found", bal>0?GOLD:RED);
-    }catch(e){
-      toast("Error verifying balance, please retry",RED);
+  // Wallet connect routes through the shared window.XZWallet (Reown AppKit). The
+  // verified balance flows back via applyWalletToEcon(), which sets the holder tier.
+  function walletConnect(){
+    if(window.XZWallet){ toast("Opening wallet…",CYAN); window.XZWallet.connect(); return; }
+    toast("Wallet connector still loading — try again",RED);
+  }
+  // Apply a verified $XZILLA balance to the live holder tier + persist it.
+  function applyWalletToEcon(address, balance){
+    if(address && typeof balance==="number"){
+      econ.holdings = Math.round(balance); window.__holderVerified = balance>0;
+      saveEcon(); updateVip(); updateHUDtokens();
+      if(!$("walletPanel").classList.contains("hidden")) renderWallet();
+      toast(balance>0 ? ("Verified — "+fmt(balance)+" $XZILLA") : "Connected — no $XZILLA found", balance>0?GOLD:RED);
+    } else if(!address){
+      // disconnected → KEEP the last-verified tier (user preference). Just unlink the live
+      // session: re-render the panel so the button reverts to CONNECT; the held amount and
+      // multiplier are preserved (re-verify any time by reconnecting + REFRESH BALANCE).
+      if(!$("walletPanel").classList.contains("hidden")) renderWallet();
+      toast("Wallet disconnected — your tier is kept",CYAN);
     }
   }
+  (function wireEconWallet(){
+    if(window.XZWallet){ window.XZWallet.onChange(applyWalletToEcon); }
+    else setTimeout(wireEconWallet, 150);
+  })();
 
   function renderMissions(){
-    ensureDaily();
+    ensureDaily(); ensureWeekly();
     const dpct=Math.min(100,(daily.prog/daily.goal)*100);
     const dailyHtml =
       '<h2 class="pnl-title" style="border-color:'+GOLD+'">DAILY CHALLENGE</h2>'+
       '<div class="dailyTop">🔥 STREAK <b>'+(econ.streak||0)+' day'+((econ.streak||0)===1?'':'s')+'</b></div>'+
       '<div class="mrow'+(daily.done?' done':'')+'" style="border-color:'+(daily.done?TEAL:GOLD)+'">'+
-        '<div class="mtop"><span>'+daily.text+'</span><b style="color:'+(daily.done?TEAL:GOLD)+'">'+(daily.done?"DONE":"+"+fmt(daily.reward))+'</b></div>'+
+        '<div class="mtop"><span>'+daily.text+'</span><b style="color:'+(daily.done?TEAL:GOLD)+'">+'+fmt(daily.reward)+' XP'+(daily.done?' ✓':'')+'</b></div>'+
         '<div class="mbar"><i style="width:'+dpct+'%;background:'+(daily.done?TEAL:GOLD)+'"></i></div>'+
-        '<div class="msub">'+fmt(Math.min(daily.prog,daily.goal))+' / '+fmt(daily.goal)+' · resets daily</div></div>';
+        '<div class="msub">'+fmt(Math.min(daily.prog,daily.goal))+' / '+fmt(daily.goal)+' · '+(daily.done?'claimed · ':'')+'resets daily</div></div>';
+    const wpct=Math.min(100,(weekly.prog/weekly.goal)*100);
+    const weeklyHtml =
+      '<h2 class="pnl-title" style="border-color:'+MAG+';margin-top:16px;">WEEKLY CHALLENGE</h2>'+
+      '<div class="mrow'+(weekly.done?' done':'')+'" style="border-color:'+(weekly.done?TEAL:MAG)+'">'+
+        '<div class="mtop"><span>'+weekly.text+'</span><b style="color:'+(weekly.done?TEAL:MAG)+'">+'+fmt(weekly.reward)+' XP'+(weekly.done?' ✓':'')+'</b></div>'+
+        '<div class="mbar"><i style="width:'+wpct+'%;background:'+(weekly.done?TEAL:MAG)+'"></i></div>'+
+        '<div class="msub">'+fmt(Math.min(weekly.prog,weekly.goal))+' / '+fmt(weekly.goal)+' · '+(weekly.done?'claimed · ':'')+'resets weekly</div></div>';
     $("missionsInner").innerHTML =
-      dailyHtml +
+      dailyHtml + weeklyHtml +
       '<h2 class="pnl-title" style="border-color:'+TEAL+';margin-top:16px;">BOUNTIES</h2>'+
       missions.map(m=>{
         const pct=Math.min(100,(m.prog/m.goal)*100);
         return '<div class="mrow'+(m.done?' done':'')+'">'+
-          '<div class="mtop"><span>'+m.text+'</span><b>'+(m.done?"CLAIMED":"+"+fmt(m.reward))+'</b></div>'+
+          '<div class="mtop"><span>'+m.text+'</span><b style="color:'+(m.done?TEAL:GOLD)+'">+'+fmt(m.reward)+' XP'+(m.done?' ✓':'')+'</b></div>'+
           '<div class="mbar"><i style="width:'+pct+'%;background:'+(m.done?TEAL:MAG)+'"></i></div>'+
-          '<div class="msub">'+fmt(Math.min(m.prog,m.goal))+' / '+fmt(m.goal)+'</div></div>';
+          '<div class="msub">'+fmt(Math.min(m.prog,m.goal))+' / '+fmt(m.goal)+(m.done?' · claimed':'')+'</div></div>';
       }).join("");
   }
   function renderLeaderboard(){
@@ -686,7 +818,9 @@ window._adsPayload = "WwogIHsKICAgICJpZCI6ICJ4emlsbGEtaG9tZSIsCiAgICAidGV4dCI6IC
     const progPct = next ? Math.max(0, Math.min(100, ((best-floor)/(next.score-floor))*100)) : 100;
     $("leaderboardInner").innerHTML =
       '<h2 class="pnl-title" style="border-color:'+GOLD+';margin-top:4px;">RANK MILESTONES</h2>'+
-      '<div class="sub" style="margin-bottom:8px;">Your best: '+fmt(best)+' pts \u00b7 <span style="color:'+GOLD+'">'+(cur?cur.name:"UNRANKED")+'</span></div>'+
+      '<div class="wcard" style="margin-bottom:10px;display:flex;justify-content:space-between;align-items:center;">'+
+        '<span class="hud-label">\u26a1 YOUR XP</span><b style="color:'+TEAL+';font-size:22px">'+fmt(econ.tokens)+'</b></div>'+
+      '<div class="sub" style="margin-bottom:8px;">Best score: '+fmt(best)+' pts \u00b7 <span style="color:'+GOLD+'">'+(cur?cur.name:"UNRANKED")+'</span></div>'+
       SCORE_TITLES.map(t=>{
         const reached = best>=t.score;
         return '<div class="lrow" style="'+(reached?'border-color:'+GOLD+';background:rgba(255,210,63,.08);':'opacity:.55;')+'">'+
@@ -758,6 +892,7 @@ window._adsPayload = "WwogIHsKICAgICJpZCI6ICJ4emlsbGEtaG9tZSIsCiAgICAidGV4dCI6IC
     saveMissions(); saveEcon();
     pushScore(state.score);
     progressDaily();      // tally the daily challenge from this run
+    progressWeekly();     // tally the weekly challenge from this run
     syncRankSkins();      // unlock any rank-reward skins the new best just earned
     submitLeaderboard();  // post the best score to the cross-player board (if configured)
     // augment game over screen
@@ -1595,20 +1730,19 @@ window._adsPayload = "WwogIHsKICAgICJpZCI6ICJ4emlsbGEtaG9tZSIsCiAgICAidGV4dCI6IC
         '<button class="sbtn" id="wRefresh" style="border-color:'+CYAN+';color:'+CYAN+'">REFRESH ON-CHAIN BALANCE</button>'+
         '<div class="sub" style="opacity:.7">Reads $XZILLA from your connected wallet. Rewards remain off-chain until the claim contract is connected.</div>';
       host.appendChild(box);
+      // seed with the last known verified balance if we already have one
+      if(window.XZWallet && typeof window.XZWallet.balance==="number"){
+        $("wChainVal").textContent=fmt(window.XZWallet.balance)+" $XZILLA";
+      }
       $("wRefresh").onclick=async()=>{
         const v=$("wChainVal"); v.textContent="…";
         try{
-          if(window.solana && window.solana.isPhantom && !/YOUR_/.test(XZILLA_MINT_ADDRESS)){
-            const r=await window.solana.connect();
-            const conn=new solanaWeb3.Connection(SOLANA_RPC,"confirmed");
-            const bal=await checkTokenBalance(conn, r.publicKey.toString(), XZILLA_MINT_ADDRESS);
-            v.textContent=fmt(bal)+" $XZILLA";
-            econ.holdings=bal; saveEcon(); updateVip(); _renderWallet();
-            toast("Balance synced",CYAN);
-          } else {
-            v.textContent="Set mint address";
-            toast("Add your $XZILLA mint in CONFIG to read on-chain",GOLD);
-          }
+          if(!window.XZWallet){ v.textContent="Loading…"; return; }
+          if(!window.XZWallet.address){ window.XZWallet.connect(); v.textContent="Connect wallet…"; return; }
+          await window.XZWallet.refresh();                       // re-reads via the Worker /balance endpoint
+          const b=window.XZWallet.balance;
+          v.textContent=(typeof b==="number") ? (fmt(b)+" $XZILLA") : "Read failed";
+          if(typeof b==="number"){ econ.holdings=Math.round(b); saveEcon(); updateVip(); _renderWallet(); toast("Balance synced",CYAN); }
         }catch(e){ v.textContent="Read failed"; toast("On-chain read failed",RED); }
       };
     };
@@ -2054,11 +2188,15 @@ window._adsPayload = "WwogIHsKICAgICJpZCI6ICJ4emlsbGEtaG9tZSIsCiAgICAidGV4dCI6IC
        * {"text":"...","color":"#rrggbb"} to pin a specific color. A plain
        * array (no "messages" wrapper) also works. Falls back to AD_MSGS above if
        * the fetch fails, the file is missing, or it's malformed. ------------------ */
-      const ADS_CONFIG_URL = "https://raw.githubusercontent.com/Xzilla-memecoin/xzilla-game/main/ads.json";
+      // Live ads: the Worker /ads endpoint (KV-backed, updates are instant) is tried
+      // first; GitHub-raw ads.json is the fallback if the Worker is unreachable/empty.
+      const _adsApi      = (window.__LB_API||"").replace(/\/+$/,"");
+      const ADS_WORKER   = _adsApi ? _adsApi+"/ads" : "";
+      const ADS_FALLBACK = "https://raw.githubusercontent.com/Xzilla-memecoin/xzilla-game/main/ads.json";
       (function loadAdsConfig(){
-        fetch(ADS_CONFIG_URL, {cache:"no-store"}).then(r=>r.ok?r.json():null).then(data=>{
+        function applyAds(data){
           let raw = Array.isArray(data) ? data : (data && Array.isArray(data.messages) ? data.messages : null);
-          if(!raw) return;
+          if(!raw) return false;
           // each entry can be a plain string ("WAGMI") or
           // {"text":"WAGMI","color":"#21e6ff","imageUrl":"...","clickLink":"..."}
           const msgs=[], colors=[], imgs=[], links=[];
@@ -2070,7 +2208,7 @@ window._adsPayload = "WwogIHsKICAgICJpZCI6ICJ4emlsbGEtaG9tZSIsCiAgICAidGV4dCI6IC
             imgs.push((item && typeof item==="object" && typeof item.imageUrl==="string") ? item.imageUrl : undefined);
             links.push((item && typeof item==="object" && typeof item.clickLink==="string") ? item.clickLink : undefined);
           }
-          if(!msgs.length) return;
+          if(!msgs.length) return false;
           AD_MSGS.length=0; AD_MSGS.push(...msgs);
           AD_COLORS.length=0; AD_COLORS.push(...colors);
           AD_IMAGES.length=0; AD_IMAGES.push(...imgs);
@@ -2078,7 +2216,12 @@ window._adsPayload = "WwogIHsKICAgICJpZCI6ICJ4emlsbGEtaG9tZSIsCiAgICAidGV4dCI6IC
           imgs.forEach(adImage);
           for(const s of adScreens){ s._msg=s._msg%AD_MSGS.length; s._t=0;
             drawAd(s._scr,AD_MSGS[s._msg],AD_COLORS[s._msg]||CYAN,AD_IMAGES[s._msg]); }
-        }).catch(()=>{ /* keep built-in defaults */ });
+          return true;
+        }
+        const tryUrl = u => u ? fetch(u,{cache:"no-store"}).then(r=>r.ok?r.json():null) : Promise.resolve(null);
+        tryUrl(ADS_WORKER)
+          .then(d=>{ if(applyAds(d)) return; return tryUrl(ADS_FALLBACK).then(applyAds); })   // worker → github → built-in defaults
+          .catch(()=>{ /* keep built-in defaults */ });
       })();
 
       /* ---------- slow parallax silhouette layers ---------- */
@@ -2166,7 +2309,11 @@ window._adsPayload = "WwogIHsKICAgICJpZCI6ICJ4emlsbGEtaG9tZSIsCiAgICAidGV4dCI6IC
   //  sprite-sheet or a small procedural spinner — to revisit later.)
 
   /* -------------------------------- boot ---------------------------------- */
-  applySkin(); updateVip(); updateHUDtokens(); checkStreak();
-  ensureDaily(); syncRankSkins();   // refresh today's challenge + grant any earned rank skins
-  $("tabbar").classList.remove("hidden"); showTab("PLAY");
+  function boot(){
+    applySkin(); updateVip(); updateHUDtokens(); checkStreak();
+    ensureDaily(); ensureWeekly(); syncRankSkins();   // refresh today's + this week's challenge + grant earned rank skins
+    $("tabbar").classList.remove("hidden"); showTab("PLAY");
+  }
+  // Pull any newer cross-device cloud save first, THEN boot (runs immediately outside Telegram).
+  restoreEconFromCloud(boot);
 })();
