@@ -154,15 +154,26 @@ window._adsPayload = "WwogIHsKICAgICJpZCI6ICJ4emlsbGEtaG9tZSIsCiAgICAidGV4dCI6IC
   const fmt = n => Math.round(n).toLocaleString("en-US");
   const abbr = n => n>=1e6 ? (n/1e6).toFixed(n%1e6?1:0)+"M" : n>=1e3 ? (n/1e3).toFixed(0)+"K" : ""+n;
 
-  /* ----------------------------- wallet tiers ----------------------------- */
-  function tierFor(h){
-    if(h>=5e6) return {m:3,   l:"WHALE",       c:GOLD};
-    if(h>=1e6) return {m:1.5, l:"DEGEN",       c:MAG};
-    if(h>=1e5) return {m:1.2, l:"APE",         c:CYAN};
-    return       {m:1,   l:"PAPER HANDS", c:"#9fb6c9"};
-  }
+  /* ----------------------------- wallet tiers -----------------------------
+   * 10 holder tiers, multiplier evenly stepped 1.1x → 2.0x (10M+ = 2.0x), plus a
+   * 1.0x baseline for non/sub-10K holders. Single source of truth (TIERS) used by
+   * both the in-game score multiplier and the WALLET ladder. Ordered high → low. */
+  const TIERS = [
+    {min:10e6, m:2.0, l:"XZILLA",      c:GOLD},
+    {min:6e6,  m:1.9, l:"KRAKEN",      c:GOLD},
+    {min:4e6,  m:1.8, l:"WHALE",       c:MAG},
+    {min:2e6,  m:1.7, l:"SHARK",       c:MAG},
+    {min:1e6,  m:1.6, l:"DOLPHIN",     c:CYAN},
+    {min:5e5,  m:1.5, l:"BULL",        c:CYAN},
+    {min:25e4, m:1.4, l:"APE",         c:TEAL},
+    {min:1e5,  m:1.3, l:"FISH",        c:TEAL},
+    {min:5e4,  m:1.2, l:"CRAB",        c:"#9fb6c9"},
+    {min:1e4,  m:1.1, l:"SHRIMP",      c:"#9fb6c9"},
+    {min:0,    m:1.0, l:"PAPER HANDS", c:"#9fb6c9"}
+  ];
+  function tierFor(h){ for(const t of TIERS){ if(h>=t.min) return t; } return TIERS[TIERS.length-1]; }
   window.__mult = () => tierFor(econ.holdings).m;
-  window.__tierFor = tierFor;   // shared with the start-screen UI so it shows the REAL tiered multiplier (not the flat 1.2x)
+  window.__tierFor = tierFor;   // shared with the start-screen UI so it shows the REAL tiered multiplier
 
   /* -------------------------------- skins --------------------------------- */
   const SKINS = [
@@ -727,7 +738,7 @@ window._adsPayload = "WwogIHsKICAgICJpZCI6ICJ4emlsbGEtaG9tZSIsCiAgICAidGV4dCI6IC
 
   function renderWallet(){
     const t=tierFor(econ.holdings);
-    const rows=[[ "< 100K","1.0x",1],["100K – 1M","1.2x",1.2],["1M – 5M","1.5x",1.5],["5M – 10M+","3.0x",3]];
+    const tierLabel = mn => mn>=1e6 ? (mn/1e6)+"M+" : mn>=1e3 ? (mn/1e3)+"K+" : "&lt; 10K";
     const addr = (window.XZWallet && window.XZWallet.address) || null;
     const shortAddr = addr ? (addr.slice(0,4)+"…"+addr.slice(-4)) : "";
     $("walletInner").innerHTML =
@@ -744,8 +755,8 @@ window._adsPayload = "WwogIHsKICAgICJpZCI6ICJ4emlsbGEtaG9tZSIsCiAgICAidGV4dCI6IC
           '<div class="sub">Tier set from your saved on-chain $XZILLA — you don\'t need to stay connected while playing. Refresh after buying more.</div>'
         : '<button class="btn pbtn" id="wConnect">CONNECT WALLET</button>'+
           '<div class="sub">Connect to verify your on-chain $XZILLA — your real balance sets the tier.</div>')+
-      '<div class="ttable">'+ rows.map(r=>
-        '<div class="trow'+(t.m===r[2]?' on':'')+'"><span>'+r[0]+'</span><b>'+r[1]+'</b></div>').join("")+
+      '<div class="ttable">'+ TIERS.map(r=>
+        '<div class="trow'+(t.m===r.m?' on':'')+'"><span style="color:'+r.c+'">'+r.l+' · '+tierLabel(r.min)+'</span><b>'+r.m.toFixed(1)+'x</b></div>').join("")+
       '</div>';
     // When connected, the button re-reads the balance; otherwise it opens the connect flow.
     $("wConnect").onclick = addr
