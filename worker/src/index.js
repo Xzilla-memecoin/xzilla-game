@@ -33,7 +33,7 @@ function cors(origin){
   return {
     "Access-Control-Allow-Origin": origin || "*",
     "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
-    "Access-Control-Allow-Headers": "content-type",
+    "Access-Control-Allow-Headers": "content-type, x-admin-token",
     "Access-Control-Max-Age": "86400",
   };
 }

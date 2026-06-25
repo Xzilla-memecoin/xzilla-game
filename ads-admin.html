@@ -1,0 +1,151 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<meta name="robots" content="noindex, nofollow" />
+<title>XZILLA · Ads Admin</title>
+<style>
+  :root{ --bg:#070318; --card:#120a2e; --line:#2a1c54; --cyan:#21e6ff; --mag:#ff2bd6; --gold:#ffd23f; --green:#39ff7a; --red:#ff3b5c; --mut:#9fb6c9; }
+  *{ box-sizing:border-box; }
+  body{ margin:0; background:radial-gradient(120% 80% at 50% -10%, #1a0f43 0%, var(--bg) 60%); color:#eaf2ff;
+        font-family:-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif; min-height:100vh; padding:18px; }
+  .wrap{ max-width:680px; margin:0 auto; }
+  h1{ font-size:20px; letter-spacing:1px; margin:6px 0 2px; }
+  h1 span{ color:var(--gold); }
+  .sub{ color:var(--mut); font-size:13px; margin:0 0 16px; }
+  .card{ background:var(--card); border:1px solid var(--line); border-radius:14px; padding:14px; margin-bottom:14px; }
+  label{ display:block; font-size:12px; color:var(--mut); margin:0 0 6px; text-transform:uppercase; letter-spacing:.5px; }
+  input[type=text], input[type=password], input[type=url]{ width:100%; background:#0c0726; border:1px solid var(--line);
+        color:#fff; border-radius:9px; padding:11px 12px; font-size:14px; }
+  input:focus{ outline:none; border-color:var(--cyan); }
+  .ad{ border:1px solid var(--line); border-radius:11px; padding:12px; margin-bottom:10px; background:#0e0828; }
+  .ad .row{ display:flex; gap:8px; align-items:center; }
+  .ad .row + .row{ margin-top:8px; }
+  .ad input[type=color]{ width:46px; height:42px; padding:0; border:1px solid var(--line); border-radius:9px; background:#0c0726; }
+  .grid2{ display:grid; grid-template-columns:1fr 1fr; gap:8px; }
+  @media(max-width:520px){ .grid2{ grid-template-columns:1fr; } }
+  .small{ font-size:11px; color:var(--mut); }
+  button{ font-family:inherit; font-weight:700; border:none; border-radius:10px; padding:12px 16px; cursor:pointer; font-size:14px; }
+  .btn-pub{ background:var(--green); color:#06210f; width:100%; font-size:16px; letter-spacing:.5px; }
+  .btn-add{ background:transparent; color:var(--cyan); border:1px dashed var(--cyan); width:100%; }
+  .btn-load{ background:transparent; color:var(--gold); border:1px solid var(--gold); }
+  .btn-x{ background:#2a1c54; color:var(--red); padding:8px 11px; border-radius:9px; }
+  .bar{ display:flex; gap:8px; margin-bottom:12px; }
+  .bar button{ flex:1; }
+  #status{ min-height:20px; font-size:14px; margin-top:10px; text-align:center; font-weight:600; }
+  .ok{ color:var(--green); } .err{ color:var(--red); }
+  .hint{ font-size:12px; color:var(--mut); margin-top:4px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>XZILLA · <span>Ads Admin</span></h1>
+  <p class="sub">Type your in-game billboard ads, then Publish. Changes go live in seconds.</p>
+
+  <div class="card">
+    <label for="token">Admin token</label>
+    <input id="token" type="password" placeholder="paste your ads admin token" autocomplete="off" />
+    <div class="row" style="display:flex;gap:8px;align-items:center;margin-top:8px;">
+      <input id="remember" type="checkbox" checked style="width:auto" />
+      <label for="remember" style="margin:0;text-transform:none;">Remember on this device</label>
+    </div>
+  </div>
+
+  <div class="bar">
+    <button class="btn-load" id="load">↻ Load current ads</button>
+  </div>
+
+  <div id="ads"></div>
+  <button class="btn-add" id="add">+ Add another ad</button>
+
+  <div class="card" style="margin-top:14px;">
+    <button class="btn-pub" id="publish">🚀 Publish ads (go live)</button>
+    <div id="status"></div>
+  </div>
+  <p class="small">Each ad needs text. Color, image URL and click link are optional. Leave an ad's text empty to drop it.</p>
+</div>
+
+<script>
+const API = "https://xzilla-leaderboard.kombainain.workers.dev/ads";
+const $ = id => document.getElementById(id);
+const adsEl = $("ads");
+
+// token persistence
+const saved = localStorage.getItem("xz_ads_token");
+if(saved){ $("token").value = saved; }
+$("token").addEventListener("input", ()=>{ if($("remember").checked) localStorage.setItem("xz_ads_token", $("token").value.trim()); });
+
+function adRow(data){
+  data = data || {};
+  const wrap = document.createElement("div"); wrap.className="ad";
+  wrap.innerHTML =
+    '<div class="row">'+
+      '<input type="text" class="f-text" placeholder="Ad text (e.g. BUY $XZILLA NOW)" />'+
+      '<input type="color" class="f-color" value="#ffd23f" title="Text color" />'+
+      '<button class="btn-x" title="Remove">✕</button>'+
+    '</div>'+
+    '<div class="row grid2">'+
+      '<input type="url" class="f-img" placeholder="Image URL (optional)" />'+
+      '<input type="url" class="f-link" placeholder="Click link (optional)" />'+
+    '</div>';
+  wrap.querySelector(".f-text").value  = data.text || "";
+  if(data.color) wrap.querySelector(".f-color").value = data.color;
+  wrap.querySelector(".f-img").value   = data.imageUrl || "";
+  wrap.querySelector(".f-link").value  = data.clickLink || "";
+  wrap.querySelector(".btn-x").onclick = ()=> wrap.remove();
+  adsEl.appendChild(wrap);
+}
+
+function collect(){
+  const out = [];
+  adsEl.querySelectorAll(".ad").forEach(ad=>{
+    const text = ad.querySelector(".f-text").value.trim();
+    if(!text) return;
+    const color = ad.querySelector(".f-color").value;
+    const img   = ad.querySelector(".f-img").value.trim();
+    const link  = ad.querySelector(".f-link").value.trim();
+    if(color==="#ffd23f" && !img && !link){ out.push(text); }   // plain string when no extras
+    else{ const o={ text }; if(color) o.color=color; if(img) o.imageUrl=img; if(link) o.clickLink=link; out.push(o); }
+  });
+  return out;
+}
+
+function status(msg, ok){ const s=$("status"); s.textContent=msg; s.className = ok?"ok":"err"; }
+
+$("add").onclick = ()=> adRow();
+
+$("load").onclick = async ()=>{
+  status("Loading…", true);
+  try{
+    const r = await fetch(API, { cache:"no-store" });
+    const d = await r.json();
+    adsEl.innerHTML = "";
+    (d.messages||[]).forEach(m => adRow(typeof m==="string" ? {text:m} : m));
+    if(!adsEl.children.length) adRow();
+    status("Loaded current live ads.", true);
+  }catch(e){ status("Couldn't load: "+e.message, false); }
+};
+
+$("publish").onclick = async ()=>{
+  const token = $("token").value.trim();
+  if(!token){ status("Enter your admin token first.", false); return; }
+  const messages = collect();
+  if(!messages.length){ status("Add at least one ad with text.", false); return; }
+  if($("remember").checked) localStorage.setItem("xz_ads_token", token);
+  status("Publishing…", true);
+  try{
+    const r = await fetch(API, { method:"POST", headers:{ "content-type":"application/json", "x-admin-token":token }, body: JSON.stringify({ messages }) });
+    const d = await r.json();
+    if(r.ok && d.ok){ status("✅ Published "+d.count+" ads — live now!", true); }
+    else if(r.status===401){ status("❌ Wrong admin token.", false); }
+    else{ status("❌ "+(d.error||("HTTP "+r.status)), false); }
+  }catch(e){ status("❌ Failed: "+e.message, false); }
+};
+
+// start with one empty ad; auto-load current if a token is already saved
+adRow();
+if(saved) $("load").click();
+</script>
+</body>
+</html>

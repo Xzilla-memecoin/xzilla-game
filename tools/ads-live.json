@@ -1,0 +1,10 @@
+{
+  "messages": [
+    "$XZILLA",
+    "WAGMI",
+    { "text": "BUY $XZILLA NOW", "color": "#ffd23f", "clickLink": "https://xzilla.io" },
+    "TO THE MOON",
+    "NO MERCY",
+    "BUY THE DIP"
+  ]
+}
