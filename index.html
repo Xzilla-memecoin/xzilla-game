@@ -132,6 +132,30 @@
     const W = { address:null, balance:null, ready:false, appkit:null, error:null };
     let resolveReady; const readyPromise = new Promise(r => { resolveReady = r; });   // settles when init finishes (ok OR fail)
 
+    // --- Telegram Mini App fix ------------------------------------------------
+    // Inside Telegram's in-app webview there's no injected extension, so connect
+    // goes through the WalletConnect modal. AppKit launches the wallet app via
+    // window.open(), which Telegram BLOCKS — so the modal opens but tapping
+    // Phantom does nothing. Routing those opens through Telegram's own openLink/
+    // openTelegramLink lets Phantom actually launch. WalletConnect v2 then finishes
+    // pairing over its relay, so no redirect back into Telegram is needed — the
+    // user approves in Phantom, switches back to Telegram, and we're connected.
+    (function patchTelegramOpen(){
+      const tg = window.Telegram && window.Telegram.WebApp;
+      if(!tg || !tg.platform || tg.platform === "unknown") return;   // only inside a real Telegram Mini App
+      const nativeOpen = window.open.bind(window);
+      window.open = function(url, target, features){
+        const u = url ? url.toString() : "";
+        try{
+          if(u.indexOf("tg://") === 0 || u.indexOf("t.me/") !== -1){
+            (tg.openTelegramLink || tg.openLink).call(tg, u); return null;
+          }
+          if(u){ tg.openLink(u); return null; }   // https universal links (phantom.app/ul/...) etc.
+        }catch(_){ }
+        return nativeOpen(url, target, features);
+      };
+    })();
+
     function notify(){ for(const fn of listeners){ try{ fn(W.address, W.balance); }catch(_){ } } }
 
     // Verified $XZILLA balance for an address, read through the Cloudflare Worker.
