@@ -1002,7 +1002,7 @@ window._adsPayload = "WwogIHsKICAgICJpZCI6ICJ4emlsbGEtaG9tZSIsCiAgICAidGV4dCI6IC
     /* ===================================================================== *
      *  SPAWN OVERRIDE — wider enemy roster + waves + power variety            *
      * ===================================================================== */
-    let rugPending=false, lastBossWave=0;
+    let rugPending=false, nextBossWave=4;   // first boss at wave 4, then 4 waves after each defeat
     window.spawn = function(){
       // every 4th wave -> rug boss (replaces plain whale cadence)
       if(rugPending && !active.some(a=>a.type===TYPE.RUGBOSS || a.type===TYPE.BOSS)){
@@ -1084,8 +1084,13 @@ window._adsPayload = "WwogIHsKICAgICJpZCI6ICJ4emlsbGEtaG9tZSIsCiAgICAidGV4dCI6IC
       // the wave BEFORE delegating, then detect the crossing here.
       const prevWave = state.wave;
       _origAddScore(base * x2, worldPos);
-      if(state.wave > prevWave && state.wave % 4 === 0 && state.wave!==lastBossWave){
-        rugPending=true; lastBossWave=state.wave;
+      // Schedule a boss once we reach the next boss wave — but NEVER while one is already
+      // pending or on the field. The auto-cannon farms scammers during the (long ×8-HP)
+      // fight, which inflates the wave; without this gate it would stack a second boss
+      // that spawns the instant the first dies. nextBossWave advances on defeat (below).
+      if(state.wave > prevWave && state.wave >= nextBossWave
+         && !rugPending && !active.some(a=>a.type===TYPE.RUGBOSS||a.type===TYPE.BOSS)){
+        rugPending=true;
       }
       // rank-milestone callout — once per run, the first time you cross a new title threshold
       const t = titleForScore(state.score);
@@ -1203,6 +1208,10 @@ window._adsPayload = "WwogIHsKICAgICJpZCI6ICJ4emlsbGEtaG9tZSIsCiAgICAidGV4dCI6IC
         if(a!==e && a.type===TYPE.SCAMMER && !a.dead){ a.dead=true;
           const ap=a.sprite.position.clone(); burst(ap.x,ap.y,ap.z,MAG,5); freeEntity(a); } }
       try{ window.__buzz ? window.__buzz([60,40,120],"success") : (tg&&tg.HapticFeedback&&tg.HapticFeedback.notificationOccurred("success")); }catch(_){}
+      // Space the NEXT boss at least 4 waves after this defeat, measured off the
+      // post-reward score so the +900 (and farmed scammer points) can't immediately
+      // re-trigger another boss.
+      nextBossWave = (1 + Math.floor(state.score/150)) + 4;
       e.dead=true; freeEntity(e); updateHUDtokens();
       return true;
     }
@@ -1415,7 +1424,7 @@ window._adsPayload = "WwogIHsKICAgICJpZCI6ICJ4emlsbGEtaG9tZSIsCiAgICAidGV4dCI6IC
     function set2BeforeRun(){
       applyUpgrades();
       renderLives();                 // reflect new max HP
-      px.slowUntil=px.x2Until=px.magUntil=0; rugPending=false; lastBossWave=0;
+      px.slowUntil=px.x2Until=px.magUntil=0; rugPending=false; nextBossWave=4;
       hideRugBar();
       if(lvl("start")>0){ shieldActive=true; }
     }
