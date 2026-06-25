@@ -2047,10 +2047,27 @@ window._adsPayload = "WwogIHsKICAgICJpZCI6ICJ4emlsbGEtaG9tZSIsCiAgICAidGV4dCI6IC
 
       /* ---------- reactive ad-screen (canvas mounted on a tower) ---------- */
       const adScreens=[];
-      const AD_MSGS=["$XZILLA","WAGMI","PUMP IT","HODL","BUY THE DIP","DIAMOND HANDS","FEW","LFG","TO THE MOON"];
-      const AD_COLORS=[null,null,null,null,null,null,null,null,null]; // per-message color override (ads.json), null = use combo-tier color
-      const AD_IMAGES=[]; // per-message background image URL (parallel to AD_MSGS), undefined = no image
-      const AD_LINKS=[];  // per-message click target (reserved; raycast click handling not wired here)
+      // Ad screens come in 3 aspect ratios, grouped so the admin can target each:
+      //   wide 2:1 (small buildings) · square 1:1 (big) · tall 9:16 portrait (big).
+      const SCREEN_KINDS = {
+        wide:   { cw:256, ch:128 },   // 2:1
+        square: { cw:208, ch:208 },   // 1:1
+        tall:   { cw:144, ch:256 }    // 9:16 portrait
+      };
+      const AD_DEFAULTS = { m:["$XZILLA","WAGMI","PUMP IT","HODL","BUY THE DIP","DIAMOND HANDS","FEW","LFG","TO THE MOON"], c:[], img:[], l:[] };
+      // Per-ratio ad pools (parallel arrays: message / color / imageUrl / clickLink).
+      const AD_GROUPS = {
+        wide:   { m:AD_DEFAULTS.m.slice(), c:[], img:[], l:[] },
+        square: { m:[], c:[], img:[], l:[] },
+        tall:   { m:[], c:[], img:[], l:[] }
+      };
+      // Effective pool for a screen kind: its own pool → else wide → else built-in defaults.
+      function groupFor(kind){
+        const g=AD_GROUPS[kind];
+        if(g && g.m.length) return g;
+        if(AD_GROUPS.wide.m.length) return AD_GROUPS.wide;
+        return AD_DEFAULTS;
+      }
 
       /* ---------- cached background-image system (from billboard-textures POC) ----------
        * One HTMLImageElement per URL, loaded once and shared by reference. drawAd()
@@ -2095,10 +2112,7 @@ window._adsPayload = "WwogIHsKICAgICJpZCI6ICJ4emlsbGEtaG9tZSIsCiAgICAidGV4dCI6IC
           links.push(typeof a.clickLink==="string"?a.clickLink:undefined);
         }
         if(!msgs.length) return;
-        AD_MSGS.length=0; AD_MSGS.push(...msgs);
-        AD_COLORS.length=0; AD_COLORS.push(...cols);
-        AD_IMAGES.length=0; AD_IMAGES.push(...imgs);
-        AD_LINKS.length=0;  AD_LINKS.push(...links);
+        AD_GROUPS.wide={ m:msgs, c:cols, img:imgs, l:links };   // built-in payload = the 2:1 (wide) pool
         imgs.forEach(adImage);   // warm the image cache so backgrounds are ready ASAP
       })();
 
@@ -2107,7 +2121,7 @@ window._adsPayload = "WwogIHsKICAgICJpZCI6ICJ4emlsbGEtaG9tZSIsCiAgICAidGV4dCI6IC
       // (28px down to 14px) and re-wraps until it fits, so the message
       // always stays fully on the screen no matter how long it is.
       function drawAd(scr,msg,color,imageUrl){
-        const x=scr.ctx,W=256,H=128;
+        const x=scr.ctx,W=scr.canvas.width,H=scr.canvas.height;
         const img=adImage(imageUrl);
         const text=String(msg==null?"":msg).trim();
         // IMAGE-ONLY: an ad with an image and no caption → full-bleed banner (no scrim, no text).
@@ -2129,8 +2143,9 @@ window._adsPayload = "WwogIHsKICAgICJpZCI6ICJ4emlsbGEtaG9tZSIsCiAgICAidGV4dCI6IC
         x.fillStyle=color; x.shadowColor=color; x.shadowBlur=18;
         x.textAlign="center"; x.textBaseline="middle";
         const words=String(msg).split(" ");
-        let fontPx=28, lines=[], lh=32;
-        for(; fontPx>=14; fontPx-=2){
+        let fontPx=Math.max(14,Math.round(W/9)), lines=[], lh=32;   // scale start size to screen width
+        const minPx=Math.max(10,Math.round(W/22));
+        for(; fontPx>=minPx; fontPx-=2){
           x.font="bold "+fontPx+"px 'Press Start 2P',monospace";
           lines=[]; let line="";
           for(const w of words){
@@ -2147,15 +2162,23 @@ window._adsPayload = "WwogIHsKICAgICJpZCI6ICJ4emlsbGEtaG9tZSIsCiAgICAidGV4dCI6IC
         lines.forEach((ln,i)=>x.fillText(ln,W/2,y0+i*lh));
         x.shadowBlur=0; scr.tex.needsUpdate=true;
       }
-      function mountScreen(group, w, faceY){
-        const c=document.createElement("canvas"); c.width=256; c.height=128;
+      function mountScreen(group, w, faceY, kind){
+        kind = SCREEN_KINDS[kind] ? kind : "wide";
+        const K = SCREEN_KINDS[kind];
+        const c=document.createElement("canvas"); c.width=K.cw; c.height=K.ch;
         const scr={canvas:c,ctx:c.getContext("2d")}; scr.tex=new THREE.CanvasTexture(c);
-        const sw=Math.min(w*0.82, 5.2), sh=sw*0.5;
+        // plane width capped to the building face; height follows the canvas aspect ratio
+        let sw;
+        if(kind==="wide")        sw=Math.min(w*0.82,5.2);
+        else if(kind==="square") sw=Math.min(w*0.80,4.6);
+        else                     sw=Math.min(w*0.60,3.1);   // tall 9:16
+        const sh=sw*(K.ch/K.cw);
         const m=new THREE.Mesh(new THREE.PlaneGeometry(sw,sh),
           new THREE.MeshBasicMaterial({map:scr.tex,transparent:true,depthWrite:false,fog:true}));
         m.position.set(0, faceY, 0);   // z offset applied by caller via group depth
-        m._scr=scr; m._t=Math.random()*4; m._msg=(Math.random()*AD_MSGS.length)|0; m._mode="msg";
-        drawAd(scr,AD_MSGS[m._msg],CYAN,AD_IMAGES[m._msg]);
+        m._scr=scr; m._group=kind; m._t=Math.random()*4; m._mode="msg";
+        const grp=groupFor(kind); m._msg=(Math.random()*grp.m.length)|0;
+        drawAd(scr, grp.m[m._msg], grp.c[m._msg]||CYAN, grp.img[m._msg]);
         group.add(m); adScreens.push(m);
         return m;
       }
@@ -2183,11 +2206,16 @@ window._adsPayload = "WwogIHsKICAgICJpZCI6ICJ4emlsbGEtaG9tZSIsCiAgICAidGV4dCI6IC
         ant.position.y=h-1.45+antH/2; g.add(ant);
         const beacon=halo(GOLD,1.4); beacon.position.y=h-1.45+antH; g.add(beacon);
         if(withAd){
-          const scr=mountScreen(g, w, h*0.62-1.45);
+          // Small buildings → wide 2:1. Big buildings → square 1:1 or tall 9:16 (alternating).
+          let kind, faceY;
+          if(h < 17){ kind="wide"; faceY=h*0.62-1.45; }
+          else { kind = (_bigAdN++ % 2) ? "tall" : "square"; faceY = (kind==="tall"? h*0.5 : h*0.55) - 1.45; }
+          const scr=mountScreen(g, w, faceY, kind);
           scr.position.z = d/2 + 0.06;          // sit flush on the front face
         }
         return g;
       }
+      let _bigAdN = 0;   // alternates square/tall across big buildings so both ratios appear
 
       /* ---------- rebuild skyline into skyline[] ---------- */
       try{ for(const o of skyline) disposeObj(o); }catch(_){}
@@ -2215,33 +2243,41 @@ window._adsPayload = "WwogIHsKICAgICJpZCI6ICJ4emlsbGEtaG9tZSIsCiAgICAidGV4dCI6IC
       const ADS_FALLBACK = "https://raw.githubusercontent.com/Xzilla-memecoin/xzilla-game/main/ads.json";
       (function loadAdsConfig(){
         let lastSig = null;   // skip re-applying identical configs (no needless redraw/flicker)
-        function applyAds(data){
-          let raw = Array.isArray(data) ? data : (data && Array.isArray(data.messages) ? data.messages : null);
-          if(!raw) return false;
-          const sig = JSON.stringify(raw);
-          if(sig === lastSig) return true;   // unchanged → treat as applied, do nothing
-          // each entry can be a plain string ("WAGMI") or
-          // {"text":"WAGMI","color":"#21e6ff","imageUrl":"...","clickLink":"..."}
-          const msgs=[], colors=[], imgs=[], links=[];
-          for(const item of raw){
+        // Parse one ad list (array of strings / {text,color,imageUrl,clickLink}) into parallel arrays.
+        function parseList(raw){
+          const m=[],c=[],img=[],l=[];
+          for(const item of (Array.isArray(raw)?raw:[])){
             const isObj = item && typeof item==="object";
             const text = typeof item==="string" ? item : (isObj && typeof item.text==="string" ? item.text : "");
             const imageUrl = (isObj && typeof item.imageUrl==="string") ? item.imageUrl : undefined;
             if((typeof text!=="string" || !text.trim()) && !imageUrl) continue;   // need text OR image (image-only allowed)
-            msgs.push((text||"").trim().toUpperCase().slice(0,60));               // "" for an image-only ad
-            colors.push((isObj && /^#[0-9a-fA-F]{3,8}$/.test(item.color||"")) ? item.color : null);
-            imgs.push(imageUrl);
-            links.push((isObj && typeof item.clickLink==="string") ? item.clickLink : undefined);
+            m.push((text||"").trim().toUpperCase().slice(0,60));                  // "" for an image-only ad
+            c.push((isObj && /^#[0-9a-fA-F]{3,8}$/.test(item.color||"")) ? item.color : null);
+            img.push(imageUrl);
+            l.push((isObj && typeof item.clickLink==="string") ? item.clickLink : undefined);
           }
-          if(!msgs.length) return false;
+          return { m, c, img, l };
+        }
+        function applyAds(data){
+          // Accept grouped {wide,square,tall}, legacy {messages:[...]}, or a bare array.
+          let groups;
+          if(Array.isArray(data)) groups = { wide:data };
+          else if(data && typeof data==="object"){
+            if(Array.isArray(data.messages)) groups = { wide:data.messages };
+            else if(Array.isArray(data.wide)||Array.isArray(data.square)||Array.isArray(data.tall))
+              groups = { wide:data.wide, square:data.square, tall:data.tall };
+            else return false;
+          } else return false;
+          const sig = JSON.stringify(groups);
+          if(sig === lastSig) return true;   // unchanged → no-op
+          const W=parseList(groups.wide), S=parseList(groups.square), T=parseList(groups.tall);
+          if(!W.m.length && !S.m.length && !T.m.length) return false;
           lastSig = sig;
-          AD_MSGS.length=0; AD_MSGS.push(...msgs);
-          AD_COLORS.length=0; AD_COLORS.push(...colors);
-          AD_IMAGES.length=0; AD_IMAGES.push(...imgs);
-          AD_LINKS.length=0;  AD_LINKS.push(...links);
-          imgs.forEach(adImage);
-          for(const s of adScreens){ s._msg=s._msg%AD_MSGS.length; s._t=0;
-            drawAd(s._scr,AD_MSGS[s._msg],AD_COLORS[s._msg]||CYAN,AD_IMAGES[s._msg]); }
+          AD_GROUPS.wide=W; AD_GROUPS.square=S; AD_GROUPS.tall=T;
+          [W,S,T].forEach(g=>g.img.forEach(adImage));   // warm image caches
+          for(const s of adScreens){ const grp=groupFor(s._group); if(!grp.m.length) continue;
+            s._msg=s._msg%grp.m.length; s._t=0;
+            drawAd(s._scr, grp.m[s._msg], grp.c[s._msg]||CYAN, grp.img[s._msg]); }
           return true;
         }
         const tryUrl = u => u ? fetch(u,{cache:"no-store"}).then(r=>r.ok?r.json():null) : Promise.resolve(null);
@@ -2300,9 +2336,9 @@ window._adsPayload = "WwogIHsKICAgICJpZCI6ICJ4emlsbGEtaG9tZSIsCiAgICAidGV4dCI6IC
           } else {
             s.material.opacity=1;
             if(s._mode==="boss"){ s._mode="msg"; s._t=99; }
-            if(s._t>3.4){ s._t=0; s._msg=(s._msg+1)%AD_MSGS.length;
+            if(s._t>3.4){ s._t=0; const grp=groupFor(s._group); s._msg=(s._msg+1)%grp.m.length;
               const tierCol=combo>=10?GOLD:(combo>=5?MAG:CYAN);
-              drawAd(s._scr,AD_MSGS[s._msg],AD_COLORS[s._msg]||tierCol,AD_IMAGES[s._msg]); }
+              drawAd(s._scr, grp.m[s._msg], grp.c[s._msg]||tierCol, grp.img[s._msg]); }
           }
         }
       };

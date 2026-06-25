@@ -27,7 +27,8 @@ const XZILLA_MINT = "2VzDVUgzTHSf9qCPdkYBeMd2sK7m8t9GR2MN5kxRpump";
 const B58_RE = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/;   // base58 Solana address shape
 
 const ADS_KEY = "ads:v1";     // KV key holding the live billboard ad config
-const ADS_MAX_BYTES = 8000;   // reject oversized ad payloads
+const ADS_MAX_BYTES = 24000;  // reject oversized ad payloads (3 ratio groups + image URLs)
+const AD_GROUP_KEYS = ["wide", "square", "tall"];   // the 3 aspect-ratio pools
 
 const IMG_PREFIX = "img:";                 // KV key prefix for uploaded ad images
 const IMG_MAX_BYTES = 2_000_000;           // 2 MB cap per ad image
@@ -144,12 +145,20 @@ export default {
       if(text.length > ADS_MAX_BYTES) return json({ error: "too_large" }, 413, origin);
       let parsed;
       try{ parsed = JSON.parse(text); }catch(_){ return json({ error: "bad_json" }, 400, origin); }
-      const arr = Array.isArray(parsed) ? parsed
-                : (parsed && Array.isArray(parsed.messages) ? parsed.messages : null);
-      if(!arr) return json({ error: "expected an array or {messages:[...]}" }, 400, origin);
-      await env.LB.put(ADS_KEY, JSON.stringify({ messages: arr }));
+      // Accept grouped {wide,square,tall}, legacy {messages:[...]}, or a bare array (→ wide).
+      let cfg, count = 0;
+      if(Array.isArray(parsed)){ cfg = { wide: parsed }; count = parsed.length; }
+      else if(parsed && typeof parsed === "object"){
+        if(Array.isArray(parsed.messages)){ cfg = { wide: parsed.messages }; count = parsed.messages.length; }
+        else {
+          cfg = {};
+          for(const k of AD_GROUP_KEYS){ if(Array.isArray(parsed[k])){ cfg[k] = parsed[k]; count += parsed[k].length; } }
+          if(!Object.keys(cfg).length) return json({ error: "expected {wide,square,tall} arrays or {messages:[...]}" }, 400, origin);
+        }
+      } else return json({ error: "bad_format" }, 400, origin);
+      await env.LB.put(ADS_KEY, JSON.stringify(cfg));
       try{ await caches.default.delete(new Request(new URL("/ads", req.url).toString())); }catch(_){}   // purge edge cache so the update is live immediately
-      return json({ ok: true, count: arr.length }, 200, origin);
+      return json({ ok: true, count }, 200, origin);
     }
 
     // -------- POST /ad-image  (admin) — store an uploaded image, return its URL -----

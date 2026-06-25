@@ -10,63 +10,63 @@
   *{ box-sizing:border-box; }
   body{ margin:0; background:radial-gradient(120% 80% at 50% -10%, #1a0f43 0%, var(--bg) 60%); color:#eaf2ff;
         font-family:-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif; min-height:100vh; padding:18px; }
-  .wrap{ max-width:680px; margin:0 auto; }
-  h1{ font-size:20px; letter-spacing:1px; margin:6px 0 2px; }
-  h1 span{ color:var(--gold); }
+  .wrap{ max-width:760px; margin:0 auto; }
+  h1{ font-size:20px; letter-spacing:1px; margin:6px 0 2px; } h1 span{ color:var(--gold); }
   .sub{ color:var(--mut); font-size:13px; margin:0 0 16px; }
   .card{ background:var(--card); border:1px solid var(--line); border-radius:14px; padding:14px; margin-bottom:14px; }
   label{ display:block; font-size:12px; color:var(--mut); margin:0 0 6px; text-transform:uppercase; letter-spacing:.5px; }
   input[type=text], input[type=password], input[type=url]{ width:100%; background:#0c0726; border:1px solid var(--line);
         color:#fff; border-radius:9px; padding:11px 12px; font-size:14px; }
   input:focus{ outline:none; border-color:var(--cyan); }
+  .group{ border-top:3px solid var(--cyan); }
+  .group.square{ border-top-color:var(--mag); } .group.tall{ border-top-color:var(--gold); }
+  .ghead{ display:flex; align-items:baseline; gap:10px; margin-bottom:10px; }
+  .ghead b{ font-size:15px; letter-spacing:1px; }
   .ad{ border:1px solid var(--line); border-radius:11px; padding:12px; margin-bottom:10px; background:#0e0828; }
-  .ad .row{ display:flex; gap:8px; align-items:center; }
-  .ad .row + .row{ margin-top:8px; }
-  .ad input[type=color]{ width:46px; height:42px; padding:0; border:1px solid var(--line); border-radius:9px; background:#0c0726; }
+  .admain{ display:flex; gap:12px; align-items:flex-start; }
+  .fields{ flex:1; min-width:0; }
+  .row{ display:flex; gap:8px; align-items:center; } .row + .row{ margin-top:8px; }
   .grid2{ display:grid; grid-template-columns:1fr 1fr; gap:8px; }
-  @media(max-width:520px){ .grid2{ grid-template-columns:1fr; } }
+  @media(max-width:560px){ .grid2{ grid-template-columns:1fr; } .admain{ flex-direction:column-reverse; } }
+  input[type=color]{ width:46px; height:42px; padding:0; border:1px solid var(--line); border-radius:9px; background:#0c0726; flex:none; }
+  .preview{ flex:none; text-align:center; }
+  .f-prev{ background:#05030f; border-radius:6px; display:block; }
+  .prevlabel{ margin-top:3px; }
   .small{ font-size:11px; color:var(--mut); }
   button{ font-family:inherit; font-weight:700; border:none; border-radius:10px; padding:12px 16px; cursor:pointer; font-size:14px; }
   .btn-pub{ background:var(--green); color:#06210f; width:100%; font-size:16px; letter-spacing:.5px; }
   .btn-add{ background:transparent; color:var(--cyan); border:1px dashed var(--cyan); width:100%; }
-  .btn-load{ background:transparent; color:var(--gold); border:1px solid var(--gold); }
-  .btn-x{ background:#2a1c54; color:var(--red); padding:8px 11px; border-radius:9px; }
-  .up-btn{ background:transparent; color:var(--cyan); border:1px solid var(--cyan); border-radius:9px;
-           padding:9px 12px; cursor:pointer; font-size:13px; font-weight:700; display:inline-block; }
-  .f-thumb{ height:40px; border-radius:6px; border:1px solid var(--line); }
-  .bar{ display:flex; gap:8px; margin-bottom:12px; }
-  .bar button{ flex:1; }
+  .btn-load{ background:transparent; color:var(--gold); border:1px solid var(--gold); width:100%; }
+  .btn-x{ background:#2a1c54; color:var(--red); padding:8px 11px; border-radius:9px; flex:none; }
+  .up-btn{ background:transparent; color:var(--cyan); border:1px solid var(--cyan); border-radius:9px; padding:9px 12px; cursor:pointer; font-size:13px; font-weight:700; }
+  .bar{ margin-bottom:12px; }
   #status{ min-height:20px; font-size:14px; margin-top:10px; text-align:center; font-weight:600; }
   .ok{ color:var(--green); } .err{ color:var(--red); }
-  .hint{ font-size:12px; color:var(--mut); margin-top:4px; }
 </style>
 </head>
 <body>
 <div class="wrap">
   <h1>XZILLA · <span>Ads Admin</span></h1>
-  <p class="sub">Type your in-game billboard ads, then Publish. Changes go live in seconds.</p>
+  <p class="sub">Ads are grouped by billboard shape. Fill the boxes, watch the live preview, then Publish — live in seconds, no reload.</p>
 
   <div class="card">
     <label for="token">Admin token</label>
     <input id="token" type="password" placeholder="paste your ads admin token" autocomplete="off" />
-    <div class="row" style="display:flex;gap:8px;align-items:center;margin-top:8px;">
+    <div class="row" style="margin-top:8px;">
       <input id="remember" type="checkbox" checked style="width:auto" />
       <label for="remember" style="margin:0;text-transform:none;">Remember on this device</label>
     </div>
   </div>
 
-  <div class="bar">
-    <button class="btn-load" id="load">↻ Load current ads</button>
-  </div>
+  <div class="bar"><button class="btn-load" id="load">↻ Load current ads</button></div>
 
-  <div id="ads"></div>
-  <button class="btn-add" id="add">+ Add another ad</button>
+  <div id="groups"></div>
 
-  <div class="card" style="margin-top:14px;">
+  <div class="card">
     <button class="btn-pub" id="publish">🚀 Publish ads (go live)</button>
     <div id="status"></div>
   </div>
-  <p class="small">Each ad needs <b>text OR an image</b>. <b>Image-only:</b> upload/paste an image and leave the text empty → it shows full-screen with no caption. With text + image, the text overlays the image. Click <b>📁 Upload image</b> to add a picture straight from your device (max 2 MB, ~2:1 landscape looks best).</p>
+  <p class="small"><b>Tip:</b> leave an ad's text empty (with an image) for a full-screen image-only billboard. WIDE = small buildings (2:1) · SQUARE = big buildings (1:1) · TALL = big buildings (9:16 portrait). Upload max 2 MB; match the group's shape for best fit.</p>
 </div>
 
 <script>
@@ -74,47 +74,92 @@ const BASE = "https://xzilla-leaderboard.kombainain.workers.dev";
 const API = BASE + "/ads";
 const IMG_API = BASE + "/ad-image";
 const $ = id => document.getElementById(id);
-const adsEl = $("ads");
+
+const GROUPS = [
+  { key:"wide",   name:"WIDE · 2:1",   note:"small buildings",          rw:2, rh:1 },
+  { key:"square", name:"SQUARE · 1:1", note:"big buildings",            rw:1, rh:1 },
+  { key:"tall",   name:"TALL · 9:16",  note:"big buildings (portrait)", rw:9, rh:16 }
+];
+const containers = {};   // key -> .ads element
 
 // token persistence
-const saved = localStorage.getItem("xz_ads_token");
-if(saved){ $("token").value = saved; }
+const savedTok = localStorage.getItem("xz_ads_token");
+if(savedTok){ $("token").value = savedTok; }
 $("token").addEventListener("input", ()=>{ if($("remember").checked) localStorage.setItem("xz_ads_token", $("token").value.trim()); });
 
-function adRow(data){
-  data = data || {};
-  const wrap = document.createElement("div"); wrap.className="ad";
-  wrap.innerHTML =
-    '<div class="row">'+
-      '<input type="text" class="f-text" placeholder="Ad text — leave empty for image-only" />'+
-      '<input type="color" class="f-color" value="#ffd23f" title="Text / border color" />'+
-      '<button class="btn-x" title="Remove">✕</button>'+
-    '</div>'+
-    '<div class="row grid2">'+
-      '<input type="url" class="f-img" placeholder="Image URL (or upload →)" />'+
-      '<input type="url" class="f-link" placeholder="Click link (optional)" />'+
-    '</div>'+
-    '<div class="row" style="margin-top:8px;align-items:center;gap:10px;flex-wrap:wrap">'+
-      '<label class="up-btn">📁 Upload image<input type="file" accept="image/*" class="f-file" style="display:none" /></label>'+
-      '<img class="f-thumb" style="display:none" />'+
-      '<span class="f-up small"></span>'+
-    '</div>';
-  wrap.querySelector(".f-text").value  = data.text || "";
-  if(data.color) wrap.querySelector(".f-color").value = data.color;
-  wrap.querySelector(".f-img").value   = data.imageUrl || "";
-  wrap.querySelector(".f-link").value  = data.clickLink || "";
-  const thumb = wrap.querySelector(".f-thumb");
-  if(data.imageUrl){ thumb.src = data.imageUrl; thumb.style.display="inline-block"; }
-  wrap.querySelector(".f-img").addEventListener("input", e=>{
-    const v=e.target.value.trim(); if(v){ thumb.src=v; thumb.style.display="inline-block"; } else thumb.style.display="none";
-  });
-  wrap.querySelector(".f-file").onchange = e=>{ const f=e.target.files[0]; if(f) uploadImage(f, wrap); };
-  wrap.querySelector(".btn-x").onclick = ()=> wrap.remove();
-  adsEl.appendChild(wrap);
+// ---- preview rendering (mirrors the in-game billboard) ----
+const _imgCache = {};
+function loadImg(url, cb){
+  if(!url){ cb(null); return; }
+  if(_imgCache[url] && _imgCache[url].complete){ cb(_imgCache[url]); return; }
+  const im = new Image(); im.onload = ()=>cb(im); im.onerror = ()=>cb(null); im.src = url; _imgCache[url] = im;
+}
+function drawPreview(canvas, g, text, color, img){
+  const long = 132; let W, H;
+  if(g.rw >= g.rh){ W = long; H = Math.round(long*g.rh/g.rw); } else { H = long; W = Math.round(long*g.rw/g.rh); }
+  canvas.width = W; canvas.height = H; canvas.style.width = W+"px"; canvas.style.height = H+"px";
+  const x = canvas.getContext("2d");
+  const t = (text||"").trim();
+  x.fillStyle = "#05030f"; x.fillRect(0,0,W,H);
+  if(!t && img){                                   // image-only → full bleed
+    x.drawImage(img,0,0,W,H);
+    x.strokeStyle = color||"#21e6ff"; x.lineWidth = 4; x.strokeRect(2,2,W-4,H-4); return;
+  }
+  if(img){ x.globalAlpha=0.6; x.drawImage(img,0,0,W,H); x.globalAlpha=1; x.fillStyle="rgba(5,3,15,.35)"; x.fillRect(0,0,W,H); }
+  x.strokeStyle = color||"#21e6ff"; x.lineWidth = 4; x.strokeRect(2,2,W-4,H-4);
+  if(t){
+    x.fillStyle = color||"#21e6ff"; x.textAlign="center"; x.textBaseline="middle";
+    let fp = Math.max(8, Math.round(W/9)); x.font = "bold "+fp+"px monospace";
+    const words = t.toUpperCase().split(" "); let lines=[], line="";
+    for(const w of words){ const tt=line?line+" "+w:w; if(x.measureText(tt).width>W-10 && line){ lines.push(line); line=w; } else line=tt; }
+    lines.push(line);
+    const lh = Math.round(fp*1.25), y0 = H/2-(lines.length-1)*lh/2;
+    lines.forEach((ln,i)=>x.fillText(ln, W/2, y0+i*lh));
+  }
+}
+function refreshPreview(row, g){
+  const text = row.querySelector(".f-text").value;
+  const color = row.querySelector(".f-color").value;
+  const url = row.querySelector(".f-img").value.trim();
+  const cv = row.querySelector(".f-prev");
+  loadImg(url, im => drawPreview(cv, g, text, color, im));
 }
 
-// Upload a chosen image file straight to the Worker; fills the Image URL on success.
-async function uploadImage(file, row){
+function adRow(g, data){
+  data = data || {};
+  const wrap = document.createElement("div"); wrap.className = "ad";
+  wrap.innerHTML =
+    '<div class="admain">'+
+      '<div class="fields">'+
+        '<div class="row">'+
+          '<input type="text" class="f-text" placeholder="Text — empty for image-only" />'+
+          '<input type="color" class="f-color" value="#ffd23f" title="Text / border color" />'+
+          '<button class="btn-x" title="Remove">✕</button>'+
+        '</div>'+
+        '<div class="row grid2">'+
+          '<input type="url" class="f-img" placeholder="Image URL (or upload →)" />'+
+          '<input type="url" class="f-link" placeholder="Click link (optional)" />'+
+        '</div>'+
+        '<div class="row"><label class="up-btn">📁 Upload<input type="file" accept="image/*" class="f-file" style="display:none" /></label><span class="f-up small"></span></div>'+
+      '</div>'+
+      '<div class="preview"><canvas class="f-prev"></canvas><div class="small prevlabel">preview</div></div>'+
+    '</div>';
+  wrap.querySelector(".f-text").value = data.text || "";
+  if(data.color) wrap.querySelector(".f-color").value = data.color;
+  wrap.querySelector(".f-img").value  = data.imageUrl || "";
+  wrap.querySelector(".f-link").value = data.clickLink || "";
+  const upd = ()=> refreshPreview(wrap, g);
+  wrap.querySelector(".f-text").addEventListener("input", upd);
+  wrap.querySelector(".f-color").addEventListener("input", upd);
+  wrap.querySelector(".f-img").addEventListener("input", upd);
+  wrap.querySelector(".f-file").onchange = e => { const f=e.target.files[0]; if(f) uploadImage(f, wrap, g); };
+  wrap.querySelector(".btn-x").onclick = ()=> wrap.remove();
+  containers[g.key].appendChild(wrap);
+  upd();
+  return wrap;
+}
+
+async function uploadImage(file, row, g){
   const token = $("token").value.trim();
   const st = row.querySelector(".f-up");
   if(!token){ status("Enter your admin token first — it's needed to upload.", false); return; }
@@ -124,29 +169,22 @@ async function uploadImage(file, row){
   try{
     const r = await fetch(IMG_API, { method:"POST", headers:{ "content-type":file.type, "x-admin-token":token }, body:file });
     const d = await r.json();
-    if(r.ok && d.url){
-      row.querySelector(".f-img").value = d.url;
-      const thumb = row.querySelector(".f-thumb"); thumb.src = d.url; thumb.style.display="inline-block";
-      st.textContent="Uploaded ✓"; st.className="f-up small ok";
-    } else if(r.status===401){ st.textContent="Wrong token"; st.className="f-up small err"; }
+    if(r.ok && d.url){ row.querySelector(".f-img").value = d.url; refreshPreview(row, g); st.textContent="Uploaded ✓"; st.className="f-up small ok"; }
+    else if(r.status===401){ st.textContent="Wrong token"; st.className="f-up small err"; }
     else { st.textContent="Failed: "+(d.error||r.status); st.className="f-up small err"; }
   }catch(e){ st.textContent="Failed: "+e.message; st.className="f-up small err"; }
 }
 
-function collect(){
+function collectGroup(key){
   const out = [];
-  adsEl.querySelectorAll(".ad").forEach(ad=>{
+  containers[key].querySelectorAll(".ad").forEach(ad=>{
     const text  = ad.querySelector(".f-text").value.trim();
     const color = ad.querySelector(".f-color").value;
     const img   = ad.querySelector(".f-img").value.trim();
     const link  = ad.querySelector(".f-link").value.trim();
-    if(!text && !img) return;                                    // skip empty ads
+    if(!text && !img) return;
     if(text && color==="#ffd23f" && !img && !link){ out.push(text); return; }   // plain text ad
-    const o = {};                                                // object ad (image-only has no text)
-    if(text) o.text = text;
-    if(color && color !== "#ffd23f") o.color = color;
-    if(img) o.imageUrl = img;
-    if(link) o.clickLink = link;
+    const o = {}; if(text) o.text=text; if(color && color!=="#ffd23f") o.color=color; if(img) o.imageUrl=img; if(link) o.clickLink=link;
     out.push(o);
   });
   return out;
@@ -154,16 +192,30 @@ function collect(){
 
 function status(msg, ok){ const s=$("status"); s.textContent=msg; s.className = ok?"ok":"err"; }
 
-$("add").onclick = ()=> adRow();
+// build the 3 group sections
+GROUPS.forEach(g=>{
+  const card = document.createElement("div"); card.className = "card group "+g.key;
+  card.innerHTML = '<div class="ghead"><b>'+g.name+'</b><span class="small">'+g.note+'</span></div>'+
+                   '<div class="ads"></div>'+
+                   '<button class="btn-add">+ Add ad</button>';
+  containers[g.key] = card.querySelector(".ads");
+  card.querySelector(".btn-add").onclick = ()=> adRow(g);
+  $("groups").appendChild(card);
+});
 
 $("load").onclick = async ()=>{
   status("Loading…", true);
   try{
-    const r = await fetch(API, { cache:"no-store" });
+    const r = await fetch(API + "?t=" + Date.now(), { cache:"no-store" });
     const d = await r.json();
-    adsEl.innerHTML = "";
-    (d.messages||[]).forEach(m => adRow(typeof m==="string" ? {text:m} : m));
-    if(!adsEl.children.length) adRow();
+    GROUPS.forEach(g=> containers[g.key].innerHTML = "");
+    // grouped config, or legacy {messages:[...]} → wide
+    const data = (d && (Array.isArray(d.wide)||Array.isArray(d.square)||Array.isArray(d.tall)))
+      ? d : { wide: (d && d.messages) || [] };
+    GROUPS.forEach(g=>{
+      (data[g.key] || []).forEach(m => adRow(g, typeof m==="string" ? {text:m} : m));
+      if(!containers[g.key].children.length) adRow(g);   // leave one empty row to start
+    });
     status("Loaded current live ads.", true);
   }catch(e){ status("Couldn't load: "+e.message, false); }
 };
@@ -171,12 +223,13 @@ $("load").onclick = async ()=>{
 $("publish").onclick = async ()=>{
   const token = $("token").value.trim();
   if(!token){ status("Enter your admin token first.", false); return; }
-  const messages = collect();
-  if(!messages.length){ status("Add at least one ad with text.", false); return; }
+  const cfg = {}; let total = 0;
+  GROUPS.forEach(g=>{ const list = collectGroup(g.key); cfg[g.key] = list; total += list.length; });
+  if(!total){ status("Add at least one ad.", false); return; }
   if($("remember").checked) localStorage.setItem("xz_ads_token", token);
   status("Publishing…", true);
   try{
-    const r = await fetch(API, { method:"POST", headers:{ "content-type":"application/json", "x-admin-token":token }, body: JSON.stringify({ messages }) });
+    const r = await fetch(API, { method:"POST", headers:{ "content-type":"application/json", "x-admin-token":token }, body: JSON.stringify(cfg) });
     const d = await r.json();
     if(r.ok && d.ok){ status("✅ Published "+d.count+" ads — live now!", true); }
     else if(r.status===401){ status("❌ Wrong admin token.", false); }
@@ -184,9 +237,9 @@ $("publish").onclick = async ()=>{
   }catch(e){ status("❌ Failed: "+e.message, false); }
 };
 
-// start with one empty ad; auto-load current if a token is already saved
-adRow();
-if(saved) $("load").click();
+// start: one empty row per group; auto-load if a token is saved
+GROUPS.forEach(g=> adRow(g));
+if(savedTok) $("load").click();
 </script>
 </body>
 </html>
