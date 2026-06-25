@@ -31,6 +31,9 @@
   .btn-add{ background:transparent; color:var(--cyan); border:1px dashed var(--cyan); width:100%; }
   .btn-load{ background:transparent; color:var(--gold); border:1px solid var(--gold); }
   .btn-x{ background:#2a1c54; color:var(--red); padding:8px 11px; border-radius:9px; }
+  .up-btn{ background:transparent; color:var(--cyan); border:1px solid var(--cyan); border-radius:9px;
+           padding:9px 12px; cursor:pointer; font-size:13px; font-weight:700; display:inline-block; }
+  .f-thumb{ height:40px; border-radius:6px; border:1px solid var(--line); }
   .bar{ display:flex; gap:8px; margin-bottom:12px; }
   .bar button{ flex:1; }
   #status{ min-height:20px; font-size:14px; margin-top:10px; text-align:center; font-weight:600; }
@@ -63,11 +66,13 @@
     <button class="btn-pub" id="publish">🚀 Publish ads (go live)</button>
     <div id="status"></div>
   </div>
-  <p class="small">Each ad needs text. Color, image URL and click link are optional. Leave an ad's text empty to drop it.</p>
+  <p class="small">Each ad needs <b>text OR an image</b>. <b>Image-only:</b> upload/paste an image and leave the text empty → it shows full-screen with no caption. With text + image, the text overlays the image. Click <b>📁 Upload image</b> to add a picture straight from your device (max 2 MB, ~2:1 landscape looks best).</p>
 </div>
 
 <script>
-const API = "https://xzilla-leaderboard.kombainain.workers.dev/ads";
+const BASE = "https://xzilla-leaderboard.kombainain.workers.dev";
+const API = BASE + "/ads";
+const IMG_API = BASE + "/ad-image";
 const $ = id => document.getElementById(id);
 const adsEl = $("ads");
 
@@ -81,32 +86,68 @@ function adRow(data){
   const wrap = document.createElement("div"); wrap.className="ad";
   wrap.innerHTML =
     '<div class="row">'+
-      '<input type="text" class="f-text" placeholder="Ad text (e.g. BUY $XZILLA NOW)" />'+
-      '<input type="color" class="f-color" value="#ffd23f" title="Text color" />'+
+      '<input type="text" class="f-text" placeholder="Ad text — leave empty for image-only" />'+
+      '<input type="color" class="f-color" value="#ffd23f" title="Text / border color" />'+
       '<button class="btn-x" title="Remove">✕</button>'+
     '</div>'+
     '<div class="row grid2">'+
-      '<input type="url" class="f-img" placeholder="Image URL (optional)" />'+
+      '<input type="url" class="f-img" placeholder="Image URL (or upload →)" />'+
       '<input type="url" class="f-link" placeholder="Click link (optional)" />'+
+    '</div>'+
+    '<div class="row" style="margin-top:8px;align-items:center;gap:10px;flex-wrap:wrap">'+
+      '<label class="up-btn">📁 Upload image<input type="file" accept="image/*" class="f-file" style="display:none" /></label>'+
+      '<img class="f-thumb" style="display:none" />'+
+      '<span class="f-up small"></span>'+
     '</div>';
   wrap.querySelector(".f-text").value  = data.text || "";
   if(data.color) wrap.querySelector(".f-color").value = data.color;
   wrap.querySelector(".f-img").value   = data.imageUrl || "";
   wrap.querySelector(".f-link").value  = data.clickLink || "";
+  const thumb = wrap.querySelector(".f-thumb");
+  if(data.imageUrl){ thumb.src = data.imageUrl; thumb.style.display="inline-block"; }
+  wrap.querySelector(".f-img").addEventListener("input", e=>{
+    const v=e.target.value.trim(); if(v){ thumb.src=v; thumb.style.display="inline-block"; } else thumb.style.display="none";
+  });
+  wrap.querySelector(".f-file").onchange = e=>{ const f=e.target.files[0]; if(f) uploadImage(f, wrap); };
   wrap.querySelector(".btn-x").onclick = ()=> wrap.remove();
   adsEl.appendChild(wrap);
+}
+
+// Upload a chosen image file straight to the Worker; fills the Image URL on success.
+async function uploadImage(file, row){
+  const token = $("token").value.trim();
+  const st = row.querySelector(".f-up");
+  if(!token){ status("Enter your admin token first — it's needed to upload.", false); return; }
+  if(!/^image\//.test(file.type)){ st.textContent="Not an image"; st.className="f-up small err"; return; }
+  if(file.size > 2000000){ st.textContent="Too big (max 2 MB)"; st.className="f-up small err"; return; }
+  st.textContent="Uploading…"; st.className="f-up small";
+  try{
+    const r = await fetch(IMG_API, { method:"POST", headers:{ "content-type":file.type, "x-admin-token":token }, body:file });
+    const d = await r.json();
+    if(r.ok && d.url){
+      row.querySelector(".f-img").value = d.url;
+      const thumb = row.querySelector(".f-thumb"); thumb.src = d.url; thumb.style.display="inline-block";
+      st.textContent="Uploaded ✓"; st.className="f-up small ok";
+    } else if(r.status===401){ st.textContent="Wrong token"; st.className="f-up small err"; }
+    else { st.textContent="Failed: "+(d.error||r.status); st.className="f-up small err"; }
+  }catch(e){ st.textContent="Failed: "+e.message; st.className="f-up small err"; }
 }
 
 function collect(){
   const out = [];
   adsEl.querySelectorAll(".ad").forEach(ad=>{
-    const text = ad.querySelector(".f-text").value.trim();
-    if(!text) return;
+    const text  = ad.querySelector(".f-text").value.trim();
     const color = ad.querySelector(".f-color").value;
     const img   = ad.querySelector(".f-img").value.trim();
     const link  = ad.querySelector(".f-link").value.trim();
-    if(color==="#ffd23f" && !img && !link){ out.push(text); }   // plain string when no extras
-    else{ const o={ text }; if(color) o.color=color; if(img) o.imageUrl=img; if(link) o.clickLink=link; out.push(o); }
+    if(!text && !img) return;                                    // skip empty ads
+    if(text && color==="#ffd23f" && !img && !link){ out.push(text); return; }   // plain text ad
+    const o = {};                                                // object ad (image-only has no text)
+    if(text) o.text = text;
+    if(color && color !== "#ffd23f") o.color = color;
+    if(img) o.imageUrl = img;
+    if(link) o.clickLink = link;
+    out.push(o);
   });
   return out;
 }

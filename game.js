@@ -2087,10 +2087,11 @@ window._adsPayload = "WwogIHsKICAgICJpZCI6ICJ4emlsbGEtaG9tZSIsCiAgICAidGV4dCI6IC
         const msgs=[],cols=[],imgs=[],links=[];
         for(const a of ads){
           const text=a&&typeof a.text==="string"?a.text.trim():"";
-          if(!text) continue;
-          msgs.push(text.toUpperCase().slice(0,60));
+          const imageUrl=a&&typeof a.imageUrl==="string"?a.imageUrl:undefined;
+          if(!text && !imageUrl) continue;   // need at least text OR an image (image-only allowed)
+          msgs.push(text.toUpperCase().slice(0,60));   // "" for an image-only ad
           cols.push(/^#[0-9a-fA-F]{3,8}$/.test(a.color||"")?a.color:null);
-          imgs.push(typeof a.imageUrl==="string"?a.imageUrl:undefined);
+          imgs.push(imageUrl);
           links.push(typeof a.clickLink==="string"?a.clickLink:undefined);
         }
         if(!msgs.length) return;
@@ -2107,8 +2108,16 @@ window._adsPayload = "WwogIHsKICAgICJpZCI6ICJ4emlsbGEtaG9tZSIsCiAgICAidGV4dCI6IC
       // always stays fully on the screen no matter how long it is.
       function drawAd(scr,msg,color,imageUrl){
         const x=scr.ctx,W=256,H=128;
-        // Background: cached ad image if decoded, else the solid neon-dark panel.
         const img=adImage(imageUrl);
+        const text=String(msg==null?"":msg).trim();
+        // IMAGE-ONLY: an ad with an image and no caption → full-bleed banner (no scrim, no text).
+        if(!text && img && img._ready){
+          x.fillStyle="#05030f"; x.fillRect(0,0,W,H);
+          x.drawImage(img,0,0,W,H);
+          x.strokeStyle=color||"#21e6ff"; x.lineWidth=6; x.strokeRect(5,5,W-10,H-10);
+          x.shadowBlur=0; scr.tex.needsUpdate=true; return;
+        }
+        // Background: cached ad image if decoded, else the solid neon-dark panel.
         if(img&&img._ready){
           x.fillStyle="#05030f"; x.fillRect(0,0,W,H);          // base under transparent/letterboxed art
           x.globalAlpha=0.6; x.drawImage(img,0,0,W,H); x.globalAlpha=1;
@@ -2212,12 +2221,14 @@ window._adsPayload = "WwogIHsKICAgICJpZCI6ICJ4emlsbGEtaG9tZSIsCiAgICAidGV4dCI6IC
           // {"text":"WAGMI","color":"#21e6ff","imageUrl":"...","clickLink":"..."}
           const msgs=[], colors=[], imgs=[], links=[];
           for(const item of raw){
-            const text = typeof item==="string" ? item : (item && item.text);
-            if(typeof text!=="string" || !text.trim()) continue;
-            msgs.push(text.trim().toUpperCase().slice(0,60));
-            colors.push((item && typeof item==="object" && /^#[0-9a-fA-F]{3,8}$/.test(item.color||"")) ? item.color : null);
-            imgs.push((item && typeof item==="object" && typeof item.imageUrl==="string") ? item.imageUrl : undefined);
-            links.push((item && typeof item==="object" && typeof item.clickLink==="string") ? item.clickLink : undefined);
+            const isObj = item && typeof item==="object";
+            const text = typeof item==="string" ? item : (isObj && typeof item.text==="string" ? item.text : "");
+            const imageUrl = (isObj && typeof item.imageUrl==="string") ? item.imageUrl : undefined;
+            if((typeof text!=="string" || !text.trim()) && !imageUrl) continue;   // need text OR image (image-only allowed)
+            msgs.push((text||"").trim().toUpperCase().slice(0,60));               // "" for an image-only ad
+            colors.push((isObj && /^#[0-9a-fA-F]{3,8}$/.test(item.color||"")) ? item.color : null);
+            imgs.push(imageUrl);
+            links.push((isObj && typeof item.clickLink==="string") ? item.clickLink : undefined);
           }
           if(!msgs.length) return false;
           AD_MSGS.length=0; AD_MSGS.push(...msgs);

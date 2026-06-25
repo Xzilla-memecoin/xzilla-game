@@ -29,6 +29,10 @@ const B58_RE = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/;   // base58 Solana address shape
 const ADS_KEY = "ads:v1";     // KV key holding the live billboard ad config
 const ADS_MAX_BYTES = 8000;   // reject oversized ad payloads
 
+const IMG_PREFIX = "img:";                 // KV key prefix for uploaded ad images
+const IMG_MAX_BYTES = 2_000_000;           // 2 MB cap per ad image
+const IMG_TYPES = ["image/png", "image/jpeg", "image/webp", "image/gif"];
+
 function cors(origin){
   return {
     "Access-Control-Allow-Origin": origin || "*",
@@ -138,6 +142,35 @@ export default {
       if(!arr) return json({ error: "expected an array or {messages:[...]}" }, 400, origin);
       await env.LB.put(ADS_KEY, JSON.stringify({ messages: arr }));
       return json({ ok: true, count: arr.length }, 200, origin);
+    }
+
+    // -------- POST /ad-image  (admin) — store an uploaded image, return its URL -----
+    // Body is the raw image bytes; Content-Type must be an image/*. Lets the admin page
+    // upload a picture directly (no external host). Stored in KV, served by GET below.
+    if(req.method === "POST" && url.pathname === "/ad-image"){
+      if(!env.ADS_ADMIN_TOKEN || req.headers.get("x-admin-token") !== env.ADS_ADMIN_TOKEN)
+        return json({ error: "unauthorized" }, 401, origin);
+      const ct = (req.headers.get("content-type") || "").split(";")[0].trim().toLowerCase();
+      if(!IMG_TYPES.includes(ct)) return json({ error: "unsupported_type", detail: ct }, 415, origin);
+      const buf = await req.arrayBuffer();
+      if(buf.byteLength === 0) return json({ error: "empty" }, 400, origin);
+      if(buf.byteLength > IMG_MAX_BYTES) return json({ error: "too_large", maxBytes: IMG_MAX_BYTES }, 413, origin);
+      const id = crypto.randomUUID().replace(/-/g, "").slice(0, 16);
+      await env.LB.put(IMG_PREFIX + id, buf, { metadata: { ct } });
+      return json({ ok: true, id, url: url.origin + "/ad-image/" + id }, 200, origin);
+    }
+
+    // -------- GET /ad-image/<id>  (public) — serve a stored image (CORS for canvas) --
+    if(req.method === "GET" && url.pathname.startsWith("/ad-image/")){
+      const id = url.pathname.slice("/ad-image/".length);
+      if(!/^[a-f0-9]{8,32}$/.test(id)) return json({ error: "bad_id" }, 400, origin);
+      const { value, metadata } = await env.LB.getWithMetadata(IMG_PREFIX + id, { type: "arrayBuffer" });
+      if(!value) return json({ error: "not_found" }, 404, origin);
+      return new Response(value, { status: 200, headers: {
+        "content-type": (metadata && metadata.ct) || "image/png",
+        "Cache-Control": "public, max-age=604800",
+        "Access-Control-Allow-Origin": "*",   // canvas (crossOrigin=anonymous) needs this
+      }});
     }
 
     // -------- GET /balance?address=<pubkey> --------------------------------------
