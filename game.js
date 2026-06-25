@@ -2380,7 +2380,20 @@ window._adsPayload = "WwogIHsKICAgICJpZCI6ICJ4emlsbGEtaG9tZSIsCiAgICAidGV4dCI6IC
   //  sprite-sheet or a small procedural spinner — to revisit later.)
 
   /* -------------------------------- boot ---------------------------------- */
+  // One-time cleanup: early builds granted a demo $XZILLA "bag" (e.g. 250000) that
+  // got persisted in localStorage + CloudStorage. Holdings must only ever reflect a
+  // REAL verified on-chain balance, so wipe any leftover pre-wallet holdings once.
+  // Genuine holders simply reconnect their wallet to re-verify. Runs after the cloud
+  // restore (in boot) and re-saves so the corrected snapshot wins on every device.
+  function migrateEcon(){
+    if(store.get("xz_mig_holdings",0) >= 1) return;
+    if(econ.holdings>0){ econ.holdings=0; }
+    store.set("xz_mig_holdings",1);
+    saveEcon();
+  }
+
   function boot(){
+    migrateEcon();
     applySkin(); updateVip(); updateHUDtokens(); checkStreak();
     ensureDaily(); ensureWeekly(); syncRankSkins();   // refresh today's + this week's challenge + grant earned rank skins
     $("tabbar").classList.remove("hidden"); showTab("PLAY");
