@@ -189,6 +189,19 @@
       if(window.solana) return window.solana;                                       // generic injected provider
       return null;
     }
+    // Extensions sometimes register their provider a beat after the page settles,
+    // so a single check at click-time can miss Phantom/Solflare and wrongly fall
+    // through to the WalletConnect modal. Poll briefly before giving up.
+    function waitForInjected(ms){
+      return new Promise(resolve=>{
+        const now = getInjected(); if(now) return resolve(now);
+        const t0 = Date.now();
+        const id = setInterval(()=>{
+          const p = getInjected();
+          if(p || Date.now()-t0 > ms){ clearInterval(id); resolve(p||null); }
+        }, 120);
+      });
+    }
     async function injectedConnect(){
       const p = getInjected(); if(!p) return false;
       try{
@@ -209,9 +222,18 @@
         await readyPromise;                        // wait out AppKit init (don't fail fast)
         // Installed extension (Phantom/Solflare on desktop) → connect directly. This is
         // instant and reliable, and sidesteps AppKit's flaky wallet-standard detection.
-        if(getInjected()) return injectedConnect();
-        // No extension (mobile browser / Telegram) → open the AppKit / WalletConnect modal.
-        if(W.ready && W.appkit){ try{ W.appkit.open(); return true; }catch(e){ W.error = (e&&e.message)||String(e); } }
+        // Poll up to ~1.2s so a slow-registering extension isn't missed.
+        if(await waitForInjected(1200)) return injectedConnect();
+        // No extension (mobile browser / Telegram webview) → open the AppKit / WalletConnect
+        // modal. On desktop without the extension, scan the modal's QR with Phantom mobile.
+        if(W.ready && W.appkit){
+          try{
+            W.appkit.open();
+            // Tell the user what to expect — the modal shows a link/QR, not the extension.
+            if(window.__toast) window.__toast("No wallet extension here — scan the QR with Phantom mobile, or open the game in your browser", "#21e6ff");
+            return true;
+          }catch(e){ W.error = (e&&e.message)||String(e); }
+        }
         const msg = W.error ? ("Wallet connector error: " + W.error) : "No wallet found — install Phantom or use WalletConnect";
         if(window.__toast) window.__toast(msg.slice(0,110), "#ff3b5c");
         return false;
