@@ -212,12 +212,30 @@ window._adsPayload = "WwogIHsKICAgICJpZCI6ICJ4emlsbGEtaG9tZSIsCiAgICAidGV4dCI6IC
     if((tries||0) > 40) return;            // give up after ~8s
     setTimeout(()=>whenCloudReady(fn,(tries||0)+1), 200);
   }
+  // Dismissible celebratory card so referral XP is never missed (toasts are too easy to miss).
+  function referralPopup(title, sub){
+    let el=document.getElementById("refPop");
+    if(!el){ el=document.createElement("div"); el.id="refPop";
+      el.style.cssText="position:fixed;inset:0;z-index:60;display:none;align-items:center;justify-content:center;background:rgba(7,3,24,.75)";
+      el.addEventListener("click",()=>{ el.style.display="none"; });
+      document.body.appendChild(el);
+    }
+    el.innerHTML='<div style="background:#0b0f1a;border:2px solid '+GOLD+';border-radius:16px;padding:26px 22px;max-width:300px;text-align:center;box-shadow:0 0 30px rgba(255,210,63,.4)">'+
+      '<div style="font-size:42px">🦖</div>'+
+      '<h2 style="color:'+GOLD+';margin:.3em 0;font-size:19px">'+title+'</h2>'+
+      '<p style="opacity:.85;font-size:13px;line-height:1.5">'+sub+'</p>'+
+      '<button class="btn" style="margin-top:14px">LET’S GO</button></div>';
+    el.style.display="flex";
+    try{ if(tg&&tg.HapticFeedback) tg.HapticFeedback.notificationOccurred("success"); }catch(_){}
+  }
   function claimReferralRewards(){
     const api=econApi(), init=tgInit(); if(!api||!init) return;
     fetch(api+"/refer-claim",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({initData:init})})
-      .then(r=>r.json()).then(d=>{ if(d&&d.ok&&d.reward>0){
-        econ.tokens+=d.reward; saveEcon(); updateHUDtokens();
-        toast("+"+fmt(d.reward)+" XP — "+d.count+" friend"+(d.count>1?"s":"")+" joined! 🦖",GOLD);
+      .then(r=>r.json()).then(d=>{ if(d&&d.ok){
+        if(typeof d.count==="number") store.set("xz_ref_count", d.count);   // persist for the RANKS stat
+        if(d.reward>0){ econ.tokens+=d.reward; saveEcon(); updateHUDtokens();
+          referralPopup("+"+fmt(d.reward)+" XP!", (d.count||0)+" friend"+((d.count||0)>1?"s":"")+" joined from your invite. Keep sharing to climb the TOP INVITERS board!");
+        }
       } }).catch(()=>{});
   }
   function processIncomingReferral(){
@@ -227,7 +245,8 @@ window._adsPayload = "WwogIHsKICAgICJpZCI6ICJ4emlsbGEtaG9tZSIsCiAgICAidGV4dCI6IC
     if(store.get("xz_ref_done",false)) return;  // already processed on this device
     fetch(api+"/refer",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({initData:init,ref:sp})})
       .then(r=>r.json()).then(d=>{ if(d&&d.ok){ store.set("xz_ref_done",true);
-        if(d.welcome>0){ econ.tokens+=d.welcome; saveEcon(); updateHUDtokens(); toast("Welcome! +"+fmt(d.welcome)+" XP bonus 🦖",GOLD); }
+        if(d.welcome>0){ econ.tokens+=d.welcome; saveEcon(); updateHUDtokens();
+          referralPopup("Welcome! +"+fmt(d.welcome)+" XP", "You joined from a friend’s invite. Smash scammers and invite your own crew to earn more 🦖"); }
       } }).catch(()=>{});
   }
 
@@ -1928,6 +1947,25 @@ window._adsPayload = "WwogIHsKICAgICJpZCI6ICJ4emlsbGEtaG9tZSIsCiAgICAidGV4dCI6IC
               '<b>'+fmt(e.score)+'</b></div>';
           }).join("");
         }).catch(()=>{ const el=$("lbTopList"); if(el) el.textContent="Global rankings unavailable — retry later."; });
+      }
+
+      // TOP INVITERS board + the player's own invite tally
+      if(lbApi() && !host.querySelector("#lbRefTop")){
+        const myInv = (store.get("xz_ref_count",0)|0);
+        const box=document.createElement("div"); box.id="lbRefTop";
+        box.innerHTML='<h2 class="pnl-title" style="border-color:'+GOLD+';margin-top:14px;">TOP INVITERS</h2>'+
+          (myInv>0
+            ? '<div class="sub" style="color:'+TEAL+'">You’ve invited '+myInv+' friend'+(myInv>1?'s':'')+' · +'+fmt(myInv*1500)+' XP earned</div>'
+            : '<div class="sub">Invite friends below to climb this board!</div>')+
+          '<div class="sub" id="lbRefList">Loading…</div>';
+        const lbTopEl=$("lbTop");
+        if(lbTopEl && lbTopEl.nextSibling) host.insertBefore(box, lbTopEl.nextSibling); else host.insertBefore(box, host.firstChild);
+        fetch(lbApi()+"/refer-top",{cache:"no-store"}).then(r=>r.json()).then(d=>{
+          const list=(d&&d.top)||[]; const el=$("lbRefList"); if(!el) return;
+          if(!list.length){ el.textContent="No invites yet — be the first!"; return; }
+          el.className=""; el.innerHTML=list.map((e,i)=>
+            '<div class="lrow"><span class="lrank">#'+(i+1)+'</span><span class="lname">'+escapeHtml(e.name)+'</span><b>'+e.count+' 🦖</b></div>').join("");
+        }).catch(()=>{ const el=$("lbRefList"); if(el) el.textContent="Inviter board unavailable."; });
       }
 
       // append a social strip below the existing rankings

@@ -155,6 +155,7 @@ export default {
     const REFERRED_PREFIX = "referred:";  // referred:<inviteeId> = referrerId (one-time marker)
     const REFPEND_PREFIX  = "refpend:";   // refpend:<referrerId>  = unclaimed XP
     const REFCOUNT_PREFIX = "refcount:";  // refcount:<referrerId> = total confirmed referrals
+    const REFLB_KEY       = "reflb:v1";   // public TOP INVITERS board: [{id,name,count}]
     const ID_RE = /^[0-9]{1,20}$/;
 
     if(req.method === "POST" && url.pathname === "/refer"){
@@ -170,6 +171,12 @@ export default {
       const count = (parseInt(await env.LB.get(REFCOUNT_PREFIX + ref), 10) || 0) + 1;
       await env.LB.put(REFPEND_PREFIX + ref, String(pend));
       await env.LB.put(REFCOUNT_PREFIX + ref, String(count));
+      // maintain the public top-inviters board (name filled in when the referrer next opens)
+      const board = JSON.parse((await env.LB.get(REFLB_KEY)) || "[]");
+      const e = board.find(x => x.id === ref);
+      if(e) e.count = count; else board.push({ id: ref, name: "Player", count });
+      board.sort((a, b) => b.count - a.count);
+      await env.LB.put(REFLB_KEY, JSON.stringify(board.slice(0, 200)));
       return json({ ok:true, welcome: REF_INVITEE_REWARD }, 200, origin);
     }
 
@@ -181,7 +188,22 @@ export default {
       const reward = parseInt(await env.LB.get(REFPEND_PREFIX + id), 10) || 0;
       const count  = parseInt(await env.LB.get(REFCOUNT_PREFIX + id), 10) || 0;
       if(reward > 0) await env.LB.delete(REFPEND_PREFIX + id);   // one-time claim
+      // stamp the inviter's real name onto the board now that they've authenticated
+      if(count > 0){
+        const name = (user.username ? "@" + user.username : (user.first_name || "Player")).slice(0, 24);
+        const board = JSON.parse((await env.LB.get(REFLB_KEY)) || "[]");
+        const e = board.find(x => x.id === id);
+        if(e && e.name !== name){ e.name = name; await env.LB.put(REFLB_KEY, JSON.stringify(board)); }
+      }
       return json({ ok:true, reward, count }, 200, origin);
+    }
+
+    // -------- GET /refer-top  (public) — TOP INVITERS board ----------------------
+    if(req.method === "GET" && url.pathname === "/refer-top"){
+      const board = JSON.parse((await env.LB.get(REFLB_KEY)) || "[]");
+      return new Response(JSON.stringify({ ok:true, top: board.slice(0, 10).map(e => ({ name:e.name, count:e.count })) }), {
+        status: 200, headers: { "content-type": "application/json", "Cache-Control": "public, max-age=15", "Access-Control-Allow-Origin": "*" },
+      });
     }
 
     // -------- GET /ads  (public, no-store) ---------------------------------------
