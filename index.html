@@ -1147,12 +1147,14 @@ function pauseGame(){
   isPaused = true; state.running = false;
   try{ if(actx && actx.state==="running") actx.suspend(); }catch(e){}   // freezes music + engine + sfx in place
   document.getElementById("pauseScreen").classList.remove("hidden");
+  document.getElementById("tabbar").classList.remove("hidden");   // show the upper menu while paused
 }
 function resumeGame(){
   if(!isPaused) return;
   isPaused = false; state.running = true;
   try{ if(actx && actx.state==="suspended") actx.resume(); }catch(e){}
   document.getElementById("pauseScreen").classList.add("hidden");
+  document.getElementById("tabbar").classList.add("hidden");   // hide menu again during play
 }
 function quitToMenu(){
   isPaused = false; state.running = false;
@@ -1162,6 +1164,7 @@ function quitToMenu(){
   document.getElementById("gameOverScreen").classList.add("hidden");
   el.hud.classList.add("hidden"); document.getElementById("pauseBtn").classList.add("hidden");
   document.getElementById("startScreen").classList.remove("hidden");
+  document.getElementById("tabbar").classList.remove("hidden");   // menu visible back on the start screen
 }
 document.getElementById("pauseBtn").addEventListener("click",pauseGame);
 document.getElementById("resumeBtn").addEventListener("click",resumeGame);
@@ -1260,6 +1263,6 @@ document.querySelectorAll("#startScreen .btn").forEach(b=>{
 document.addEventListener("visibilitychange",()=>{ if(document.hidden&&state.running) pauseGame(); });
 document.getElementById("bestScore").textContent=state.best;
 </script>
-<script src="game.js?v=45"></script>
+<script src="game.js?v=46"></script>
 </body>
 </html>

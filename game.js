@@ -2465,7 +2465,9 @@ window._adsPayload = "WwogIHsKICAgICJpZCI6ICJ4emlsbGEtaG9tZSIsCiAgICAidGV4dCI6IC
      * ===================================================================== */
     (function tgSafeArea(){
       if(typeof tg==="undefined" || !tg) return;   // only inside Telegram (browser keeps the env() CSS)
-      try{ if(tg.requestFullscreen && !tg.isFullscreen) tg.requestFullscreen(); }catch(_){}
+      // No fullscreen: its overlay ✕ close button sits on top of gameplay. We just expand
+      // (done in iosTapFix) and use Telegram's safe-area insets to clear the header/notch.
+      try{ if(tg.isFullscreen && tg.exitFullscreen) tg.exitFullscreen(); }catch(_){}
       const root=document.documentElement;
       function apply(){
         let top=0, bot=0;
