@@ -1148,11 +1148,13 @@ window._adsPayload = "WwogIHsKICAgICJpZCI6ICJ4emlsbGEtaG9tZSIsCiAgICAidGV4dCI6IC
     /* ===================================================================== *
      *  SPAWN OVERRIDE — wider enemy roster + waves + power variety            *
      * ===================================================================== */
-    let rugPending=false, nextBossWave=4;   // first boss at wave 4, then 4 waves after each defeat
+    let rugPending=false, nextBossWave=4, rugWarnUntil=0;   // first boss at wave 4, then 4 waves after each defeat
     window.spawn = function(){
-      // every 4th wave -> rug boss (replaces plain whale cadence)
+      // every 4th wave -> rug boss (replaces plain whale cadence). A 3s warning runs
+      // first (rugWarnUntil) during which every ad-screen flashes "RUG INCOMING".
       if(rugPending && !active.some(a=>a.type===TYPE.RUGBOSS || a.type===TYPE.BOSS)){
-        rugPending=false; spawnRug(); return;
+        if(nowS() >= rugWarnUntil){ rugPending=false; window.__rugWarn=false; spawnRug(); return; }
+        // still inside the warning window — fall through and spawn a normal enemy this tick
       }
       const e=getEntity(), wp=waveProfile(), r=Math.random();
       let cum=0;
@@ -1236,7 +1238,8 @@ window._adsPayload = "WwogIHsKICAgICJpZCI6ICJ4emlsbGEtaG9tZSIsCiAgICAidGV4dCI6IC
       // that spawns the instant the first dies. nextBossWave advances on defeat (below).
       if(state.wave > prevWave && state.wave >= nextBossWave
          && !rugPending && !active.some(a=>a.type===TYPE.RUGBOSS||a.type===TYPE.BOSS)){
-        rugPending=true;
+        rugPending=true; rugWarnUntil=nowS()+3; window.__rugWarn=true;   // 3s "RUG INCOMING" ad-screen warning before the boss
+        try{ if(tg&&tg.HapticFeedback) tg.HapticFeedback.notificationOccurred("warning"); }catch(_){}
       }
       // rank-milestone callout — once per run, the first time you cross a new title threshold
       const t = titleForScore(state.score);
@@ -1570,7 +1573,7 @@ window._adsPayload = "WwogIHsKICAgICJpZCI6ICJ4emlsbGEtaG9tZSIsCiAgICAidGV4dCI6IC
     function set2BeforeRun(){
       applyUpgrades();
       renderLives();                 // reflect new max HP
-      px.slowUntil=px.x2Until=px.magUntil=0; rugPending=false; nextBossWave=4;
+      px.slowUntil=px.x2Until=px.magUntil=0; rugPending=false; nextBossWave=4; rugWarnUntil=0; window.__rugWarn=false;
       hideRugBar();
       if(lvl("start")>0){ shieldActive=true; }
     }
@@ -2329,8 +2332,9 @@ window._adsPayload = "WwogIHsKICAgICJpZCI6ICJ4emlsbGEtaG9tZSIsCiAgICAidGV4dCI6IC
         let boss=false;
         for(const a of active){ if(a&&!a.dead&&(a.type===TYPE.RUGBOSS||a.type===TYPE.BOSS)){ boss=true; break; } }
         const combo=state.combo||0;
+        const warn = boss || !!window.__rugWarn;   // flash during the 3s pre-warning AND the fight
         for(const s of adScreens){ s._t+=dt;
-          if(boss){
+          if(warn){
             if(s._mode!=="boss"){ s._mode="boss"; drawAd(s._scr,"RUG INCOMING",RED); }
             s.material.opacity=0.6+0.4*Math.sin(t*12);
           } else {

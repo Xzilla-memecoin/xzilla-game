@@ -281,6 +281,46 @@ export default {
       return new Response(html, { status: 200, headers: { "content-type": "text/html; charset=utf-8", "Cache-Control": "no-store" } });
     }
 
+    // Desktop helper: opened in the user's real browser (via Telegram Desktop's openLink).
+    // Telegram Desktop's webview has no extension, but the user's normal browser does — so
+    // this page connects via the Phantom EXTENSION and posts the plain address to the relay,
+    // which the still-open Telegram Desktop client polls. (Mobile uses the direct deeplink.)
+    if(req.method === "GET" && url.pathname === "/phantom-desktop"){
+      const html = `<!doctype html><html><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1"><title>Connect Phantom</title></head>
+<body style="background:#0b0f1a;color:#e8f6ff;font-family:system-ui,sans-serif;display:flex;align-items:center;justify-content:center;min-height:100vh;margin:0;text-align:center">
+<div style="padding:24px;max-width:360px">
+<div style="font-size:46px">🦖</div>
+<h2 style="color:#21e6ff;margin:.3em 0">Connect Phantom</h2>
+<p id="msg" style="opacity:.85">Looking for your Phantom extension…</p>
+<a id="go" href="#" style="display:none;margin-top:10px;padding:14px 22px;background:#ab9ff2;color:#1a1030;font-weight:700;border-radius:12px;text-decoration:none">Retry</a>
+<p style="opacity:.6;font-size:13px;margin-top:18px">Approve in Phantom, then return to the XZILLA game in Telegram.</p>
+</div>
+<script>
+(function(){
+  var q=new URLSearchParams(location.search), sid=q.get("sid")||"";
+  var msg=document.getElementById("msg"), btn=document.getElementById("go");
+  if(!/^[a-f0-9]{16,64}$/.test(sid)){ msg.textContent="Invalid link — reopen from the game."; return; }
+  function prov(){ if(window.phantom&&window.phantom.solana) return window.phantom.solana; if(window.solana) return window.solana; return null; }
+  async function go(){
+    var p=prov();
+    if(!p){ msg.textContent="Phantom extension not found. Install it (or open this in a browser that has Phantom), then retry."; btn.style.display="inline-block"; btn.textContent="Get Phantom"; btn.href="https://phantom.app/download"; return; }
+    try{
+      msg.textContent="Approve the connection in Phantom…";
+      var r=await p.connect(); var pk=(r&&r.publicKey)?r.publicKey:p.publicKey;
+      if(!pk) throw new Error("no key");
+      await fetch(location.origin+"/phantom-cb?sid="+encodeURIComponent(sid)+"&addr="+encodeURIComponent(pk.toString()));
+      msg.innerHTML="✓ Connected!<br>Return to the game in Telegram — your tier applies automatically.";
+      btn.style.display="none";
+      try{ if(p.disconnect) await p.disconnect(); }catch(e){}
+    }catch(e){ msg.textContent="Connection cancelled."; btn.style.display="inline-block"; btn.textContent="Retry"; btn.href="#"; btn.onclick=function(ev){ ev.preventDefault(); go(); }; }
+  }
+  var n=0; (function wait(){ if(prov()||n++>15){ go(); } else setTimeout(wait,150); })();
+})();
+</script></body></html>`;
+      return new Response(html, { status: 200, headers: { "content-type": "text/html; charset=utf-8", "Cache-Control": "no-store" } });
+    }
+
     // Phantom redirects here after the user approves/rejects in the wallet app.
     if(req.method === "GET" && url.pathname === "/phantom-cb"){
       const sid = (url.searchParams.get("sid") || "").trim();
@@ -296,7 +336,13 @@ export default {
 
       const rec = {};
       const ec = url.searchParams.get("errorCode");
-      if(ec){
+      const addr = (url.searchParams.get("addr") || "").trim();
+      if(addr){
+        // Desktop extension path: the helper page connected via the Phantom extension and
+        // posts the plain public address (no encryption needed — an address is public).
+        if(!B58_RE.test(addr)) return html("Bad address");
+        rec.addr = addr;
+      } else if(ec){
         rec.errorCode = String(ec).slice(0, 32);
         rec.errorMessage = (url.searchParams.get("errorMessage") || "").slice(0, 200);
       } else {

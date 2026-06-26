@@ -176,6 +176,20 @@
       W.address = address || null;
       W.balance = W.address ? await balanceFor(W.address) : null;
       if(changed || W.address) notify();
+      // Auto-release: the wallet is only needed to READ the $XZILLA balance. Once we have
+      // a verified number, drop the live session after a short beat and keep the saved tier
+      // — the user is never left connected. Guarded so teardown's setAddress(null) can't recurse.
+      if(W.address && typeof W.balance === "number" && !W._releasing){
+        W._releasing = true;
+        setTimeout(async ()=>{ try{ await teardown(); } finally { W._releasing = false; } }, 1500);
+      }
+    }
+
+    // Disconnect the underlying wallet session but preserve the verified tier.
+    async function teardown(){
+      try{ const p=getInjected(); if(p && typeof p.disconnect==="function") await p.disconnect(); }catch(_){ }
+      try{ if(W.appkit && typeof W.appkit.disconnect==="function") await W.appkit.disconnect(); }catch(_){ }
+      await setAddress(null);   // clears address+balance, notifies → UI shows "tier saved"
     }
 
     function initAppKit(){
@@ -267,6 +281,11 @@
       const tg = window.Telegram && window.Telegram.WebApp;
       return !!(tg && tg.platform && tg.platform !== "unknown");
     }
+    function isTelegramMobile(){
+      const tg = window.Telegram && window.Telegram.WebApp;
+      const p = (tg && tg.platform) || "";
+      return p === "android" || p === "ios";   // everything else in Telegram = desktop/web
+    }
     function randomSid(){
       const a=new Uint8Array(16); crypto.getRandomValues(a);
       return [...a].map(b=>b.toString(16).padStart(2,"0")).join("");
@@ -323,6 +342,27 @@
         return false;
       }
     }
+    // Telegram Desktop has no extension in its webview and can't use the mobile deeplink.
+    // Open a helper page in the user's real browser (which has the Phantom extension); it
+    // connects there and relays the plain address back, which we poll for here.
+    async function phantomDesktopConnect(){
+      const tg = window.Telegram && window.Telegram.WebApp;
+      const api = (window.__LB_API||"").replace(/\/+$/,"");
+      if(!tg || !api){
+        if(window.__toast) window.__toast("Wallet connect unavailable — open the game in your browser to connect","#ff3b5c");
+        return false;
+      }
+      const sid = randomSid();
+      const helper = api + "/phantom-desktop?sid=" + sid;
+      if(window.__toast) window.__toast("Opening your browser — connect Phantom there, then return to Telegram","#21e6ff");
+      try{ tg.openLink(helper); }catch(_){ try{ window.open(helper); }catch(__){} }
+      const res = await pollResult(api, sid, 180000);
+      if(!res){ if(window.__toast) window.__toast("Wallet connect timed out — tap connect to retry","#ff3b5c"); return false; }
+      if(res.errorCode){ if(window.__toast) window.__toast(("Phantom error "+res.errorCode).slice(0,100),"#ff3b5c"); return false; }
+      if(res.addr){ await setAddress(res.addr); return true; }
+      if(window.__toast) window.__toast("Couldn't read wallet — try again","#ff3b5c");
+      return false;
+    }
 
     window.XZWallet = {
       get address(){ return W.address; },
@@ -335,9 +375,10 @@
         // instant and reliable, and sidesteps AppKit's flaky wallet-standard detection.
         // Poll up to ~1.2s so a slow-registering extension isn't missed.
         if(await waitForInjected(1200)) return injectedConnect();
-        // Telegram Mini App → Phantom connect deeplink (WalletConnect can't pair
-        // Phantom for Solana inside Telegram's webview).
-        if(inTelegram()) return phantomDeeplinkConnect();
+        // Telegram Mini App → Phantom (WalletConnect can't pair Phantom for Solana here).
+        // Mobile: direct connect deeplink. Desktop: helper page in the real browser, since
+        // the Telegram Desktop webview has no extension and can't use the mobile deeplink.
+        if(inTelegram()) return isTelegramMobile() ? phantomDeeplinkConnect() : phantomDesktopConnect();
         // Plain mobile browser / desktop without extension → AppKit / WalletConnect
         // modal. On desktop without the extension, scan the modal's QR with Phantom mobile.
         if(W.ready && W.appkit){
@@ -353,11 +394,7 @@
         return false;
       },
       async refresh(){ if(W.address){ W.balance = await balanceFor(W.address); notify(); } },
-      async disconnect(){
-        try{ const p=getInjected(); if(p && typeof p.disconnect==="function") await p.disconnect(); }catch(_){ }
-        try{ if(W.appkit && typeof W.appkit.disconnect==="function") await W.appkit.disconnect(); }catch(_){ }
-        await setAddress(null);   // clears address+balance and notifies listeners → UI + tier reset
-      }
+      async disconnect(){ await teardown(); }
     };
   })();
   </script>
