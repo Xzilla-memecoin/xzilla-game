@@ -1427,14 +1427,34 @@ window._adsPayload = "WwogIHsKICAgICJpZCI6ICJ4emlsbGEtaG9tZSIsCiAgICAidGV4dCI6IC
       if(SHOT_POOL.length) return;
       for(let i=0;i<8;i++){ try{ const a=new Audio(SHOT_SRC); a.preload='auto'; a.volume=0; SHOT_POOL.push(a); }catch(_){} }
     }
+    // WebAudio buffer playback for the gun — decoded once, played via cheap buffer-source
+    // nodes. At ~20 shots/sec this is essentially free; rapid HTML5 <audio>.play() spam is
+    // what janks iOS Safari hard (the boss-fight lag). Falls back to the <audio> pool
+    // (e.g. over file://, or until the buffer finishes decoding).
+    let shotBuffer=null, shotDecoding=false;
+    function ensureShotBuffer(){
+      if(shotBuffer||shotDecoding) return;
+      if(typeof actx==="undefined" || !actx) return;
+      shotDecoding=true;
+      fetch(SHOT_SRC).then(r=>r.arrayBuffer()).then(b=>actx.decodeAudioData(b))
+        .then(dec=>{ shotBuffer=dec; shotDecoding=false; })
+        .catch(()=>{ shotDecoding=false; });
+    }
     function playShot(){
       if(state.soundOn===false) return;
+      if(typeof actx!=="undefined" && actx){
+        if(shotBuffer){
+          try{ const s=actx.createBufferSource(); s.buffer=shotBuffer;
+            const g=actx.createGain(); g.gain.value=GUN_VOL; s.connect(g); g.connect(sfxGain||actx.destination);
+            s.start(); return; }catch(_){}
+        } else { ensureShotBuffer(); }   // decode now; use the cheap fallback this frame
+      }
       if(!SHOT_POOL.length){ shotInit(); if(!SHOT_POOL.length) return; }
       const a=SHOT_POOL[(shotIdx++)%SHOT_POOL.length];
       try{ a.currentTime=0; a.volume=GUN_VOL; a.play().catch(()=>{}); }catch(_){}
     }
     function gunOff(){ for(const a of SHOT_POOL){ try{ a.pause(); a.currentTime=0; }catch(_){} } }
-    shotInit();   // preload the pool so the first shots fire without delay
+    shotInit();   // preload the <audio> fallback pool
 
     function cannonMat(){
       if(CANNON.mat) return CANNON.mat;
@@ -1462,7 +1482,7 @@ window._adsPayload = "WwogIHsKICAgICJpZCI6ICJ4emlsbGEtaG9tZSIsCiAgICAidGV4dCI6IC
       // gentle lock-on so the stream reliably connects with the weaving boss
       b._vx=(boss.sprite.position.x-player.position.x)*0.85;
       b._vz=-CANNON.speed;
-      burst(b.position.x,b.position.y,b.position.z,GOLD,2);   // muzzle spark
+      burst(b.position.x,b.position.y,b.position.z,GOLD,1);   // muzzle spark (1 — keeps iOS fill-rate low at 20 shots/sec)
       playShot();                                             // one-shot per bullet
     }
 
@@ -1472,7 +1492,7 @@ window._adsPayload = "WwogIHsKICAgICJpZCI6ICJ4emlsbGEtaG9tZSIsCiAgICAidGV4dCI6IC
       const p=e.sprite.position.clone();
       const dropMult=(window.__dropMult||1)*tierDropMult();
       px.rugHp--; updateRugBar();
-      burst(p.x,p.y,p.z,RED,8);
+      burst(p.x,p.y,p.z,RED,4);   // per-hit spark trimmed (was 8) — ~20 hits/sec adds up with bloom
       if(px.rugHp>0) return false;
       // defeated
       burst(p.x,p.y,p.z,MAG,46); burst(p.x,p.y,p.z,RED,40); burst(p.x,p.y,p.z,GOLD,24);
@@ -1506,6 +1526,7 @@ window._adsPayload = "WwogIHsKICAgICJpZCI6ICJ4emlsbGEtaG9tZSIsCiAgICAidGV4dCI6IC
       if(!state.running){ if(CANNON.live.length) clearBullets(); gunOff(); return; }
       const boss=bossOnField();
       if(boss){
+        ensureShotBuffer();   // make sure the cheap WebAudio shot is ready for sustained fire
         CANNON.cd-=dt;
         while(CANNON.cd<=0){ fireBullet(boss); CANNON.cd+=CANNON.rate; }   // playShot() per bullet
       } else { if(CANNON.live.length) clearBullets(); gunOff(); }
