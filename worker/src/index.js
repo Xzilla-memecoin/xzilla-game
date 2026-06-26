@@ -145,6 +145,45 @@ export default {
       return json({ ok: true }, 200, origin);
     }
 
+    // ===================== Double-sided referrals (XP only) =====================
+    // Each player shares t.me/<bot>?startapp=<their-id>. When a NEW user opens via that
+    // link, /refer marks them (one-time) and credits the referrer's pending bucket; the
+    // new user gets an immediate welcome bonus. The referrer claims their pending XP on
+    // their next launch via /refer-claim. XP only — no token payouts.
+    const REF_REFERRER_REWARD = 1500;   // XP to the inviter per confirmed friend
+    const REF_INVITEE_REWARD  = 1000;   // XP welcome bonus to the new player
+    const REFERRED_PREFIX = "referred:";  // referred:<inviteeId> = referrerId (one-time marker)
+    const REFPEND_PREFIX  = "refpend:";   // refpend:<referrerId>  = unclaimed XP
+    const REFCOUNT_PREFIX = "refcount:";  // refcount:<referrerId> = total confirmed referrals
+    const ID_RE = /^[0-9]{1,20}$/;
+
+    if(req.method === "POST" && url.pathname === "/refer"){
+      let body; try{ body = await req.json(); }catch(_){ return json({ error: "bad json" }, 400, origin); }
+      const user = await verifyInitData(body.initData || "", env.BOT_TOKEN);
+      if(!user) return json({ error: "unauthorized" }, 401, origin);
+      const invitee = String(user.id);
+      const ref = String(body.ref || "").trim();
+      if(!ID_RE.test(ref) || ref === invitee) return json({ ok:true, welcome:0 }, 200, origin);   // bad/self ref → no-op
+      if(await env.LB.get(REFERRED_PREFIX + invitee)) return json({ ok:true, welcome:0, already:true }, 200, origin);  // one-time
+      await env.LB.put(REFERRED_PREFIX + invitee, ref);
+      const pend  = (parseInt(await env.LB.get(REFPEND_PREFIX + ref), 10) || 0) + REF_REFERRER_REWARD;
+      const count = (parseInt(await env.LB.get(REFCOUNT_PREFIX + ref), 10) || 0) + 1;
+      await env.LB.put(REFPEND_PREFIX + ref, String(pend));
+      await env.LB.put(REFCOUNT_PREFIX + ref, String(count));
+      return json({ ok:true, welcome: REF_INVITEE_REWARD }, 200, origin);
+    }
+
+    if(req.method === "POST" && url.pathname === "/refer-claim"){
+      let body; try{ body = await req.json(); }catch(_){ return json({ error: "bad json" }, 400, origin); }
+      const user = await verifyInitData(body.initData || "", env.BOT_TOKEN);
+      if(!user) return json({ error: "unauthorized" }, 401, origin);
+      const id = String(user.id);
+      const reward = parseInt(await env.LB.get(REFPEND_PREFIX + id), 10) || 0;
+      const count  = parseInt(await env.LB.get(REFCOUNT_PREFIX + id), 10) || 0;
+      if(reward > 0) await env.LB.delete(REFPEND_PREFIX + id);   // one-time claim
+      return json({ ok:true, reward, count }, 200, origin);
+    }
+
     // -------- GET /ads  (public, no-store) ---------------------------------------
     // Live ad config for the in-game billboards. Served from KV with no caching so an
     // update via POST /ads is visible to players within seconds (vs. ~5 min on the

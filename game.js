@@ -198,6 +198,39 @@ window._adsPayload = "WwogIHsKICAgICJpZCI6ICJ4emlsbGEtaG9tZSIsCiAgICAidGV4dCI6IC
   const fmt = n => Math.round(n).toLocaleString("en-US");
   const abbr = n => n>=1e6 ? (n/1e6).toFixed(n%1e6?1:0)+"M" : n>=1e3 ? (n/1e3).toFixed(0)+"K" : ""+n;
 
+  /* ---- double-sided referrals (XP only) -------------------------------------
+   * Each player shares t.me/<bot>?startapp=<their-id>. A new player who opens that
+   * link gets a welcome XP bonus and credits the inviter's pending bucket; the inviter
+   * collects it on their next launch. Run only AFTER the economy has loaded so the XP
+   * grant isn't wiped by a late cloud/server restore. */
+  function refLink(){
+    const id = (typeof tg!=="undefined" && tg && tg.initDataUnsafe && tg.initDataUnsafe.user && tg.initDataUnsafe.user.id);
+    return id ? ("https://t.me/RugSmasher_bot?startapp="+id) : (window.__BOT_SHARE_URL || "https://t.me/RugSmasher_bot/");
+  }
+  function whenCloudReady(fn, tries){
+    if(_cloudReady) return void fn();
+    if((tries||0) > 40) return;            // give up after ~8s
+    setTimeout(()=>whenCloudReady(fn,(tries||0)+1), 200);
+  }
+  function claimReferralRewards(){
+    const api=econApi(), init=tgInit(); if(!api||!init) return;
+    fetch(api+"/refer-claim",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({initData:init})})
+      .then(r=>r.json()).then(d=>{ if(d&&d.ok&&d.reward>0){
+        econ.tokens+=d.reward; saveEcon(); updateHUDtokens();
+        toast("+"+fmt(d.reward)+" XP — "+d.count+" friend"+(d.count>1?"s":"")+" joined! 🦖",GOLD);
+      } }).catch(()=>{});
+  }
+  function processIncomingReferral(){
+    const api=econApi(), init=tgInit(); if(!api||!init) return;
+    const sp=(tg.initDataUnsafe&&tg.initDataUnsafe.start_param)||"";
+    if(!/^[0-9]{1,20}$/.test(sp)) return;       // no/invalid referrer param
+    if(store.get("xz_ref_done",false)) return;  // already processed on this device
+    fetch(api+"/refer",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({initData:init,ref:sp})})
+      .then(r=>r.json()).then(d=>{ if(d&&d.ok){ store.set("xz_ref_done",true);
+        if(d.welcome>0){ econ.tokens+=d.welcome; saveEcon(); updateHUDtokens(); toast("Welcome! +"+fmt(d.welcome)+" XP bonus 🦖",GOLD); }
+      } }).catch(()=>{});
+  }
+
   /* ----------------------------- wallet tiers -----------------------------
    * 10 holder tiers, multiplier evenly stepped 1.1x → 2.0x (10M+ = 2.0x), plus a
    * 1.0x baseline for non/sub-10K holders. Single source of truth (TIERS) used by
@@ -832,7 +865,7 @@ window._adsPayload = "WwogIHsKICAgICJpZCI6ICJ4emlsbGEtaG9tZSIsCiAgICAidGV4dCI6IC
     const best  = Math.max(Math.round(state.best||0), (myBest&&myBest.score)||0, Math.round(state.score||0));
     const t     = titleForScore(best);
     const title = t ? t.name : "ROOKIE";
-    const link  = window.__BOT_SHARE_URL || "";
+    const link  = refLink();   // referral-attributed so friends who join from a shared score count too
     const txt   = "🦖 I smashed "+fmt(best)+" pts as "+title+" in XZILLA: RUG SMASHER!\nThink you can beat my rank? 👇";
     try{
       if(tg && tg.openTelegramLink){
@@ -849,7 +882,7 @@ window._adsPayload = "WwogIHsKICAgICJpZCI6ICJ4emlsbGEtaG9tZSIsCiAgICAidGV4dCI6IC
   function postLeaderboard(target){
     const api = (typeof lbApi==="function") ? lbApi() : "";
     if(!api){ toast("Leaderboard backend not connected",RED); return; }
-    const link = window.__BOT_SHARE_URL || "";
+    const link = refLink();   // referral-attributed link
     toast("Fetching leaderboard…",CYAN);
     fetch(api+"/top",{cache:"no-store"}).then(r=>r.json()).then(d=>{
       const list=(d&&d.top)||[];
@@ -1064,6 +1097,7 @@ window._adsPayload = "WwogIHsKICAgICJpZCI6ICJ4emlsbGEtaG9tZSIsCiAgICAidGV4dCI6IC
   const _gameOver = gameOver; // capture original (gameOver is called by name -> override applies)
   window.gameOver = function(){
     _gameOver();
+    const _prevBest = (myBest && myBest.score) || 0;   // capture BEFORE pushScore updates it (new-best detection)
     // economy + missions + leaderboard
     run.score=Math.max(run.score, state.score);
     // run earnings were already added live during play; just persist now (D5: removed `econ.tokens += 0;` no-op)
@@ -1102,6 +1136,18 @@ window._adsPayload = "WwogIHsKICAgICJpZCI6ICJ4emlsbGEtaG9tZSIsCiAgICAidGV4dCI6IC
         // global-rank line: filled async by submitLeaderboard() when /submit replies
         ((lbApi() && tg && tg.initData) ? '<span class="go-rank-world" id="goWorldRank">🌍 finding your global rank…</span>' : '');
     }
+    // NEW PERSONAL BEST → celebratory one-tap share CTA (frictionless virality)
+    const isNewBest = Math.round(state.score) > _prevBest && Math.round(state.score) > 0;
+    let nb=$("goNewBest");
+    if(!nb){ nb=document.createElement("div"); nb.id="goNewBest"; nb.style.cssText="margin:8px 0;text-align:center;display:none";
+      go.querySelector(".go-buttons").before(nb); }
+    if(isNewBest){
+      nb.style.display="block";
+      nb.innerHTML='<div style="color:'+GOLD+';font-weight:700;letter-spacing:1px;margin-bottom:6px">🎉 NEW PERSONAL BEST!</div>'+
+        '<button class="btn" id="goShareBest">📣 SHARE YOUR RECORD</button>';
+      const b=$("goShareBest"); if(b) b.onclick=shareScore;
+      try{ if(tg&&tg.HapticFeedback) tg.HapticFeedback.notificationOccurred("success"); }catch(_){}
+    } else if(nb){ nb.style.display="none"; }
     updateHUDtokens();
     $("tabbar").classList.remove("hidden");
   };
@@ -1890,7 +1936,7 @@ window._adsPayload = "WwogIHsKICAgICJpZCI6ICJ4emlsbGEtaG9tZSIsCiAgICAidGV4dCI6IC
       wrap.style.cssText="margin-top:14px;display:flex;flex-direction:column;gap:8px";
       wrap.innerHTML=
         '<div class="sub" style="margin-top:2px">PLAY WITH FRIENDS</div>'+
-        '<button class="btn secondary" id="lbInvite" style="font-size:11px;padding:13px">INVITE A DEGEN (+500 XP)</button>'+
+        '<button class="btn secondary" id="lbInvite" style="font-size:11px;padding:13px">INVITE A DEGEN · +1500 XP / FRIEND</button>'+
         '<button class="btn secondary" id="lbShare" style="font-size:11px;padding:13px">SHARE MY RANK</button>'+
         (lbApi() ?
           '<div class="sub" style="margin-top:6px">POST THE LEADERBOARD</div>'+
@@ -1899,16 +1945,13 @@ window._adsPayload = "WwogIHsKICAgICJpZCI6ICJ4emlsbGEtaG9tZSIsCiAgICAidGV4dCI6IC
           : '<div class="sub" style="opacity:.7">Global TOP 10 activates once the $XZILLA leaderboard backend is connected.</div>');
       host.appendChild(wrap);
       $("lbInvite").onclick=()=>{
-        const link = window.__BOT_SHARE_URL || "";
-        const txt  = "🦖 Hunt scammers with me in XZILLA: RUG SMASHER — climb the global leaderboard! 👇";
+        // Personal referral link: when a friend opens it and plays, BOTH of you get XP
+        // (credited server-side — see /refer). No local fake reward.
+        const link = refLink();
+        const txt  = "🦖 Play XZILLA: RUG SMASHER with me — smash scammers, climb the board. We BOTH get XP when you join 👇";
         try{
           if(tg && tg.openTelegramLink){ tg.openTelegramLink("https://t.me/share/url?url="+encodeURIComponent(link)+"&text="+encodeURIComponent(txt)); }
-          else { navigator.clipboard.writeText(txt + (link?("\n"+link):"")); toast("Invite copied",CYAN); }
-          // local referral reward (server should be the real source of truth)
-          if(!store.get("xz_invited_once",false)){
-            econ.tokens+=500; saveEcon(); updateHUDtokens(); store.set("xz_invited_once",true);
-            toast("+500 XP — first invite bonus",GOLD);
-          }
+          else { navigator.clipboard.writeText(txt + "\n" + link); toast("Invite link copied",CYAN); }
         }catch(e){ toast("Share unavailable",RED); }
       };
       $("lbShare").onclick=shareScore;
@@ -2643,6 +2686,9 @@ window._adsPayload = "WwogIHsKICAgICJpZCI6ICJ4emlsbGEtaG9tZSIsCiAgICAidGV4dCI6IC
     applySkin(); updateVip(); updateHUDtokens(); checkStreak();
     ensureDaily(); ensureWeekly(); syncRankSkins();   // refresh today's + this week's challenge + grant earned rank skins
     $("tabbar").classList.remove("hidden"); showTab("PLAY");
+    // Referrals: claim any pending inviter XP + process an incoming invite — but only once
+    // the economy has fully loaded, so the XP grant can't be clobbered by a late restore.
+    whenCloudReady(()=>{ try{ claimReferralRewards(); processIncomingReferral(); }catch(_){} });
   }
   // Pull any newer cross-device cloud save first, THEN boot (runs immediately outside Telegram).
   restoreEcon(boot);
