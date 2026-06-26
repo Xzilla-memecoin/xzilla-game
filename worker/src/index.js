@@ -246,6 +246,37 @@ export default {
     const SID_RE     = /^[a-f0-9]{16,64}$/;       // client-generated hex session id
     const PV_RE      = /^[1-9A-HJ-NP-Za-km-z]{1,200}$/;   // base58 phantom param shape
 
+    // Bridge page: opened in the SYSTEM browser (via Telegram.openLink). Launching
+    // Phantom directly from Telegram's webview is unreliable, but from a real browser
+    // page the universal link hands off to the native app cleanly. The page reads the
+    // session id + the client's ephemeral public key from its own URL, builds the
+    // Phantom connect deeplink (redirect_link -> /phantom-cb), and launches it.
+    if(req.method === "GET" && url.pathname === "/phantom-bridge"){
+      const html = `<!doctype html><html><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1"><title>Connect Phantom</title></head>
+<body style="background:#0b0f1a;color:#e8f6ff;font-family:system-ui,sans-serif;display:flex;align-items:center;justify-content:center;min-height:100vh;margin:0;text-align:center">
+<div style="padding:24px;max-width:340px">
+<div style="font-size:46px">🦖</div>
+<h2 style="color:#21e6ff;margin:.3em 0">Connect Phantom</h2>
+<p id="msg" style="opacity:.85">Opening Phantom…</p>
+<a id="go" href="#" style="display:inline-block;margin-top:10px;padding:14px 22px;background:#ab9ff2;color:#1a1030;font-weight:700;border-radius:12px;text-decoration:none">Open Phantom</a>
+<p style="opacity:.6;font-size:13px;margin-top:18px">After approving in Phantom, return to the XZILLA game in Telegram.</p>
+</div>
+<script>
+(function(){
+  var q=new URLSearchParams(location.search);
+  var sid=q.get("sid")||"", pk=q.get("pk")||"", app=q.get("app")||location.origin;
+  if(!/^[a-f0-9]{16,64}$/.test(sid) || !pk){ document.getElementById("msg").textContent="Invalid connect link — reopen from the game."; document.getElementById("go").style.display="none"; return; }
+  var cb=location.origin+"/phantom-cb?sid="+encodeURIComponent(sid);
+  var link="https://phantom.app/ul/v1/connect?dapp_encryption_public_key="+encodeURIComponent(pk)
+    +"&cluster=mainnet-beta&app_url="+encodeURIComponent(app)+"&redirect_link="+encodeURIComponent(cb);
+  document.getElementById("go").href=link;
+  setTimeout(function(){ try{ window.location.href=link; }catch(e){} }, 350);   // auto-launch; button is the fallback
+})();
+</script></body></html>`;
+      return new Response(html, { status: 200, headers: { "content-type": "text/html; charset=utf-8", "Cache-Control": "no-store" } });
+    }
+
     // Phantom redirects here after the user approves/rejects in the wallet app.
     if(req.method === "GET" && url.pathname === "/phantom-cb"){
       const sid = (url.searchParams.get("sid") || "").trim();
