@@ -1065,7 +1065,9 @@ function loop(){ requestAnimationFrame(loop); const dt=Math.min(clock.getDelta()
   const since=actx?(actx.currentTime-beatT):9, pulse=Math.max(0,1-since*6);
   grid.material.opacity=0.5+0.32*pulse; grid2.material.opacity=0.16+0.18*pulse;
   sunGlow.material.opacity=0.5+0.4*pulse; sunGlow.scale.setScalar(66+10*pulse);
-  if(state.vip){ vipGlow.material.opacity=0.42+0.26*Math.sin(now*4.4); vipGlow.scale.setScalar(4.4+0.3*Math.sin(now*4.4)); }
+  // VIP glow only on the menu/pause screens (state.running===false) — no bubble during play.
+  if(state.vip && !state.running){ vipGlow.material.opacity=0.42+0.26*Math.sin(now*4.4); vipGlow.scale.setScalar(4.4+0.3*Math.sin(now*4.4)); }
+  else vipGlow.material.opacity=0;
   vipGlow.position.x=player.position.x; vipGlow.position.y=player.position.y;
   const vx=player.position.x-prevPX; prevPX=player.position.x; const moving=Math.abs(vx)>0.002;
   const cadence=state.running?(moving?17:12):9; runPhase+=dt*cadence;
@@ -1258,6 +1260,6 @@ document.querySelectorAll("#startScreen .btn").forEach(b=>{
 document.addEventListener("visibilitychange",()=>{ if(document.hidden&&state.running) pauseGame(); });
 document.getElementById("bestScore").textContent=state.best;
 </script>
-<script src="game.js?v=42"></script>
+<script src="game.js?v=43"></script>
 </body>
 </html>

@@ -203,9 +203,13 @@ window._adsPayload = "WwogIHsKICAgICJpZCI6ICJ4emlsbGEtaG9tZSIsCiAgICAidGV4dCI6IC
     const x=c.getContext("2d"); x.drawImage(img,0,0,w,h);
     let id; try{ id=x.getImageData(0,0,w,h); }catch(e){ return null; }   // tainted canvas → caller falls back to colour mult
     const d=id.data, col=new THREE.Color(tint), tr=col.r, tg=col.g, tb=col.b;
-    for(let i=0;i<d.length;i+=4){ if(!d[i+3]) continue;
+    for(let i=0;i<d.length;i+=4){
+      let a=d[i+3]; if(!a) continue;
+      // Fade the soft aura baked into the art so the skin colour doesn't form a glowing
+      // "bubble" around the rider — faint pixels are pulled toward transparent.
+      if(a<170){ a=Math.round(a*a/170); d[i+3]=a; if(!a) continue; }
       let lum=(0.299*d[i]+0.587*d[i+1]+0.114*d[i+2])/255;
-      lum=Math.min(1, lum*0.55+0.45);                 // lift so the colour reads vivid, not dark
+      lum=Math.min(1, Math.pow(lum,0.72));            // brighten midtones, keep darks dark (no glow halo)
       d[i]=tr*255*lum; d[i+1]=tg*255*lum; d[i+2]=tb*255*lum; }
     x.putImageData(id,0,0);
     const t=new THREE.CanvasTexture(c); try{ t.encoding=THREE.sRGBEncoding; }catch(e){}
@@ -760,7 +764,7 @@ window._adsPayload = "WwogIHsKICAgICJpZCI6ICJ4emlsbGEtaG9tZSIsCiAgICAidGV4dCI6IC
   function showTab(name){
     document.querySelectorAll("#tabbar .tab").forEach(b=>b.classList.toggle("on", b.dataset.tab===name));
     hideAllOverlays(); $("gameOverScreen").classList.add("hidden");
-    if(name==="PLAY"){ $("startScreen").classList.remove("hidden"); }
+    if(name==="PLAY"){ $("startScreen").classList.remove("hidden"); applySkin(); }   // reflect equipped skin on the menu player
     else { $(PANELS[name]).classList.remove("hidden"); renderPanel(name); }
   }
   function renderPanel(name){
