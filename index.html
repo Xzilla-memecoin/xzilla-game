@@ -663,7 +663,7 @@ function scheduleStep(step,t){
   const bar=Math.floor(step/16)%4, sib=step%16, ch=PROG[bar];
   if(sib%4===0) mKick(t);
   if(sib===4||sib===12) mNoise(t,0.18,0.45,"bandpass",1900);   // snare
-  if(sib%2===1) mNoise(t,0.035,0.14,"highpass",8000);          // hat
+  // hi-hat removed — its fast 8kHz tick read as an annoying "ticking" background sound
   if(sib===0||sib===8||sib===14) mVoice("sawtooth",ch.b,t,0.34,0.5,520); // bass
   if(sib%2===0){ const n=ch.t[((step/2)|0)%3]; mVoice("square",n,t,0.13,0.16,2600); } // arp
 }
