@@ -244,7 +244,8 @@ export default {
     const PCB_PREFIX = "pcb:";
     const PCB_TTL    = 300;                       // seconds a pending result survives
     const SID_RE     = /^[a-f0-9]{16,64}$/;       // client-generated hex session id
-    const PV_RE      = /^[1-9A-HJ-NP-Za-km-z]{1,200}$/;   // base58 phantom param shape
+    const PK_RE      = /^[1-9A-HJ-NP-Za-km-z]{32,64}$/;     // base58 pubkey / nonce
+    const DATA_RE    = /^[1-9A-HJ-NP-Za-km-z]{1,4000}$/;    // encrypted payload (incl. session token) can be long
 
     // Bridge page: opened in the SYSTEM browser (via Telegram.openLink). Launching
     // Phantom directly from Telegram's webview is unreliable, but from a real browser
@@ -302,7 +303,7 @@ export default {
         const pk = (url.searchParams.get("phantom_encryption_public_key") || "").trim();
         const nonce = (url.searchParams.get("nonce") || "").trim();
         const data = (url.searchParams.get("data") || "").trim();
-        if(!PV_RE.test(pk) || !PV_RE.test(nonce) || !PV_RE.test(data)) return html("Bad wallet response");
+        if(!PK_RE.test(pk) || !PK_RE.test(nonce) || !DATA_RE.test(data)) return html("Bad wallet response");
         rec.phantom_encryption_public_key = pk; rec.nonce = nonce; rec.data = data;
       }
       await env.LB.put(PCB_PREFIX + sid, JSON.stringify(rec), { expirationTtl: PCB_TTL });
