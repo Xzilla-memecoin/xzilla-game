@@ -217,6 +217,7 @@ window._adsPayload = "WwogIHsKICAgICJpZCI6ICJ4emlsbGEtaG9tZSIsCiAgICAidGV4dCI6IC
   }
   function applySkin(){
     const s=SKINS.find(s=>s.id===econ.skin), tint=s&&s.tint;
+    try{ _applyHeroSkin(tint); }catch(e){}   // also recolor the start-screen hero image
     if(econ.skin!==_skinLastId){ _skinLastId=econ.skin; _skinRetry=0; }
     if(!_skinBaseMap && player && player.material && _xriderImg()) _skinBaseMap=player.material.map;   // capture original once loaded
     try{
@@ -226,6 +227,37 @@ window._adsPayload = "WwogIHsKICAgICJpZCI6ICJ4emlsbGEtaG9tZSIsCiAgICAidGV4dCI6IC
       else { player.material.color.set(tint); player.material.needsUpdate=true;          // fallback until the art finishes loading
              if(_skinRetry++ < 25) setTimeout(applySkin, 300); }
     }catch(e){}
+  }
+  // The main/start screen shows a separate static <img id="heroImg"> (mainImage.webp),
+  // not the 3D player — so recolor it too, the same way, so the menu reflects the skin.
+  const _heroImgEl = document.getElementById("heroImg");
+  const _heroUrl = _heroImgEl ? _heroImgEl.getAttribute("src") : null;
+  let _heroBase=null, _heroLoading=false; const _heroData={};
+  function _applyHeroSkin(tint){
+    const hero=_heroImgEl; if(!hero || !_heroUrl) return;
+    if(!tint){ if(hero.src!==_heroUrl) hero.src=_heroUrl; return; }   // default → original art
+    if(_heroData[tint]){ hero.src=_heroData[tint]; return; }
+    if(!_heroBase){
+      if(_heroLoading) return; _heroLoading=true;
+      const im=new Image(); im.crossOrigin="anonymous";
+      im.onload=()=>{ _heroBase=im; _heroLoading=false; try{ _applyHeroSkin(tint); }catch(e){} };
+      im.onerror=()=>{ _heroLoading=false; };
+      im.src=_heroUrl; return;                                       // re-applies once loaded
+    }
+    try{
+      const w=_heroBase.naturalWidth||_heroBase.width, h=_heroBase.naturalHeight||_heroBase.height;
+      const c=document.createElement("canvas"); c.width=w; c.height=h;
+      const x=c.getContext("2d"); x.drawImage(_heroBase,0,0,w,h);
+      const id=x.getImageData(0,0,w,h), d=id.data, col=new THREE.Color(tint), tr=col.r, tg=col.g, tb=col.b;
+      for(let i=0;i<d.length;i+=4){
+        let a=d[i+3]; if(!a) continue;
+        if(a<170){ a=Math.round(a*a/170); d[i+3]=a; if(!a) continue; }
+        let lum=(0.299*d[i]+0.587*d[i+1]+0.114*d[i+2])/255;
+        lum=Math.min(1, Math.pow(lum,0.72));
+        d[i]=tr*255*lum; d[i+1]=tg*255*lum; d[i+2]=tb*255*lum; }
+      x.putImageData(id,0,0);
+      const url=c.toDataURL(); _heroData[tint]=url; hero.src=url;
+    }catch(e){}   // tainted canvas → leave original
   }
   // Auto-grant rank-reward skins once the player's best score clears the threshold.
   function syncRankSkins(){
@@ -2413,6 +2445,44 @@ window._adsPayload = "WwogIHsKICAgICJpZCI6ICJ4emlsbGEtaG9tZSIsCiAgICAidGV4dCI6IC
       setTimeout(assert, 400);
       setTimeout(assert, 1200);
     })();
+
+    /* ===================================================================== *
+     *  TELEGRAM FULLSCREEN + SAFE AREA                                        *
+     *  Telegram's webview often reports CSS env(safe-area-inset-*) as 0 and    *
+     *  draws its own header/controls over the top, so the top menu (tabbar/    *
+     *  HUD) got hidden until game over. Go fullscreen (Bot API 8.0+) and       *
+     *  offset the top/bottom UI using Telegram's JS safe-area insets instead.  *
+     * ===================================================================== */
+    (function tgSafeArea(){
+      if(typeof tg==="undefined" || !tg) return;   // only inside Telegram (browser keeps the env() CSS)
+      try{ if(tg.requestFullscreen && !tg.isFullscreen) tg.requestFullscreen(); }catch(_){}
+      const root=document.documentElement;
+      function apply(){
+        let top=0, bot=0;
+        try{ const s=tg.safeAreaInset;        if(s){ top+=s.top||0; bot+=s.bottom||0; } }catch(_){}   // device notch
+        try{ const c=tg.contentSafeAreaInset; if(c){ top+=c.top||0; bot+=c.bottom||0; } }catch(_){}   // Telegram header/controls
+        root.style.setProperty("--tg-top", top+"px");
+        root.style.setProperty("--tg-bottom", bot+"px");
+        window.dispatchEvent(new Event("resize"));
+      }
+      apply();
+      ["safeAreaChanged","contentSafeAreaChanged","fullscreenChanged","viewportChanged"].forEach(ev=>{
+        try{ tg.onEvent && tg.onEvent(ev, apply); }catch(_){}
+      });
+      setTimeout(apply, 400); setTimeout(apply, 1200);
+      const st=document.createElement("style");
+      st.textContent=
+        "#tabbar{ padding-top:calc(8px + var(--tg-top,0px)) !important; }"+
+        "#hud{ padding-top:calc(8px + var(--tg-top,0px)) !important; }"+
+        "#pauseBtn{ top:calc(10px + var(--tg-top,0px)) !important; }"+
+        "#startScreen{ padding-top:calc(64px + var(--tg-top,0px)) !important; }"+
+        "#gameOverScreen{ padding-top:calc(12px + var(--tg-top,0px)) !important; }"+
+        ".panel{ padding-top:calc(64px + var(--tg-top,0px)) !important; }"+
+        "#soundBtn{ bottom:calc(14px + var(--tg-bottom,0px)) !important; }"+
+        "#tiltBtn{ bottom:calc(68px + var(--tg-bottom,0px)) !important; }";
+      document.head.appendChild(st);
+    })();
+
     /* refresh HUD lives to reflect upgraded max HP on boot ------------------- */
     renderLives();
   })();
