@@ -150,8 +150,8 @@ export default {
     // link, /refer marks them (one-time) and credits the referrer's pending bucket; the
     // new user gets an immediate welcome bonus. The referrer claims their pending XP on
     // their next launch via /refer-claim. XP only — no token payouts.
-    const REF_REFERRER_REWARD = 1500;   // XP to the inviter per confirmed friend
-    const REF_INVITEE_REWARD  = 1000;   // XP welcome bonus to the new player
+    const REF_REFERRER_REWARD = 3000;   // XP to the inviter per confirmed friend
+    const REF_INVITEE_REWARD  = 2500;   // XP welcome bonus to the new player
     const REFERRED_PREFIX = "referred:";  // referred:<inviteeId> = referrerId (one-time marker)
     const REFPEND_PREFIX  = "refpend:";   // refpend:<referrerId>  = unclaimed XP
     const REFCOUNT_PREFIX = "refcount:";  // refcount:<referrerId> = total confirmed referrals

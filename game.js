@@ -207,6 +207,15 @@ window._adsPayload = "WwogIHsKICAgICJpZCI6ICJ4emlsbGEtaG9tZSIsCiAgICAidGV4dCI6IC
     const id = (typeof tg!=="undefined" && tg && tg.initDataUnsafe && tg.initDataUnsafe.user && tg.initDataUnsafe.user.id);
     return id ? ("https://t.me/RugSmasher_bot?startapp="+id) : (window.__BOT_SHARE_URL || "https://t.me/RugSmasher_bot/");
   }
+  // Shared invite action — used by the main-screen button AND the RANKS panel button.
+  function inviteFriends(){
+    const link = refLink();
+    const txt  = "🦖 Play XZILLA: RUG SMASHER with me — smash scammers, climb the board. We BOTH get XP when you join 👇";
+    try{
+      if(typeof tg!=="undefined" && tg && tg.openTelegramLink){ tg.openTelegramLink("https://t.me/share/url?url="+encodeURIComponent(link)+"&text="+encodeURIComponent(txt)); }
+      else { navigator.clipboard.writeText(txt + "\n" + link); toast("Invite link copied",CYAN); }
+    }catch(e){ toast("Share unavailable",RED); }
+  }
   function whenCloudReady(fn, tries){
     if(_cloudReady) return void fn();
     if((tries||0) > 40) return;            // give up after ~8s
@@ -1955,7 +1964,7 @@ window._adsPayload = "WwogIHsKICAgICJpZCI6ICJ4emlsbGEtaG9tZSIsCiAgICAidGV4dCI6IC
         const box=document.createElement("div"); box.id="lbRefTop";
         box.innerHTML='<h2 class="pnl-title" style="border-color:'+GOLD+';margin-top:14px;">TOP INVITERS</h2>'+
           (myInv>0
-            ? '<div class="sub" style="color:'+TEAL+'">You’ve invited '+myInv+' friend'+(myInv>1?'s':'')+' · +'+fmt(myInv*1500)+' XP earned</div>'
+            ? '<div class="sub" style="color:'+TEAL+'">You’ve invited '+myInv+' friend'+(myInv>1?'s':'')+' · +'+fmt(myInv*3000)+' XP earned</div>'
             : '<div class="sub">Invite friends below to climb this board!</div>')+
           '<div class="sub" id="lbRefList">Loading…</div>';
         const lbTopEl=$("lbTop");
@@ -1974,7 +1983,7 @@ window._adsPayload = "WwogIHsKICAgICJpZCI6ICJ4emlsbGEtaG9tZSIsCiAgICAidGV4dCI6IC
       wrap.style.cssText="margin-top:14px;display:flex;flex-direction:column;gap:8px";
       wrap.innerHTML=
         '<div class="sub" style="margin-top:2px">PLAY WITH FRIENDS</div>'+
-        '<button class="btn secondary" id="lbInvite" style="font-size:11px;padding:13px">INVITE A DEGEN · +1500 XP / FRIEND</button>'+
+        '<button class="btn secondary" id="lbInvite" style="font-size:11px;padding:13px">INVITE A DEGEN · +3000 XP / FRIEND</button>'+
         '<button class="btn secondary" id="lbShare" style="font-size:11px;padding:13px">SHARE MY RANK</button>'+
         (lbApi() ?
           '<div class="sub" style="margin-top:6px">POST THE LEADERBOARD</div>'+
@@ -1982,16 +1991,7 @@ window._adsPayload = "WwogIHsKICAgICJpZCI6ICJ4emlsbGEtaG9tZSIsCiAgICAidGV4dCI6IC
           '<button class="btn secondary" id="lbPostX" style="font-size:11px;padding:13px">𝕏 POST TOP 5 TO X</button>'
           : '<div class="sub" style="opacity:.7">Global TOP 10 activates once the $XZILLA leaderboard backend is connected.</div>');
       host.appendChild(wrap);
-      $("lbInvite").onclick=()=>{
-        // Personal referral link: when a friend opens it and plays, BOTH of you get XP
-        // (credited server-side — see /refer). No local fake reward.
-        const link = refLink();
-        const txt  = "🦖 Play XZILLA: RUG SMASHER with me — smash scammers, climb the board. We BOTH get XP when you join 👇";
-        try{
-          if(tg && tg.openTelegramLink){ tg.openTelegramLink("https://t.me/share/url?url="+encodeURIComponent(link)+"&text="+encodeURIComponent(txt)); }
-          else { navigator.clipboard.writeText(txt + "\n" + link); toast("Invite link copied",CYAN); }
-        }catch(e){ toast("Share unavailable",RED); }
-      };
+      $("lbInvite").onclick=inviteFriends;
       $("lbShare").onclick=shareScore;
       if($("lbPostTg")) $("lbPostTg").onclick=()=>postLeaderboard("tg");
       if($("lbPostX"))  $("lbPostX").onclick =()=>postLeaderboard("x");
@@ -2724,6 +2724,7 @@ window._adsPayload = "WwogIHsKICAgICJpZCI6ICJ4emlsbGEtaG9tZSIsCiAgICAidGV4dCI6IC
     applySkin(); updateVip(); updateHUDtokens(); checkStreak();
     ensureDaily(); ensureWeekly(); syncRankSkins();   // refresh today's + this week's challenge + grant earned rank skins
     $("tabbar").classList.remove("hidden"); showTab("PLAY");
+    { const mi=$("mainInvite"); if(mi) mi.onclick=inviteFriends; }   // main-screen invite CTA
     // Referrals: claim any pending inviter XP + process an incoming invite — but only once
     // the economy has fully loaded, so the XP grant can't be clobbered by a late restore.
     whenCloudReady(()=>{ try{ claimReferralRewards(); processIncomingReferral(); }catch(_){} });

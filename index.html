@@ -11,7 +11,7 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@500;700;900&family=Press+Start+2P&display=swap" rel="stylesheet">
 
-<link rel="stylesheet" href="styles.css?v=28">
+<link rel="stylesheet" href="styles.css?v=30">
 </head>
 <body>
   <div id="game"></div>
@@ -65,6 +65,8 @@
       <button id="connectBtn" class="btn secondary small" style="margin-top:18px;">CONNECT YOUR XZILLA HODL WALLET FOR SCORE MULTIPLIERS</button>
       <div id="walletInfo" class="wallet">Wallet not connected</div>
       <div id="vipStatus" class="status-line"></div>
+      <button id="mainInvite" class="btn invite small" style="margin-top:16px;">🦖 INVITE FRIENDS · +3000 XP EACH</button>
+      <div class="invite-hint">You and your friend both earn XP</div>
     </div>
   </div>
 
@@ -1270,6 +1272,6 @@ document.querySelectorAll("#startScreen .btn").forEach(b=>{
 document.addEventListener("visibilitychange",()=>{ if(document.hidden&&state.running) pauseGame(); });
 document.getElementById("bestScore").textContent=state.best;
 </script>
-<script src="game.js?v=55"></script>
+<script src="game.js?v=56"></script>
 </body>
 </html>
