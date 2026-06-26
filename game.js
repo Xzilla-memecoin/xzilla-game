@@ -94,16 +94,22 @@ window._adsPayload = "WwogIHsKICAgICJpZCI6ICJ4emlsbGEtaG9tZSIsCiAgICAidGV4dCI6IC
     store.set("xz_tokens",econ.tokens); store.set("xz_holdings",econ.holdings);
     store.set("xz_skins",econ.skins);   store.set("xz_skin",econ.skin);
     store.set("xz_streak",econ.streak); store.set("xz_streakDay",econ.streakDay);
-    cloudBackupEcon();
+    const ts=Date.now(); store.set("xz_econ_ts", ts);   // stamp locally (newest-wins across devices)
+    cloudBackupEcon(ts);    // Telegram CloudStorage (legacy fallback)
+    serverBackupEcon(ts);   // Worker, keyed to the Telegram user (reliable cross-device)
   }
 
-  /* ---- cross-device cloud backup (Telegram CloudStorage) ----------------------
-   * localStorage is per-device: clearing the cache or switching phones wipes all
-   * earned XP, skins and upgrades. We mirror the whole economy to Telegram
-   * CloudStorage (synced per Telegram user across devices) and restore the newer
-   * snapshot on boot. Safely no-ops outside Telegram (e.g. local browser testing). */
+  /* ---- cross-device economy backup --------------------------------------------
+   * XP/upgrades/skins are saved SERVER-SIDE on the Worker keyed to the verified
+   * Telegram user (like the leaderboard) so they follow the player across devices,
+   * not just per-device localStorage. Telegram CloudStorage is kept as a secondary
+   * fallback (and migrates existing players' progress into the server on first save).
+   * On boot we read both, keep the newest, and never overwrite a backup before we've
+   * read it (anti-clobber). Outside Telegram it's local-only. */
   const ECON_CLOUD_KEY = "xz_econ_v1";
   const hasCloud = () => (typeof tg!=="undefined" && tg && tg.CloudStorage && tg.CloudStorage.setItem);
+  const econApi = () => (window.__LB_API||"").replace(/\/+$/,"");
+  const tgInit  = () => (typeof tg!=="undefined" && tg && tg.initData) || "";
   function econSnapshot(ts){
     return { v:1, ts:ts,
       tokens:econ.tokens, holdings:econ.holdings, skins:econ.skins, skin:econ.skin,
@@ -111,45 +117,83 @@ window._adsPayload = "WwogIHsKICAgICJpZCI6ICJ4emlsbGEtaG9tZSIsCiAgICAidGV4dCI6IC
       missions:store.get("xz_missions",null), daily:store.get("xz_daily",null),
       weekly:store.get("xz_weekly",null) };
   }
-  let _cloudSaveT=null;
-  function cloudBackupEcon(){
-    const ts=Date.now(); store.set("xz_econ_ts", ts);   // stamp locally even offline so a later sync wins
-    if(!hasCloud()) return;
-    clearTimeout(_cloudSaveT);   // debounce: bundle bursts of saves into one write
+  let _cloudSaveT=null, _servSaveT=null;
+  // Gate WRITES until we've READ the backups, so a slow/failed read can't let the game
+  // boot with empty data and then clobber the real backup → permanent XP/upgrade loss.
+  let _cloudReady=false;
+  function cloudBackupEcon(ts){
+    if(!hasCloud() || !_cloudReady) return;
+    clearTimeout(_cloudSaveT);
     _cloudSaveT=setTimeout(()=>{ try{
       tg.CloudStorage.setItem(ECON_CLOUD_KEY, JSON.stringify(econSnapshot(ts)), function(){});
     }catch(_){} }, 500);
   }
-  function restoreEconFromCloud(done){
-    if(!(hasCloud() && tg.CloudStorage.getItem)){ done(); return; }
-    let finished=false; const finish=()=>{ if(!finished){ finished=true; done(); } };
-    setTimeout(finish, 1500);   // never hang the boot if CloudStorage never calls back
-    try{
-      tg.CloudStorage.getItem(ECON_CLOUD_KEY, function(err, value){
-        try{
-          const snap = (!err && value) ? JSON.parse(value) : null;
-          const localTs = parseInt(store.get("xz_econ_ts",0),10)||0;
-          if(snap && typeof snap.ts==="number" && snap.ts>localTs){
-            // cloud is newer than this device → restore it
-            if(typeof snap.tokens==="number")   econ.tokens=snap.tokens;
-            if(typeof snap.holdings==="number") econ.holdings=snap.holdings;
-            if(Array.isArray(snap.skins))       econ.skins=snap.skins;
-            if(typeof snap.skin==="string")     econ.skin=snap.skin;
-            if(typeof snap.streak==="number")   econ.streak=snap.streak;
-            if(snap.streakDay)                  econ.streakDay=snap.streakDay;
-            if(snap.upg) store.set("xz_upg", snap.upg);                 // re-applies on next launch
-            if(Array.isArray(snap.missions)){ store.set("xz_missions", snap.missions); missions=snap.missions; }
-            if(snap.daily){  store.set("xz_daily",  snap.daily);  daily=snap.daily; }
-            if(snap.weekly){ store.set("xz_weekly", snap.weekly); weekly=snap.weekly; }
-            store.set("xz_tokens",econ.tokens); store.set("xz_holdings",econ.holdings);
-            store.set("xz_skins",econ.skins);   store.set("xz_skin",econ.skin);
-            store.set("xz_streak",econ.streak); store.set("xz_streakDay",econ.streakDay);
-            store.set("xz_econ_ts", snap.ts);
-          }
-        }catch(_){}
-        finish();
-      });
-    }catch(_){ finish(); }
+  function serverBackupEcon(ts){
+    if(!_cloudReady) return;
+    const api=econApi(), init=tgInit(); if(!api||!init) return;
+    clearTimeout(_servSaveT);
+    _servSaveT=setTimeout(()=>{ try{
+      fetch(api+"/econ-save",{ method:"POST", headers:{"content-type":"application/json"},
+        body:JSON.stringify({ initData:init, snap:econSnapshot(ts) }) }).catch(()=>{});
+    }catch(_){} }, 600);
+  }
+  function _applyCloudSnap(snap){
+    if(typeof snap.tokens==="number")   econ.tokens=snap.tokens;
+    if(typeof snap.holdings==="number") econ.holdings=snap.holdings;
+    if(Array.isArray(snap.skins))       econ.skins=snap.skins;
+    if(typeof snap.skin==="string")     econ.skin=snap.skin;
+    if(typeof snap.streak==="number")   econ.streak=snap.streak;
+    if(snap.streakDay)                  econ.streakDay=snap.streakDay;
+    if(snap.upg) store.set("xz_upg", snap.upg);
+    if(Array.isArray(snap.missions)){ store.set("xz_missions", snap.missions); missions=snap.missions; }
+    if(snap.daily){  store.set("xz_daily",  snap.daily);  daily=snap.daily; }
+    if(snap.weekly){ store.set("xz_weekly", snap.weekly); weekly=snap.weekly; }
+    store.set("xz_tokens",econ.tokens); store.set("xz_holdings",econ.holdings);
+    store.set("xz_skins",econ.skins);   store.set("xz_skin",econ.skin);
+    store.set("xz_streak",econ.streak); store.set("xz_streakDay",econ.streakDay);
+    store.set("xz_econ_ts", snap.ts);
+  }
+  function _refreshEconUI(){ try{
+    if(typeof applyUpgrades==="function") applyUpgrades();
+    if(typeof updateHUDtokens==="function") updateHUDtokens();
+    if(typeof updateVip==="function") updateVip();
+    if(typeof renderLives==="function") renderLives();
+    if(typeof applySkin==="function") applySkin();
+  }catch(_){ } }
+  function serverLoadEcon(cb){
+    const api=econApi(), init=tgInit(); if(!api||!init){ cb(null); return; }
+    let done=false; const fin=s=>{ if(!done){ done=true; cb(s); } };
+    setTimeout(()=>fin(null), 4000);
+    try{ fetch(api+"/econ-load",{ method:"POST", headers:{"content-type":"application/json"},
+      body:JSON.stringify({ initData:init }) }).then(r=>r.json())
+      .then(d=>fin(d&&d.ok?d.snap:null)).catch(()=>fin(null)); }catch(_){ fin(null); }
+  }
+  function cloudLoadSnap(cb){
+    if(!(hasCloud() && tg.CloudStorage.getItem)){ cb(null); return; }
+    let done=false; const fin=s=>{ if(!done){ done=true; cb(s); } };
+    setTimeout(()=>fin(null), 4000);
+    try{ tg.CloudStorage.getItem(ECON_CLOUD_KEY, function(err,value){
+      let s=null; try{ s=(!err&&value)?JSON.parse(value):null; }catch(_){}
+      fin(s);
+    }); }catch(_){ fin(null); }
+  }
+  // Boot loader: read server + cloud, apply whichever snapshot is newest than local.
+  function restoreEcon(done){
+    const servOK  = !!(econApi() && tgInit());
+    const cloudOK = !!(hasCloud() && tg.CloudStorage.getItem);
+    if(!servOK && !cloudOK){ _cloudReady=true; done(); return; }   // browser: local only
+    const localTs = parseInt(store.get("xz_econ_ts",0),10)||0;     // capture BEFORE boot/migrate can bump it
+    let booted=false; const finish=()=>{ if(!booted){ booted=true; done(); } };
+    const to=setTimeout(finish, 2800);   // boot the UI even if a source is slow
+    let best=null, pending=0;
+    const consider=s=>{ if(s && typeof s.ts==="number" && (!best||s.ts>best.ts)) best=s; };
+    const settle=()=>{ if(--pending>0) return;
+      if(best && best.ts>localTs){ _applyCloudSnap(best); if(booted) _refreshEconUI(); }
+      _cloudReady=true; clearTimeout(to); finish();
+    };
+    if(servOK){  pending++; serverLoadEcon(s=>{ consider(s); settle(); }); }
+    if(cloudOK){ pending++; cloudLoadSnap(s=>{ consider(s); settle(); }); }
+    if(!pending){ _cloudReady=true; finish(); }
   }
   const fmt = n => Math.round(n).toLocaleString("en-US");
   const abbr = n => n>=1e6 ? (n/1e6).toFixed(n%1e6?1:0)+"M" : n>=1e3 ? (n/1e3).toFixed(0)+"K" : ""+n;
@@ -2601,5 +2645,5 @@ window._adsPayload = "WwogIHsKICAgICJpZCI6ICJ4emlsbGEtaG9tZSIsCiAgICAidGV4dCI6IC
     $("tabbar").classList.remove("hidden"); showTab("PLAY");
   }
   // Pull any newer cross-device cloud save first, THEN boot (runs immediately outside Telegram).
-  restoreEconFromCloud(boot);
+  restoreEcon(boot);
 })();

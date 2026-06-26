@@ -117,6 +117,34 @@ export default {
       return json({ ok: true, rank, top: trimmed.slice(0, 10).map(e => ({ name: e.name, score: e.score })) }, 200, origin);
     }
 
+    // ===================== Per-user economy (cross-device XP/upgrades) ===========
+    // Saved server-side keyed to the verified Telegram user (same trust model as /submit:
+    // identity is verified, the values are client-reported). Makes XP/upgrades reliable
+    // across devices instead of depending on per-device localStorage / flaky CloudStorage.
+    const ECON_PREFIX = "econ:";
+    const ECON_MAX_BYTES = 8000;
+
+    if(req.method === "POST" && url.pathname === "/econ-load"){
+      let body; try{ body = await req.json(); }catch(_){ return json({ error: "bad json" }, 400, origin); }
+      const user = await verifyInitData(body.initData || "", env.BOT_TOKEN);
+      if(!user) return json({ error: "unauthorized" }, 401, origin);
+      const v = await env.LB.get(ECON_PREFIX + user.id);
+      let snap = null; try{ snap = v ? JSON.parse(v) : null; }catch(_){ snap = null; }
+      return json({ ok: true, snap }, 200, origin);
+    }
+
+    if(req.method === "POST" && url.pathname === "/econ-save"){
+      let body; try{ body = await req.json(); }catch(_){ return json({ error: "bad json" }, 400, origin); }
+      const user = await verifyInitData(body.initData || "", env.BOT_TOKEN);
+      if(!user) return json({ error: "unauthorized" }, 401, origin);
+      const snap = body.snap;
+      if(!snap || typeof snap !== "object" || Array.isArray(snap)) return json({ error: "bad_snap" }, 400, origin);
+      const s = JSON.stringify(snap);
+      if(s.length > ECON_MAX_BYTES) return json({ error: "too_large" }, 413, origin);
+      await env.LB.put(ECON_PREFIX + String(user.id), s);
+      return json({ ok: true }, 200, origin);
+    }
+
     // -------- GET /ads  (public, no-store) ---------------------------------------
     // Live ad config for the in-game billboards. Served from KV with no caching so an
     // update via POST /ads is visible to players within seconds (vs. ~5 min on the
