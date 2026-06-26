@@ -786,6 +786,35 @@ window._adsPayload = "WwogIHsKICAgICJpZCI6ICJ4emlsbGEtaG9tZSIsCiAgICAidGV4dCI6IC
     const full = txt + (link ? ("\n"+link) : "");
     try{ navigator.clipboard.writeText(full); toast("Copied — paste anywhere to share!",CYAN); }catch(_){ toast(full); }
   }
+
+  // Post the live TOP 10 to a Telegram chat/group (native share sheet) or to X (tweet
+  // intent). Pulls the freshest board from the Worker so what you post is current.
+  function postLeaderboard(target){
+    const api = (typeof lbApi==="function") ? lbApi() : "";
+    if(!api){ toast("Leaderboard backend not connected",RED); return; }
+    const link = window.__BOT_SHARE_URL || "";
+    toast("Fetching leaderboard…",CYAN);
+    fetch(api+"/top",{cache:"no-store"}).then(r=>r.json()).then(d=>{
+      const list=(d&&d.top)||[];
+      if(!list.length){ toast("No scores yet to post",RED); return; }
+      if(target==="x"){
+        // X caps tweets at 280 chars — keep it compact (top 5) so text+link fits.
+        const rows=list.slice(0,5).map((e,i)=>(i+1)+". "+e.name+" — "+fmt(e.score)).join("\n");
+        const text="🦖 XZILLA: RUG SMASHER — top degens:\n"+rows+"\n\nSmash scams, climb the board 👉";
+        const url="https://twitter.com/intent/tweet?text="+encodeURIComponent(text)+(link?("&url="+encodeURIComponent(link)):"");
+        try{ if(tg&&tg.openLink) tg.openLink(url); else window.open(url,"_blank"); }catch(_){ try{ window.open(url,"_blank"); }catch(e){ toast("Couldn't open X",RED); } }
+      } else {
+        const medal=i=>i===0?"🥇":i===1?"🥈":i===2?"🥉":"#"+(i+1);
+        const rows=list.slice(0,10).map((e,i)=>medal(i)+" "+e.name+" — "+fmt(e.score)).join("\n");
+        const text="🦖 XZILLA: RUG SMASHER\nTOP 10 DEGENS\n\n"+rows+"\n\nThink you can crack the top 10? 👇";
+        const shareUrl="https://t.me/share/url?url="+encodeURIComponent(link)+"&text="+encodeURIComponent(text);
+        try{
+          if(tg&&tg.openTelegramLink){ tg.openTelegramLink(shareUrl); }
+          else { navigator.clipboard.writeText(text+(link?("\n"+link):"")); toast("Leaderboard copied — paste in your group",CYAN); }
+        }catch(_){ toast("Share unavailable",RED); }
+      }
+    }).catch(()=>toast("Couldn't load leaderboard",RED));
+  }
   function updateHUDtokens(){ const b=$("bagHud"); if(b) b.textContent=abbr(econ.tokens); }
   function updateVip(){
     // VIP if the simulated holdings tier grants a multiplier OR a real on-chain
@@ -1784,7 +1813,11 @@ window._adsPayload = "WwogIHsKICAgICJpZCI6ICJ4emlsbGEtaG9tZSIsCiAgICAidGV4dCI6IC
         '<div class="sub" style="margin-top:2px">PLAY WITH FRIENDS</div>'+
         '<button class="btn secondary" id="lbInvite" style="font-size:11px;padding:13px">INVITE A DEGEN (+500 XP)</button>'+
         '<button class="btn secondary" id="lbShare" style="font-size:11px;padding:13px">SHARE MY RANK</button>'+
-        (lbApi() ? '' : '<div class="sub" style="opacity:.7">Global TOP 10 activates once the $XZILLA leaderboard backend is connected.</div>');
+        (lbApi() ?
+          '<div class="sub" style="margin-top:6px">POST THE LEADERBOARD</div>'+
+          '<button class="btn secondary" id="lbPostTg" style="font-size:11px;padding:13px">📣 POST TOP 10 TO TELEGRAM</button>'+
+          '<button class="btn secondary" id="lbPostX" style="font-size:11px;padding:13px">𝕏 POST TOP 5 TO X</button>'
+          : '<div class="sub" style="opacity:.7">Global TOP 10 activates once the $XZILLA leaderboard backend is connected.</div>');
       host.appendChild(wrap);
       $("lbInvite").onclick=()=>{
         const link = window.__BOT_SHARE_URL || "";
@@ -1800,6 +1833,8 @@ window._adsPayload = "WwogIHsKICAgICJpZCI6ICJ4emlsbGEtaG9tZSIsCiAgICAidGV4dCI6IC
         }catch(e){ toast("Share unavailable",RED); }
       };
       $("lbShare").onclick=shareScore;
+      if($("lbPostTg")) $("lbPostTg").onclick=()=>postLeaderboard("tg");
+      if($("lbPostX"))  $("lbPostX").onclick =()=>postLeaderboard("x");
     };
 
     /* weekly local reset so the board feels alive ---------------------------- */
