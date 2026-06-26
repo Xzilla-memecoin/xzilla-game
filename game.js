@@ -187,45 +187,55 @@ window._adsPayload = "WwogIHsKICAgICJpZCI6ICJ4emlsbGEtaG9tZSIsCiAgICAidGV4dCI6IC
   ];
   // Recolor the WHOLE Xrider+bike to the skin's color. THREE's material.color only
   // MULTIPLIES the texture (can't brighten → muddy), so instead we bake a per-skin
-  // texture: each pixel = its luminance × the tint, preserving the silhouette + shading.
-  // The default skin keeps the original art. Tints are cached; until the source image
-  // has loaded we fall back to a plain colour multiply, then re-apply once it's ready.
-  let _skinBaseMap=null, _skinLastId=null, _skinRetry=0; const _skinTex={};
-  function _xriderImg(){
-    const m = _skinBaseMap || (player && player.material && player.material.map);   // always read the ORIGINAL art
-    const im = m && m.image; return (im && (im.complete || im.width)) ? im : null;
+  // texture: pixel = luminance × tint, preserving the silhouette + shading. We load the
+  // source art from its own CORS image (NOT the in-scene texture) so we never bake the
+  // loading PLACEHOLDER sprite into a skin. The default skin uses the untinted art.
+  let _riderBase=null, _riderLoading=false, _riderOrigTex=null, _skinLastId=null, _skinRetry=0;
+  const _skinTex={};
+  function _ensureRiderBase(cb){
+    if(_riderBase){ cb&&cb(); return; }
+    if(_riderLoading) return;
+    _riderLoading=true;
+    const im=new Image(); im.crossOrigin="anonymous";
+    im.onload=()=>{ _riderBase=im; _riderLoading=false; cb&&cb(); };
+    im.onerror=()=>{ _riderLoading=false; };
+    try{ im.src = (typeof XZILLA_BACK_IMAGE_URL!=="undefined") ? XZILLA_BACK_IMAGE_URL : ""; }catch(e){ _riderLoading=false; }
   }
-  function _tintedXrider(tint){
-    if(_skinTex[tint]) return _skinTex[tint];
-    const img=_xriderImg(); if(!img) return null;
-    const w=img.width||256, h=img.height||256;
+  function _riderTexFor(tint){   // tint=null → original (untinted) art texture
+    if(tint){ if(_skinTex[tint]) return _skinTex[tint]; } else if(_riderOrigTex) return _riderOrigTex;
+    if(!_riderBase) return null;
+    const w=_riderBase.naturalWidth||_riderBase.width, h=_riderBase.naturalHeight||_riderBase.height;
     const c=document.createElement("canvas"); c.width=w; c.height=h;
-    const x=c.getContext("2d"); x.drawImage(img,0,0,w,h);
-    let id; try{ id=x.getImageData(0,0,w,h); }catch(e){ return null; }   // tainted canvas → caller falls back to colour mult
-    const d=id.data, col=new THREE.Color(tint), tr=col.r, tg=col.g, tb=col.b;
-    for(let i=0;i<d.length;i+=4){
-      let a=d[i+3]; if(!a) continue;
-      // Fade the soft aura baked into the art so the skin colour doesn't form a glowing
-      // "bubble" around the rider — faint pixels are pulled toward transparent.
-      if(a<170){ a=Math.round(a*a/170); d[i+3]=a; if(!a) continue; }
-      let lum=(0.299*d[i]+0.587*d[i+1]+0.114*d[i+2])/255;
-      lum=Math.min(1, Math.pow(lum,0.72));            // brighten midtones, keep darks dark (no glow halo)
-      d[i]=tr*255*lum; d[i+1]=tg*255*lum; d[i+2]=tb*255*lum; }
-    x.putImageData(id,0,0);
+    const x=c.getContext("2d"); x.drawImage(_riderBase,0,0,w,h);
+    if(tint){
+      let id; try{ id=x.getImageData(0,0,w,h); }catch(e){ return null; }
+      const d=id.data, col=new THREE.Color(tint), tr=col.r, tg=col.g, tb=col.b;
+      for(let i=0;i<d.length;i+=4){
+        let a=d[i+3]; if(!a) continue;
+        // Fade the soft aura baked into the art so the skin colour doesn't form a halo.
+        if(a<170){ a=Math.round(a*a/170); d[i+3]=a; if(!a) continue; }
+        let lum=(0.299*d[i]+0.587*d[i+1]+0.114*d[i+2])/255;
+        lum=Math.min(1, Math.pow(lum,0.72));          // brighten midtones, keep darks dark (no glow halo)
+        d[i]=tr*255*lum; d[i+1]=tg*255*lum; d[i+2]=tb*255*lum; }
+      x.putImageData(id,0,0);
+    }
     const t=new THREE.CanvasTexture(c); try{ t.encoding=THREE.sRGBEncoding; }catch(e){}
-    _skinTex[tint]=t; return t;
+    if(tint) _skinTex[tint]=t; else _riderOrigTex=t;
+    return t;
   }
   function applySkin(){
-    const s=SKINS.find(s=>s.id===econ.skin), tint=s&&s.tint;
+    const s=SKINS.find(s=>s.id===econ.skin), tint=(s&&s.tint)||null;
     try{ _applyHeroSkin(tint); }catch(e){}   // also recolor the start-screen hero image
     if(econ.skin!==_skinLastId){ _skinLastId=econ.skin; _skinRetry=0; }
-    if(!_skinBaseMap && player && player.material && _xriderImg()) _skinBaseMap=player.material.map;   // capture original once loaded
     try{
-      if(!tint){ if(_skinBaseMap) player.material.map=_skinBaseMap; player.material.color.set("#ffffff"); player.material.needsUpdate=true; return; }
-      const tex=_tintedXrider(tint);
+      const tex=_riderTexFor(tint);
       if(tex){ player.material.map=tex; player.material.color.set("#ffffff"); player.material.needsUpdate=true; }
-      else { player.material.color.set(tint); player.material.needsUpdate=true;          // fallback until the art finishes loading
-             if(_skinRetry++ < 25) setTimeout(applySkin, 300); }
+      else {
+        // Source art not loaded yet — leave the in-scene texture as-is (no placeholder
+        // baking, no colour fallback), load the real art, then re-apply.
+        _ensureRiderBase(()=>{ try{ applySkin(); }catch(e){} });
+        if(_skinRetry++ < 30) setTimeout(applySkin, 300);
+      }
     }catch(e){}
   }
   // The main/start screen shows a separate static <img id="heroImg"> (mainImage.webp),
