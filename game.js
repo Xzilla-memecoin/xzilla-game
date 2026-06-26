@@ -799,7 +799,8 @@ window._adsPayload = "WwogIHsKICAgICJpZCI6ICJ4emlsbGEtaG9tZSIsCiAgICAidGV4dCI6IC
       if(!list.length){ toast("No scores yet to post",RED); return; }
       if(target==="x"){
         // X caps tweets at 280 chars — keep it compact (top 5) so text+link fits.
-        const rows=list.slice(0,5).map((e,i)=>(i+1)+". "+e.name+" — "+fmt(e.score)).join("\n");
+        // Strip the leading "@" (Telegram handle) so X doesn't read it as an X mention.
+        const rows=list.slice(0,5).map((e,i)=>(i+1)+". "+String(e.name||"").replace(/^@+/,"")+" — "+fmt(e.score)).join("\n");
         const text="🦖 XZILLA: RUG SMASHER — top degens:\n"+rows+"\n\nSmash scams, climb the board 👉";
         const url="https://twitter.com/intent/tweet?text="+encodeURIComponent(text)+(link?("&url="+encodeURIComponent(link)):"");
         try{ if(tg&&tg.openLink) tg.openLink(url); else window.open(url,"_blank"); }catch(_){ try{ window.open(url,"_blank"); }catch(e){ toast("Couldn't open X",RED); } }
