@@ -295,13 +295,18 @@
       }
       const kp  = window.nacl.box.keyPair();         // ephemeral, this attempt only
       const sid = randomSid();
-      // Open the Worker bridge page in the SYSTEM browser; it launches Phantom from
-      // there (reliable), with Phantom redirecting its encrypted reply to /phantom-cb.
-      const bridge = api + "/phantom-bridge?sid=" + sid
-        + "&pk=" + encodeURIComponent(b58encode(kp.publicKey))
-        + "&app=" + encodeURIComponent(location.origin);
-      if(window.__toast) window.__toast("Opening Phantom in your browser — approve, then return to Telegram","#21e6ff");
-      try{ tg.openLink(bridge); }catch(_){ try{ window.open(bridge); }catch(__){} }
+      // Launch Phantom directly via the universal link (Telegram hands https://phantom.app/ul
+      // links to the OS, which opens the native app). Phantom requires redirect_link's origin
+      // to equal app_url's origin, so BOTH must be the Worker/relay origin (not the game's).
+      let apiOrigin; try{ apiOrigin = new URL(api).origin; }catch(_){ apiOrigin = api; }
+      const redirect = api + "/phantom-cb?sid=" + sid;
+      const link = "https://phantom.app/ul/v1/connect"
+        + "?dapp_encryption_public_key=" + encodeURIComponent(b58encode(kp.publicKey))
+        + "&cluster=mainnet-beta"
+        + "&app_url=" + encodeURIComponent(apiOrigin)
+        + "&redirect_link=" + encodeURIComponent(redirect);
+      if(window.__toast) window.__toast("Opening Phantom — approve, then switch back to Telegram","#21e6ff");
+      try{ tg.openLink(link); }catch(_){ try{ window.open(link); }catch(__){} }
       const res = await pollResult(api, sid, 180000);
       if(!res){ if(window.__toast) window.__toast("Wallet connect timed out — tap connect to retry","#ff3b5c"); return false; }
       if(res.errorCode){ if(window.__toast) window.__toast(("Phantom error "+res.errorCode+(res.errorMessage?": "+res.errorMessage:"")).slice(0,100),"#ff3b5c"); return false; }
