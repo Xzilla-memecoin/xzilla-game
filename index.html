@@ -1059,7 +1059,7 @@ function resolve(e){ const p=e.sprite.position.clone();
   e.dead=true; freeEntity(e); }
 
 /* ============================================================ MAIN LOOP */
-const clock=new THREE.Clock(); let gridOffset=0; let _lastCombo=0;
+const clock=new THREE.Clock(); let gridOffset=0; let _lastCombo=0; let _tireAcc=0;
 function loop(){ requestAnimationFrame(loop); const dt=Math.min(clock.getDelta(),0.05); const now=performance.now()*0.001;
   const scroll=dt*(state.running?state.speed:3.5); gridOffset=(gridOffset+scroll)%2; grid.position.z=-6+gridOffset; grid2.position.z=-6+gridOffset;
   const since=actx?(actx.currentTime-beatT):9, pulse=Math.max(0,1-since*6);
@@ -1081,6 +1081,13 @@ function loop(){ requestAnimationFrame(loop); const dt=Math.min(clock.getDelta()
   const want=-(steer*0.30+vx*7); const targetLean=Math.max(-0.5,Math.min(0.5,want));
   lean+=(targetLean-lean)*0.14;
   player.material.rotation=lean+vib*0.5;
+  // #tire-anim — spin the rear tire by cycling the biker spritesheet frames (speed-linked).
+  { const m=player.material.map, B=window.__BIKER;
+    if(m && B && m.repeat && m.repeat.x<1){
+      _tireAcc += dt * (state.running?(state.speed||6):3.0) * 3.0;
+      const f=((Math.floor(_tireAcc)%B.frames)+B.frames)%B.frames, c=f%B.cols, r=(f/B.cols)|0;
+      m.offset.x=c/B.cols; m.offset.y=1-(r+1)/B.rows;
+    } }
   if(typeof setEnginePitch==="function") setEnginePitch(Math.abs(vx));
 
   if(state.running){
@@ -1263,6 +1270,6 @@ document.querySelectorAll("#startScreen .btn").forEach(b=>{
 document.addEventListener("visibilitychange",()=>{ if(document.hidden&&state.running) pauseGame(); });
 document.getElementById("bestScore").textContent=state.best;
 </script>
-<script src="game.js?v=50"></script>
+<script src="game.js?v=51"></script>
 </body>
 </html>

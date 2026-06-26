@@ -190,6 +190,13 @@ window._adsPayload = "WwogIHsKICAgICJpZCI6ICJ4emlsbGEtaG9tZSIsCiAgICAidGV4dCI6IC
   // texture: pixel = luminance × tint, preserving the silhouette + shading. We load the
   // source art from its own CORS image (NOT the in-scene texture) so we never bake the
   // loading PLACEHOLDER sprite into a skin. The default skin uses the untinted art.
+  // Animated biker spritesheet: XzillaBiker.webp is a 5×4 grid (20 frames, 640×640).
+  // We show one frame via texture repeat+offset and cycle frames in the render loop
+  // (speed-linked, see #tire-anim). Relative path → loads from the local server now and
+  // GitHub Pages once pushed (same-origin, so the skin recolor canvas isn't tainted).
+  // 5×4 grid = 20 cells, but the last cell (bottom-right) is empty → cycle only 19 frames.
+  const BIKER_URL="images/XzillaBiker.webp", BIKER_COLS=5, BIKER_ROWS=4, BIKER_FRAMES=19;
+  window.__BIKER={cols:BIKER_COLS, rows:BIKER_ROWS, frames:BIKER_FRAMES};
   let _riderBase=null, _riderLoading=false, _riderOrigTex=null, _skinLastId=null, _skinRetry=0;
   const _skinTex={};
   function _ensureRiderBase(cb){
@@ -199,15 +206,19 @@ window._adsPayload = "WwogIHsKICAgICJpZCI6ICJ4emlsbGEtaG9tZSIsCiAgICAidGV4dCI6IC
     const im=new Image(); im.crossOrigin="anonymous";
     im.onload=()=>{ _riderBase=im; _riderLoading=false; cb&&cb(); };
     im.onerror=()=>{ _riderLoading=false; };
-    try{ im.src = (typeof XZILLA_BACK_IMAGE_URL!=="undefined") ? XZILLA_BACK_IMAGE_URL : ""; }catch(e){ _riderLoading=false; }
+    try{ im.src = BIKER_URL; }catch(e){ _riderLoading=false; }
   }
-  function _riderTexFor(tint){   // tint=null → original (untinted) art texture
+  function _frameRepeat(t){ if(t&&t.repeat) t.repeat.set(1/BIKER_COLS, 1/BIKER_ROWS); return t; }   // show a single frame
+  function _riderTexFor(tint){   // tint=null → original (untinted) sheet
     if(tint){ if(_skinTex[tint]) return _skinTex[tint]; } else if(_riderOrigTex) return _riderOrigTex;
     if(!_riderBase) return null;
-    const w=_riderBase.naturalWidth||_riderBase.width, h=_riderBase.naturalHeight||_riderBase.height;
-    const c=document.createElement("canvas"); c.width=w; c.height=h;
-    const x=c.getContext("2d"); x.drawImage(_riderBase,0,0,w,h);
-    if(tint){
+    let t;
+    if(!tint){
+      t=new THREE.Texture(_riderBase); t.needsUpdate=true;   // untinted sheet — no per-pixel work
+    } else {
+      const w=_riderBase.naturalWidth||_riderBase.width, h=_riderBase.naturalHeight||_riderBase.height;
+      const c=document.createElement("canvas"); c.width=w; c.height=h;
+      const x=c.getContext("2d"); x.drawImage(_riderBase,0,0,w,h);
       let id; try{ id=x.getImageData(0,0,w,h); }catch(e){ return null; }
       const d=id.data, col=new THREE.Color(tint), tr=col.r, tg=col.g, tb=col.b;
       for(let i=0;i<d.length;i+=4){
@@ -218,8 +229,10 @@ window._adsPayload = "WwogIHsKICAgICJpZCI6ICJ4emlsbGEtaG9tZSIsCiAgICAidGV4dCI6IC
         lum=Math.min(1, Math.pow(lum,0.72));          // brighten midtones, keep darks dark (no glow halo)
         d[i]=tr*255*lum; d[i+1]=tg*255*lum; d[i+2]=tb*255*lum; }
       x.putImageData(id,0,0);
+      t=new THREE.CanvasTexture(c);
     }
-    const t=new THREE.CanvasTexture(c); try{ t.encoding=THREE.sRGBEncoding; }catch(e){}
+    try{ t.encoding=THREE.sRGBEncoding; }catch(e){}
+    _frameRepeat(t);
     if(tint) _skinTex[tint]=t; else _riderOrigTex=t;
     return t;
   }
