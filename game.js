@@ -801,12 +801,19 @@ window._adsPayload = "WwogIHsKICAgICJpZCI6ICJ4emlsbGEtaG9tZSIsCiAgICAidGV4dCI6IC
   const PANELS = {WALLET:"walletPanel", MISSIONS:"missionsPanel", LEADERBOARD:"leaderboardPanel", SKINS:"skinsPanel"};
   function hideAllOverlays(){
     $("startScreen").classList.add("hidden");
+    const ps=$("pauseScreen"); if(ps) ps.classList.add("hidden");
     Object.values(PANELS).forEach(id=>$(id).classList.add("hidden"));
   }
   function showTab(name){
     document.querySelectorAll("#tabbar .tab").forEach(b=>b.classList.toggle("on", b.dataset.tab===name));
     hideAllOverlays(); $("gameOverScreen").classList.add("hidden");
-    if(name==="PLAY"){ $("startScreen").classList.remove("hidden"); applySkin(); }   // reflect equipped skin on the menu player
+    if(name==="PLAY"){
+      // While a run is paused, PLAY returns to the PAUSE menu (RESUME/QUIT) instead of the
+      // start screen, so the run is still resumable and no overlay/menu is left behind.
+      let paused=false; try{ paused=!!isPaused; }catch(e){}
+      if(paused){ $("pauseScreen").classList.remove("hidden"); }
+      else { $("startScreen").classList.remove("hidden"); applySkin(); }   // reflect equipped skin on the menu player
+    }
     else { $(PANELS[name]).classList.remove("hidden"); renderPanel(name); }
   }
   function renderPanel(name){
