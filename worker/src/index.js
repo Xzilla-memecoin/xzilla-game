@@ -265,8 +265,11 @@ export default {
 <script>
 (function(){
   var q=new URLSearchParams(location.search);
-  var sid=q.get("sid")||"", pk=q.get("pk")||"", app=q.get("app")||location.origin;
+  var sid=q.get("sid")||"", pk=q.get("pk")||"";
   if(!/^[a-f0-9]{16,64}$/.test(sid) || !pk){ document.getElementById("msg").textContent="Invalid connect link — reopen from the game."; document.getElementById("go").style.display="none"; return; }
+  // Phantom requires redirect_link origin === app_url origin, so both must be THIS
+  // (the bridge/relay) origin. The game URL is passed only for display below.
+  var app=location.origin;
   var cb=location.origin+"/phantom-cb?sid="+encodeURIComponent(sid);
   var link="https://phantom.app/ul/v1/connect?dapp_encryption_public_key="+encodeURIComponent(pk)
     +"&cluster=mainnet-beta&app_url="+encodeURIComponent(app)+"&redirect_link="+encodeURIComponent(cb);
