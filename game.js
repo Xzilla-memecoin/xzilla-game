@@ -1124,8 +1124,12 @@ window._adsPayload = "WwogIHsKICAgICJpZCI6ICJ4emlsbGEtaG9tZSIsCiAgICAidGV4dCI6IC
   /* ------------------------------- game flow ------------------------------ */
   const _gameOver = gameOver; // capture original (gameOver is called by name -> override applies)
   window.gameOver = function(){
+    // Capture the canonical all-time best BEFORE _gameOver() bumps state.best and
+    // before pushScore() bumps myBest. state.best (xzilla_best, the HUD/CloudStorage
+    // number) is the real record; myBest (xz_mybest) can lag behind it across devices,
+    // so a new-best check against myBest alone falsely fired on non-record runs.
+    const _prevBest = Math.max(Math.round(state.best||0), (myBest && myBest.score) || 0);
     _gameOver();
-    const _prevBest = (myBest && myBest.score) || 0;   // capture BEFORE pushScore updates it (new-best detection)
     // economy + missions + leaderboard
     run.score=Math.max(run.score, state.score);
     // run earnings were already added live during play; just persist now (D5: removed `econ.tokens += 0;` no-op)
