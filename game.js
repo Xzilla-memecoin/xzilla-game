@@ -400,18 +400,25 @@ window._adsPayload = "WwogIHsKICAgICJpZCI6ICJ4emlsbGEtaG9tZSIsCiAgICAidGV4dCI6IC
     {id:"k",  text:"Destroy 60 scammers",        goal:60,    prog:0, reward:1500,  done:false, stat:"kills"},
     {id:"k2", text:"Destroy 250 scammers",       goal:250,   prog:0, reward:4000,  done:false, stat:"kills"},
     {id:"k3", text:"Destroy 1,000 scammers",     goal:1000,  prog:0, reward:12000, done:false, stat:"kills"},
+    {id:"k4", text:"Destroy 3,000 scammers",     goal:3000,  prog:0, reward:30000, done:false, stat:"kills"},
     {id:"b",  text:"Defeat 3 Rug Bosses",        goal:3,     prog:0, reward:3000,  done:false, stat:"boss"},
     {id:"b2", text:"Defeat 15 Rug Bosses",       goal:15,    prog:0, reward:9000,  done:false, stat:"boss"},
+    {id:"b3", text:"Defeat 40 Rug Bosses",       goal:40,    prog:0, reward:22000, done:false, stat:"boss"},
+    {id:"b4", text:"Defeat 100 Rug Bosses",      goal:100,   prog:0, reward:55000, done:false, stat:"boss"},
     {id:"c",  text:"Land an x12 combo",          goal:12,    prog:0, reward:2500,  done:false, stat:"combo"},
     {id:"c2", text:"Land an x25 combo",          goal:25,    prog:0, reward:6000,  done:false, stat:"combo"},
+    {id:"c3", text:"Land an x40 combo",          goal:40,    prog:0, reward:14000, done:false, stat:"combo"},
+    {id:"c4", text:"Land an x60 combo",          goal:60,    prog:0, reward:30000, done:false, stat:"combo"},
     {id:"s",  text:"Score 6,000 in one run",     goal:6000,  prog:0, reward:5000,  done:false, stat:"score"},
     {id:"s2", text:"Score 12,000 in one run",    goal:12000, prog:0, reward:10000, done:false, stat:"score"},
-    {id:"s3", text:"Score 18,000 in one run",    goal:18000, prog:0, reward:18000, done:false, stat:"score"}
+    {id:"s3", text:"Score 18,000 in one run",    goal:18000, prog:0, reward:18000, done:false, stat:"score"},
+    {id:"s4", text:"Score 25,000 in one run",    goal:25000, prog:0, reward:30000, done:false, stat:"score"},
+    {id:"s5", text:"Score 40,000 in one run",    goal:40000, prog:0, reward:60000, done:false, stat:"score"}
   ];
   let missions = store.get("xz_missions", null);
   if(!Array.isArray(missions)) missions = DEFAULT_MISSIONS.map(m=>({...m}));
   else {
-    // migrate older saves to the full 10-bounty set: keep earned progress by id,
+    // migrate older saves to the full bounty set: keep earned progress by id,
     // refresh text/goal/reward (also retires the old "Beach 3 Glitch Whales" typo).
     const prev={}; missions.forEach(m=>{ prev[m.id]=m; });
     missions = DEFAULT_MISSIONS.map(d=>{
@@ -426,18 +433,31 @@ window._adsPayload = "WwogIHsKICAgICJpZCI6ICJ4emlsbGEtaG9tZSIsCiAgICAidGV4dCI6IC
    * so it's stable across reloads) and pays out XP once on completion. Progress is
    * tallied from each run's stats at game over. */
   const DAILY_POOL = [
-    {type:"kills", goal:80,   reward:2500, text:g=>"Smash "+g+" scammers today"},
-    {type:"score", goal:6000, reward:3000, text:g=>"Score "+fmt(g)+" in a single run"},
-    {type:"boss",  goal:3,    reward:4000, text:g=>"Defeat "+g+" Rug Bosses today"},
-    {type:"combo", goal:15,   reward:3500, text:g=>"Land an x"+g+" combo"}
+    {type:"kills", goal:60,    reward:2200, text:g=>"Smash "+g+" scammers today"},
+    {type:"kills", goal:100,   reward:3000, text:g=>"Smash "+g+" scammers today"},
+    {type:"kills", goal:150,   reward:4200, text:g=>"Wipe out "+g+" scammers today"},
+    {type:"kills", goal:220,   reward:5800, text:g=>"Go on a "+g+"-scammer rampage"},
+    {type:"score", goal:5000,  reward:2600, text:g=>"Score "+fmt(g)+" in a single run"},
+    {type:"score", goal:8000,  reward:3600, text:g=>"Score "+fmt(g)+" in a single run"},
+    {type:"score", goal:12000, reward:5000, text:g=>"Score "+fmt(g)+" in a single run"},
+    {type:"boss",  goal:2,     reward:3000, text:g=>"Defeat "+g+" Rug Bosses today"},
+    {type:"boss",  goal:4,     reward:4500, text:g=>"Defeat "+g+" Rug Bosses today"},
+    {type:"boss",  goal:6,     reward:6200, text:g=>"Hunt down "+g+" Rug Bosses today"},
+    {type:"combo", goal:12,    reward:2800, text:g=>"Land an x"+g+" combo"},
+    {type:"combo", goal:20,    reward:3800, text:g=>"Land an x"+g+" combo"},
+    {type:"combo", goal:30,    reward:5200, text:g=>"Chain an x"+g+" combo"}
   ];
   const todayStr = () => new Date().toDateString();
   let daily = store.get("xz_daily", null);
   function rollDaily(){
     const day=todayStr();
     const seed=[...day].reduce((a,c)=>a+c.charCodeAt(0),0);   // date-derived pick → same all day
-    const pick=DAILY_POOL[seed%DAILY_POOL.length];
-    daily={day, type:pick.type, goal:pick.goal, reward:pick.reward, text:pick.text(pick.goal), prog:0, done:false};
+    let idx=seed%DAILY_POOL.length;
+    // variety: never repeat the previous day's exact challenge (keeps the per-day
+    // determinism above — only nudges off a back-to-back duplicate).
+    if(daily && daily.idx===idx && DAILY_POOL.length>1) idx=(idx+1)%DAILY_POOL.length;
+    const pick=DAILY_POOL[idx];
+    daily={day, idx, type:pick.type, goal:pick.goal, reward:pick.reward, text:pick.text(pick.goal), prog:0, done:false};
     store.set("xz_daily", daily);
   }
   function ensureDaily(){ if(!daily || daily.day!==todayStr()) rollDaily(); }
@@ -460,17 +480,27 @@ window._adsPayload = "WwogIHsKICAgICJpZCI6ICJ4emlsbGEtaG9tZSIsCiAgICAidGV4dCI6IC
    * Progress accumulates across every run in the week (kills/boss add up; score &
    * combo take the best). Deterministic pick from the week bucket, like the daily. */
   const WEEKLY_POOL = [
-    {type:"kills", goal:600,   reward:14000, text:g=>"Smash "+fmt(g)+" scammers this week"},
-    {type:"boss",  goal:20,    reward:16000, text:g=>"Defeat "+fmt(g)+" Rug Bosses this week"},
-    {type:"score", goal:12000, reward:15000, text:g=>"Score "+fmt(g)+" in a single run this week"},
-    {type:"combo", goal:25,    reward:13000, text:g=>"Land an x"+g+" combo this week"}
+    {type:"kills", goal:500,   reward:12000, text:g=>"Smash "+fmt(g)+" scammers this week"},
+    {type:"kills", goal:1000,  reward:18000, text:g=>"Smash "+fmt(g)+" scammers this week"},
+    {type:"kills", goal:1500,  reward:24000, text:g=>"Purge "+fmt(g)+" scammers this week"},
+    {type:"boss",  goal:15,    reward:15000, text:g=>"Defeat "+fmt(g)+" Rug Bosses this week"},
+    {type:"boss",  goal:30,    reward:22000, text:g=>"Defeat "+fmt(g)+" Rug Bosses this week"},
+    {type:"boss",  goal:50,    reward:32000, text:g=>"Hunt "+fmt(g)+" Rug Bosses this week"},
+    {type:"score", goal:12000, reward:15000, text:g=>"Hit "+fmt(g)+" in a single run this week"},
+    {type:"score", goal:20000, reward:22000, text:g=>"Hit "+fmt(g)+" in a single run this week"},
+    {type:"score", goal:30000, reward:32000, text:g=>"Hit "+fmt(g)+" in a single run this week"},
+    {type:"combo", goal:25,    reward:14000, text:g=>"Land an x"+g+" combo this week"},
+    {type:"combo", goal:40,    reward:20000, text:g=>"Chain an x"+g+" combo this week"}
   ];
   const weekBucket = () => Math.floor(Date.now()/6048e5);   // ~1-week buckets (same as the weekly board)
   let weekly = store.get("xz_weekly", null);
   function rollWeekly(){
     const wk=weekBucket();
-    const pick=WEEKLY_POOL[wk%WEEKLY_POOL.length];
-    weekly={week:wk, type:pick.type, goal:pick.goal, reward:pick.reward, text:pick.text(pick.goal), prog:0, done:false};
+    let idx=wk%WEEKLY_POOL.length;
+    // variety: don't repeat last week's exact challenge (deterministic per bucket).
+    if(weekly && weekly.idx===idx && WEEKLY_POOL.length>1) idx=(idx+1)%WEEKLY_POOL.length;
+    const pick=WEEKLY_POOL[idx];
+    weekly={week:wk, idx, type:pick.type, goal:pick.goal, reward:pick.reward, text:pick.text(pick.goal), prog:0, done:false};
     store.set("xz_weekly", weekly);
   }
   function ensureWeekly(){ if(!weekly || weekly.week!==weekBucket()) rollWeekly(); }
@@ -794,7 +824,7 @@ window._adsPayload = "WwogIHsKICAgICJpZCI6ICJ4emlsbGEtaG9tZSIsCiAgICAidGV4dCI6IC
    *  OVERRIDES (these symbols are called internally by name -> reassign works) *
    * ======================================================================== */
   window.addScore = function(base, worldPos){
-    const m = (state.combo>1?state.combo:1) * window.__mult();
+    const m = (state.combo>1?state.combo:1) * window.__mult() * (window.__scoreMult||1);
     const gain = Math.round(base*m);
     state.score += gain; renderScore();
     popup(worldPos, "+"+gain, window.__mult()>1 ? GOLD : TEAL);
@@ -1234,7 +1264,12 @@ window._adsPayload = "WwogIHsKICAgICJpZCI6ICJ4emlsbGEtaG9tZSIsCiAgICAidGV4dCI6IC
       {id:"combo", name:"DIAMOND GRIP",      desc:"Wider combo window",        max:4, base:2500,  step:2.0},
       {id:"drop",  name:"DEGEN LUCK",        desc:"+15% XP per kill / lvl",max:4, base:3000,  step:2.1},
       {id:"pwr",   name:"POWER MAGNET",      desc:"Power-ups spawn more often", max:3, base:5000,  step:2.6},
-      {id:"start", name:"HEAD START",        desc:"Begin each run with a shield",max:1, base:8000,  step:1}
+      {id:"start", name:"HEAD START",        desc:"Begin each run with a shield",max:1, base:8000,  step:1},
+      // ---- ELITE TIER: expensive, end-game power spikes ----
+      {id:"midas",   name:"MIDAS RUSH",     desc:"+12% to all score / lvl",        max:3, base:12000, step:2.3, elite:true},
+      {id:"buffdur", name:"OVERDRIVE CORE", desc:"Power-ups last +35% longer / lvl",max:3, base:9000,  step:2.2, elite:true},
+      {id:"nitro",   name:"NITRO LAUNCH",   desc:"Start each run with SCORE ×2 (8s)",max:1, base:16000, step:1, elite:true},
+      {id:"revive",  name:"SECOND WIND",    desc:"Cheat death once per run",        max:1, base:30000, step:1, elite:true}
     ];
     let upg = store.get("xz_upg", null);
     if(!upg || typeof upg!=="object"){ upg={}; }
@@ -1250,6 +1285,8 @@ window._adsPayload = "WwogIHsKICAgICJpZCI6ICJ4emlsbGEtaG9tZSIsCiAgICAidGV4dCI6IC
       window.__catchBonus = lvl("combo") * 0.22; // consumed in our resolve test
       window.__dropMult   = 1 + lvl("drop")*0.15;
       window.__pwrBonus   = lvl("pwr")*0.035;    // added to powerup chance
+      window.__scoreMult  = 1 + lvl("midas")*0.12;   // MIDAS RUSH — permanent score boost
+      window.__buffMult   = 1 + lvl("buffdur")*0.35; // OVERDRIVE CORE — longer power-ups
     }
     applyUpgrades();
 
@@ -1382,6 +1419,7 @@ window._adsPayload = "WwogIHsKICAgICJpZCI6ICJ4emlsbGEtaG9tZSIsCiAgICAidGV4dCI6IC
      *  RUNTIME STATE for power-ups / waves                                    *
      * ===================================================================== */
     const px = { slowUntil:0, x2Until:0, magUntil:0, rugHp:0, rugMax:0 };
+    let reviveAvail = false;   // SECOND WIND charge, armed at run start if owned
     function nowS(){ return performance.now()*0.001; }
     function powActive(t){ return nowS() < t; }
 
@@ -1619,7 +1657,7 @@ window._adsPayload = "WwogIHsKICAgICJpZCI6ICJ4emlsbGEtaG9tZSIsCiAgICAidGV4dCI6IC
       // defeated
       burst(p.x,p.y,p.z,MAG,46); burst(p.x,p.y,p.z,RED,40); burst(p.x,p.y,p.z,GOLD,24);
       shake(1.8); flashColor("rgba(255,59,92,.5)",0.85);
-      const gain=Math.round(900*tierScoreMult()); state.score+=gain; renderScore();
+      const gain=Math.round(900*tierScoreMult()*(window.__scoreMult||1)); state.score+=gain; renderScore();
       const tok=Math.round(800*dropMult); econ.tokens+=tok; run.earned+=tok; run.boss++;
       run.score=Math.max(run.score,state.score);
       popup(p,"+"+gain,GOLD); bigBanner("RUG SHREDDED");
@@ -1729,9 +1767,10 @@ window._adsPayload = "WwogIHsKICAgICJpZCI6ICJ4emlsbGEtaG9tZSIsCiAgICAidGV4dCI6IC
         popup(p,"FAKE AIRDROP",CYAN); try{sfx.hit&&blip(220,0.18,"sawtooth",0.12);}catch(_){}
         e.dead=true; freeEntity(e); return;
       }
-      if(e.type===TYPE.PWR_SLOW){ px.slowUntil=nowS()+4.5; burst(p.x,p.y,p.z,"#7df9ff",16); popup(p,"SLOW-MO",CYAN); showBanner("SLOW-MO"); try{sfx.power();}catch(_){} e.dead=true; freeEntity(e); return; }
-      if(e.type===TYPE.PWR_X2){ px.x2Until=nowS()+6; burst(p.x,p.y,p.z,GOLD,16); popup(p,"SCORE ×2",GOLD); showBanner("DOUBLE SCORE"); try{sfx.power();}catch(_){} e.dead=true; freeEntity(e); return; }
-      if(e.type===TYPE.PWR_MAG){ px.magUntil=nowS()+5; burst(p.x,p.y,p.z,MAG,16); popup(p,"MAGNET",MAG); showBanner("SCAMMER MAGNET"); try{sfx.power();}catch(_){} e.dead=true; freeEntity(e); return; }
+      const _bm=(window.__buffMult||1);   // OVERDRIVE CORE extends every power-up
+      if(e.type===TYPE.PWR_SLOW){ px.slowUntil=nowS()+4.5*_bm; burst(p.x,p.y,p.z,"#7df9ff",16); popup(p,"SLOW-MO",CYAN); showBanner("SLOW-MO"); try{sfx.power();}catch(_){} e.dead=true; freeEntity(e); return; }
+      if(e.type===TYPE.PWR_X2){ px.x2Until=nowS()+6*_bm; burst(p.x,p.y,p.z,GOLD,16); popup(p,"SCORE ×2",GOLD); showBanner("DOUBLE SCORE"); try{sfx.power();}catch(_){} e.dead=true; freeEntity(e); return; }
+      if(e.type===TYPE.PWR_MAG){ px.magUntil=nowS()+5*_bm; burst(p.x,p.y,p.z,MAG,16); popup(p,"MAGNET",MAG); showBanner("SCAMMER MAGNET"); try{sfx.power();}catch(_){} e.dead=true; freeEntity(e); return; }
 
       if(e.type===TYPE.SCAMMER){
         state.combo++; state.kills++; run.kills++; if(state.combo>run.combo) run.combo=state.combo;
@@ -1757,6 +1796,26 @@ window._adsPayload = "WwogIHsKICAgICJpZCI6ICJ4emlsbGEtaG9tZSIsCiAgICAidGV4dCI6IC
       }
       // fallback
       e.dead=true; freeEntity(e);
+    };
+
+    /* ===================================================================== *
+     *  SECOND WIND — cheat death once per run (elite upgrade)                 *
+     *  Intercept the killing blow: instead of dropping to 0 HP and ending the *
+     *  run, spend the charge to survive the hit and pop a fresh shield.        *
+     * ===================================================================== */
+    const _loseLife = window.loseLife;
+    window.loseLife = function(worldPos){
+      if(reviveAvail && state.running && state.lives<=1){
+        reviveAvail=false;
+        state.combo=0; renderCombo(); renderLives();   // keep current (1) HP — the fatal hit is negated
+        shieldActive=true;                              // and hand back a shield to recover
+        if(worldPos){ burst(worldPos.x,worldPos.y,worldPos.z,GOLD,24); burst(worldPos.x,worldPos.y,worldPos.z,TEAL,16); popup(worldPos,"SECOND WIND!",GOLD); }
+        showBanner("SECOND WIND"); flashColor("rgba(255,210,63,.5)",0.85); shake(1.1);
+        try{sfx.power();}catch(_){}
+        try{ window.__buzz && window.__buzz([50,30,90],"success"); }catch(_){}
+        return;
+      }
+      _loseLife(worldPos);
     };
 
     /* ===================================================================== *
@@ -1849,6 +1908,8 @@ window._adsPayload = "WwogIHsKICAgICJpZCI6ICJ4emlsbGEtaG9tZSIsCiAgICAidGV4dCI6IC
       px.slowUntil=px.x2Until=px.magUntil=0; rugPending=false; nextBossWave=4; rugWarnUntil=0; window.__rugWarn=false;
       hideRugBar();
       if(lvl("start")>0){ shieldActive=true; }
+      reviveAvail = lvl("revive")>0;                 // SECOND WIND: arm one charge per run
+      if(lvl("nitro")>0){ px.x2Until = nowS()+8; }   // NITRO LAUNCH: open every run with SCORE ×2
     }
     ["startBtn","retryBtn"].forEach(id=>{ const b=$(id); if(b) b.addEventListener("click", set2BeforeRun); });
 
@@ -1899,14 +1960,18 @@ window._adsPayload = "WwogIHsKICAgICJpZCI6ICJ4emlsbGEtaG9tZSIsCiAgICAidGV4dCI6IC
         '<h2 class="pnl-title" style="border-color:'+GOLD+'">UPGRADE TREE · '+abbr(econ.tokens)+' XP</h2>'+
         '<div class="sub">Holdings tier <b style="color:'+tier.c+'">'+tier.l+'</b> · '+tier.m+'× score · '+
           (tierDropMult()).toFixed(2)+'× token drops</div>'+
-        UPGRADES.map(u=>{
+        UPGRADES.map((u,i)=>{
           const cur=lvl(u.id), maxed=cur>=u.max, cost=upgCost(u);
           const can=!maxed && econ.tokens>=cost;
-          const pips = Array.from({length:u.max},(_,i)=>
+          const accent = u.elite?MAG:GOLD;
+          // inject an "ELITE" divider just before the first elite upgrade
+          const head = (u.elite && (i===0 || !UPGRADES[i-1].elite))
+            ? '<h3 class="pnl-title" style="border-color:'+MAG+';margin-top:16px;color:'+MAG+'">⚡ ELITE UPGRADES</h3>' : '';
+          const pips = Array.from({length:u.max},(_,k)=>
             '<span style="display:inline-block;width:14px;height:8px;margin-right:3px;border-radius:3px;'+
-            'background:'+(i<cur?GOLD:"#2a2150")+'"></span>').join("");
-          return '<div class="mrow'+(maxed?' done':'')+'">'+
-            '<div class="mtop"><span>'+u.name+'</span><b style="color:'+(maxed?TEAL:GOLD)+'">'+
+            'background:'+(k<cur?accent:"#2a2150")+'"></span>').join("");
+          return head + '<div class="mrow'+(maxed?' done':'')+(u.elite?'" style="border-color:'+(maxed?TEAL:MAG):'')+'">'+
+            '<div class="mtop"><span>'+(u.elite?'⚡ ':'')+u.name+'</span><b style="color:'+(maxed?TEAL:accent)+'">'+
               (maxed?"MAX":fmt(cost)+" XP")+'</b></div>'+
             '<div class="msub" style="text-align:left">'+u.desc+'</div>'+
             '<div style="display:flex;align-items:center;justify-content:space-between;gap:10px">'+

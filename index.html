@@ -604,7 +604,7 @@ function playRev(){
   if(!actx) return;
   try{
     const s=actx.createBufferSource(); s.buffer=revBuffer; s.playbackRate.value=1.35;
-    const g=actx.createGain(); g.gain.value=0.4; s.connect(g); g.connect(sfxGain||masterGain); s.start();
+    const g=actx.createGain(); g.gain.value=0.18; s.connect(g); g.connect(sfxGain||masterGain); s.start();
   }catch(e){}
 }
 function blip(freq,dur,type,vol,dest){
@@ -1272,6 +1272,6 @@ document.querySelectorAll("#startScreen .btn").forEach(b=>{
 document.addEventListener("visibilitychange",()=>{ if(document.hidden&&state.running) pauseGame(); });
 document.getElementById("bestScore").textContent=state.best;
 </script>
-<script src="game.js?v=57"></script>
+<script src="game.js?v=59"></script>
 </body>
 </html>
