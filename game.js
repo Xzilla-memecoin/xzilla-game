@@ -205,7 +205,7 @@ window._adsPayload = "WwogIHsKICAgICJpZCI6ICJ4emlsbGEtaG9tZSIsCiAgICAidGV4dCI6IC
    * grant isn't wiped by a late cloud/server restore. */
   function refLink(){
     const id = (typeof tg!=="undefined" && tg && tg.initDataUnsafe && tg.initDataUnsafe.user && tg.initDataUnsafe.user.id);
-    return id ? ("https://t.me/RugSmasher_bot?startapp="+id) : (window.__BOT_SHARE_URL || "https://t.me/RugSmasher_bot/");
+    return id ? ("https://t.me/RugSmasher_bot/play?startapp="+id) : (window.__BOT_SHARE_URL || "https://t.me/RugSmasher_bot/play");
   }
   // Shared invite action — used by the main-screen button AND the RANKS panel button.
   function inviteFriends(){
