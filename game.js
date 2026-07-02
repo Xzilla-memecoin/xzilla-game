@@ -2890,27 +2890,32 @@ window._adsPayload = "WwogIHsKICAgICJpZCI6ICJ4emlsbGEtaG9tZSIsCiAgICAidGV4dCI6IC
 (function shieldBubble(){
   if(typeof THREE==="undefined" || typeof scene==="undefined" || typeof player==="undefined") return;
   const S=128, cv=document.createElement("canvas"); cv.width=cv.height=S; const x=cv.getContext("2d");
+  // Draw the bubble in WHITE (luminance only); the sprite's material.color applies the
+  // equipped skin's tint, so the shield glows in whatever colour Xrider is wearing.
   const g=x.createRadialGradient(S/2,S/2,S*0.30,S/2,S/2,S*0.5);   // hollow centre, bright rim => bubble
-  g.addColorStop(0.00,"rgba(45,226,214,0)");
-  g.addColorStop(0.70,"rgba(45,226,214,0.06)");
-  g.addColorStop(0.88,"rgba(120,249,255,0.60)");
-  g.addColorStop(1.00,"rgba(45,226,214,0)");
+  g.addColorStop(0.00,"rgba(255,255,255,0)");
+  g.addColorStop(0.72,"rgba(255,255,255,0.03)");
+  g.addColorStop(0.89,"rgba(255,255,255,0.12)");   // very faint outer rim — barely-there ghost edge
+  g.addColorStop(1.00,"rgba(255,255,255,0)");
   x.fillStyle=g; x.beginPath(); x.arc(S/2,S/2,S/2,0,Math.PI*2); x.fill();
   const tex=new THREE.CanvasTexture(cv);
   const mat=new THREE.SpriteMaterial({map:tex,transparent:true,depthWrite:false,blending:THREE.AdditiveBlending,opacity:0});
   const bub=new THREE.Sprite(mat); bub.scale.set(4.6,4.6,1); bub.visible=false; scene.add(bub);
-  let op=0;
+  let op=0, curTint="";
+  // Pull the equipped skin's colour (OG-green default has a null tint → fall back to neon green).
+  const skinTint=()=>{ try{ const s=SKINS.find(k=>k.id===econ.skin); if(s&&s.tint) return s.tint; }catch(_){} return "#39ff7a"; };
   const prev=window.__frame;
   window.__frame=function(dt){
     if(prev) prev(dt);
     const want=!!(typeof shieldActive!=="undefined" && shieldActive && state && state.running);
     op += ((want?1:0)-op) * Math.min(1, dt*12);        // snappy ~0.15s fade so a consumed shield visibly pops off
     if(op<0.02 && !want){ if(bub.visible) bub.visible=false; return; }
+    const tint=skinTint(); if(tint!==curTint){ curTint=tint; try{ mat.color.set(tint); }catch(_){} }
     bub.visible=true;
     bub.position.set(player.position.x, player.position.y, player.position.z+0.05);
     const pulse=1+Math.sin(performance.now()*0.006)*0.05; // gentle breathing so it reads as an active field
     bub.scale.set(4.6*pulse, 4.6*pulse, 1);
-    mat.opacity=op*0.9;
+    mat.opacity=op*0.4;   // very subtle — a faint protective haze
   };
 })();
 
