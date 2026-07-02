@@ -21,12 +21,12 @@ window._adsPayload = "WwogIHsKICAgICJpZCI6ICJ4emlsbGEtaG9tZSIsCiAgICAidGV4dCI6IC
    state (start / pause / resume / crash) without any double-audio.
    ========================================================================== */
 (function engineAudio(){
-  // Engine SFX is OFF for now — the chopper mp3 is being replaced with a better idle clip.
-  // Re-enable by setting ENGINE_AUDIO = "mp3". "off" no-ops the hooks => full silence (also
-  // bypasses the old synthesized V-twin), so nothing plays until a new sound is chosen.
-  const ENGINE_AUDIO = "off";
-  if(ENGINE_AUDIO !== "mp3"){ window.startEngine=function(){}; window.stopEngine=function(){}; window.setEnginePitch=function(){}; return; }
-  const SRC = 'sounds/spinopel-the-accelerating-chopper-style-motorcycle-545712.mp3';
+  // Engine SFX ON — bike-riding idle loop (sounds/tsikkel.m4a).
+  // Set ENGINE_AUDIO = "off" to no-op the hooks => full silence (also bypasses the old
+  // synthesized V-twin).
+  const ENGINE_AUDIO = "on";
+  if(ENGINE_AUDIO !== "on"){ window.startEngine=function(){}; window.stopEngine=function(){}; window.setEnginePitch=function(){}; return; }
+  const SRC = 'sounds/tsikkel.m4a';
   const BASE_VOL = 0.4;
   const XFADE    = 0.6;          // seconds of head/tail OVERLAP that masks the loop seam → steady idle
   const maxSpeed = 24;           // reference top speed for the rev ramp (state.speed grows from baseSpeed 9)
