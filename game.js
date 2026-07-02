@@ -1171,7 +1171,7 @@ window._adsPayload = "WwogIHsKICAgICJpZCI6ICJ4emlsbGEtaG9tZSIsCiAgICAidGV4dCI6IC
   }
   function renderSkins(){
     $("skinsInner").innerHTML =
-      '<h2 class="pnl-title" style="border-color:'+TEAL+'">SKIN SHOP · '+abbr(econ.tokens)+' XP</h2>'+
+      '<h2 class="pnl-title" style="border-color:'+TEAL+'">SKIN SHOP · '+fmt(econ.tokens)+' XP</h2>'+
       '<div class="sgrid">'+ SKINS.map(s=>{
         const owned=econ.skins.includes(s.id), eq=econ.skin===s.id;
         const rankLocked = !!s.rankReq && !owned;                 // earned by rank, not yet reached
@@ -1500,7 +1500,7 @@ window._adsPayload = "WwogIHsKICAgICJpZCI6ICJ4emlsbGEtaG9tZSIsCiAgICAidGV4dCI6IC
       // every 4th wave -> rug boss (replaces plain whale cadence). A 3s warning runs
       // first (rugWarnUntil) during which every ad-screen flashes "RUG INCOMING".
       if(rugPending && !active.some(a=>a.type===TYPE.RUGBOSS || a.type===TYPE.BOSS)){
-        if(nowS() >= rugWarnUntil){ rugPending=false; window.__rugWarn=false; spawnRug(); return; }
+        if(nowS() >= rugWarnUntil){ rugPending=false; window.__rugWarn=false; window.__rugBossAt=0; spawnRug(); return; }
         // still inside the warning window — fall through and spawn a normal enemy this tick
       }
       const e=getEntity(), wp=waveProfile(), r=Math.random();
@@ -1586,6 +1586,7 @@ window._adsPayload = "WwogIHsKICAgICJpZCI6ICJ4emlsbGEtaG9tZSIsCiAgICAidGV4dCI6IC
       if(state.wave > prevWave && state.wave >= nextBossWave
          && !rugPending && !active.some(a=>a.type===TYPE.RUGBOSS||a.type===TYPE.BOSS)){
         rugPending=true; rugWarnUntil=nowS()+3; window.__rugWarn=true;   // 3s "RUG INCOMING" ad-screen warning before the boss
+        window.__rugBossAt=rugWarnUntil;   // absolute time the boss will land — the red danger grid fades in 2s before this
         try{ if(tg&&tg.HapticFeedback) tg.HapticFeedback.notificationOccurred("warning"); }catch(_){}
       }
       // rank-milestone callout — once per run, the first time you cross a new title threshold
@@ -1962,7 +1963,7 @@ window._adsPayload = "WwogIHsKICAgICJpZCI6ICJ4emlsbGEtaG9tZSIsCiAgICAidGV4dCI6IC
     function set2BeforeRun(){
       applyUpgrades();
       renderLives();                 // reflect new max HP
-      px.slowUntil=px.x2Until=px.magUntil=0; rugPending=false; nextBossWave=4; rugWarnUntil=0; window.__rugWarn=false;
+      px.slowUntil=px.x2Until=px.magUntil=0; rugPending=false; nextBossWave=4; rugWarnUntil=0; window.__rugWarn=false; window.__rugBossAt=0;
       hideRugBar();
       if(lvl("start")>0){ shieldActive=true; }
       reviveAvail = lvl("revive")>0;                 // SECOND WIND: arm one charge per run
@@ -2014,7 +2015,7 @@ window._adsPayload = "WwogIHsKICAgICJpZCI6ICJ4emlsbGEtaG9tZSIsCiAgICAidGV4dCI6IC
     function renderUpgrades(){
       const tier=tierFor(econ.holdings);
       $("upgradesInner").innerHTML =
-        '<h2 class="pnl-title" style="border-color:'+GOLD+'">UPGRADE TREE · '+abbr(econ.tokens)+' XP</h2>'+
+        '<h2 class="pnl-title" style="border-color:'+GOLD+'">UPGRADE TREE · '+fmt(econ.tokens)+' XP</h2>'+
         '<div class="sub">Holdings tier <b style="color:'+tier.c+'">'+tier.l+'</b> · '+tier.m+'× score · '+
           (tierDropMult()).toFixed(2)+'× token drops</div>'+
         UPGRADES.map((u,i)=>{
@@ -2854,7 +2855,10 @@ window._adsPayload = "WwogIHsKICAgICJpZCI6ICJ4emlsbGEtaG9tZSIsCiAgICAidGV4dCI6IC
   const prev = window.__frame;
   window.__frame = function(dt){
     if(prev) prev(dt);
-    const on = !!(state && state.running && bossOnField());
+    // pre-warn: fade the grid in 2s BEFORE the boss lands (window.__rugBossAt = its arrival time),
+    // then hold it while the boss is on the field.
+    const preWarn = !!(window.__rugBossAt && performance.now()*0.001 >= window.__rugBossAt - 2);
+    const on = !!(state && state.running && (preWarn || bossOnField()));
     op += ((on ? 0.6 : 0) - op) * Math.min(1, dt*6);   // smooth ~0.4s fade in/out
     if(op < 0.01 && !on){ if(grid.visible) grid.visible = false; return; }
     grid.visible = true; grid.material.opacity = op;
