@@ -14,62 +14,119 @@
 window._adsPayload = "WwogIHsKICAgICJpZCI6ICJ4emlsbGEtaG9tZSIsCiAgICAidGV4dCI6ICIkWFpJTExBIMK3IEJVWSBOT1ciLAogICAgImltYWdlVXJsIjogImh0dHBzOi8vcmF3LmdpdGh1YnVzZXJjb250ZW50LmNvbS9YemlsbGEtbWVtZWNvaW4veHppbGxhLWdhbWUvbWFpbi9pbWFnZXMvcnVnX2Jvc3Mud2VicCIsCiAgICAiY2xpY2tMaW5rIjogImh0dHBzOi8veHppbGxhLmlvIgogIH0sCiAgewogICAgImlkIjogImhvZGwtd2FnbWkiLAogICAgInRleHQiOiAiSE9ETCDCtyBXQUdNSSIsCiAgICAiaW1hZ2VVcmwiOiAiaHR0cHM6Ly9yYXcuZ2l0aHVidXNlcmNvbnRlbnQuY29tL1h6aWxsYS1tZW1lY29pbi94emlsbGEtZ2FtZS9tYWluL2ltYWdlcy9ob2RsZXIud2VicCIsCiAgICAiY2xpY2tMaW5rIjogImh0dHBzOi8vdC5tZS94emlsbGEiCiAgfSwKICB7CiAgICAiaWQiOiAidG8tdGhlLW1vb24iLAogICAgInRleHQiOiAiVE8gVEhFIE1PT04iLAogICAgImltYWdlVXJsIjogImh0dHBzOi8vcmF3LmdpdGh1YnVzZXJjb250ZW50LmNvbS9YemlsbGEtbWVtZWNvaW4veHppbGxhLWdhbWUvbWFpbi9pbWFnZXMvbWFpbkltYWdlLndlYnAiLAogICAgImNsaWNrTGluayI6ICJodHRwczovL2RleHNjcmVlbmVyLmNvbSIKICB9Cl0K";
 
 /* ============================================================================
-   ENGINE AUDIO — real chopper-engine mp3.
-   Replaces the synthesized V-twin by OVERRIDING the engine hooks that index.html
-   already calls (startGame -> startEngine, the loop -> setEnginePitch, gameOver/
-   quit -> stopEngine), so there is exactly ONE engine voice and it tracks run
-   state (start / pause / resume / crash) without any double-audio.
+   ENGINE AUDIO — procedural HEAVY CHOPPER (ported from moter.html "heavy" preset).
+   OVERRIDES the engine hooks index.html calls (startGame -> startEngine, the loop
+   -> setEnginePitch, gameOver/quit -> stopEngine) so there's exactly ONE engine
+   voice. It's DYNAMIC: throttle/RPM track state.speed, so when a RUG BOSS drops the
+   bike to BOSS_SLOW (~half speed) the engine sinks into a deep slow lope, then revs
+   back up once the boss is gone. Own AudioContext; honors mute via state.soundOn.
    ========================================================================== */
 (function engineAudio(){
-  // Engine SFX ON — bike-riding idle loop (sounds/tsikkel.m4a).
-  // Set ENGINE_AUDIO = "off" to no-op the hooks => full silence (also bypasses the old
-  // synthesized V-twin).
-  const ENGINE_AUDIO = "on";
+  const ENGINE_AUDIO = "on";   // "off" => no-op the hooks (full silence, no synth)
   if(ENGINE_AUDIO !== "on"){ window.startEngine=function(){}; window.stopEngine=function(){}; window.setEnginePitch=function(){}; return; }
-  const SRC = 'sounds/tsikkel.m4a';
-  const BASE_VOL = 0.4;
-  const XFADE    = 0.6;          // seconds of head/tail OVERLAP that masks the loop seam → steady idle
-  const maxSpeed = 24;           // reference top speed for the rev ramp (state.speed grows from baseSpeed 9)
-  // A plain <audio loop> hard-cuts back to the start (the "re-accelerating" click). To get a
-  // steady idle we run TWO elements of the same clip and crossfade the tail of one into the head
-  // of the next, so there's never an audible seam.
-  let a, b;
-  try { a = new Audio(SRC); b = new Audio(SRC); } catch(_){ return; }
-  [a,b].forEach(e=>{ e.loop=false; e.preload="auto"; e.volume=0; });
-  let cur=a, nxt=b, started=false;
-  const vol  = () => (state.soundOn ? BASE_VOL : 0);                                  // 0 when muted via the toggle
-  const rate = () => (state.running && state.speed>0) ? 1.0 + Math.min(state.speed/maxSpeed,1)*0.25 : 1.0;
 
-  // Run start = a real user gesture (the START tap), which clears the browser autoplay guard.
+  const BASE_VOL = 0.10;   // master level — kept well under the pickup/power SFX (tune here)
+  const P = { idle:620, max:3200, boom:0.95, noise:0.015, crack:0.018, muffle:430, res:120 }; // "Heavy Chopper"
+  // speed -> throttle: boss-slow reads near idle, cruising mid, top speed full throttle.
+  const MIN_S = 4, MAX_S = 24;
+
+  let ctx=null, master=null, running=false, timer=null;
+  let rpm=P.idle, lastPulse=0, pulseSide=false;
+
+  const throttleFromSpeed = () => {
+    const s = (typeof state!=="undefined" && state.speed) ? state.speed : MIN_S;
+    return Math.max(0, Math.min(1, (s - MIN_S) / (MAX_S - MIN_S)));
+  };
+
+  // One uneven V-twin "boom" — two oscillators + optional exhaust crackle. Transient
+  // nodes are local (not retained) so they GC once they stop; only master/ctx persist.
+  function pulse(time){
+    const pan = ctx.createStereoPanner();
+    pan.pan.value = pulseSide ? -0.12 : 0.12; pulseSide = !pulseSide;
+    const out = ctx.createGain();
+    out.gain.setValueAtTime(0.0001, time);
+    out.gain.exponentialRampToValueAtTime(0.9*P.boom, time+0.006);
+    out.gain.exponentialRampToValueAtTime(0.0001, time+0.115);
+    const low = ctx.createOscillator(); low.type="sine";
+    low.frequency.setValueAtTime(P.res, time);
+    low.frequency.exponentialRampToValueAtTime(42, time+0.12);
+    const mid = ctx.createOscillator(); mid.type="triangle";
+    mid.frequency.setValueAtTime(P.res*2.1, time);
+    mid.frequency.exponentialRampToValueAtTime(75, time+0.08);
+    const filter = ctx.createBiquadFilter(); filter.type="lowpass";
+    filter.frequency.value=P.muffle; filter.Q.value=0.9;
+    low.connect(out); mid.connect(out);
+    out.connect(filter).connect(pan).connect(master);
+    low.start(time); mid.start(time); low.stop(time+0.13); mid.stop(time+0.10);
+    if(Math.random()<P.crack) crackle(time);
+  }
+  function crackle(time){
+    const len=Math.floor(ctx.sampleRate*0.035), buf=ctx.createBuffer(1,len,ctx.sampleRate), d=buf.getChannelData(0);
+    for(let i=0;i<len;i++) d[i]=(Math.random()*2-1)*(1-i/len);
+    const src=ctx.createBufferSource(); src.buffer=buf;
+    const hp=ctx.createBiquadFilter(); hp.type="highpass"; hp.frequency.value=220;
+    const lp=ctx.createBiquadFilter(); lp.type="lowpass"; lp.frequency.value=P.muffle*1.4;
+    const g=ctx.createGain(); g.gain.value=0.11;
+    src.connect(hp).connect(lp).connect(g).connect(master);
+    src.start(time); src.stop(time+0.04);
+  }
+  function intake(time, throttle){
+    if(throttle<0.05) return;
+    const len=Math.floor(ctx.sampleRate*0.055), buf=ctx.createBuffer(1,len,ctx.sampleRate), d=buf.getChannelData(0);
+    for(let i=0;i<len;i++) d[i]=(Math.random()*2-1)*(1-i/len);
+    const src=ctx.createBufferSource(); src.buffer=buf;
+    const bp=ctx.createBiquadFilter(); bp.type="bandpass";
+    bp.frequency.value=180+throttle*900; bp.Q.value=1.2;
+    const g=ctx.createGain(); g.gain.value=P.noise*throttle;
+    src.connect(bp).connect(g).connect(master);
+    src.start(time); src.stop(time+0.06);
+  }
+  // Runs on a fixed 12ms timer (independent of frame rate). Reads state.speed directly,
+  // eases RPM toward it, and schedules the uneven twin pattern. Goes silent + stops
+  // scheduling over menu/pause/gameover and when the sound toggle is off.
+  function step(){
+    if(!ctx || !running) return;
+    const driving = (typeof state!=="undefined" && state.running);
+    const vol = (driving && state.soundOn!==false) ? BASE_VOL : 0;
+    try{ master.gain.setTargetAtTime(vol, ctx.currentTime, 0.05); }catch(_){}
+    if(!driving) return;                                       // freeze pulses over menu/pause/over
+    const throttle = throttleFromSpeed();
+    const targetRpm = P.idle + (P.max - P.idle)*throttle;
+    rpm += (targetRpm - rpm)*0.035;
+    rpm += (Math.random()-0.5)*18;
+    const secondsPerRev = 60/Math.max(400, rpm);
+    const gap = (pulseSide ? secondsPerRev*0.42 : secondsPerRev*1.18);   // two close pulses, then a longer gap
+    if(ctx.currentTime - lastPulse > gap){
+      lastPulse = ctx.currentTime;
+      pulse(ctx.currentTime);
+      intake(ctx.currentTime, throttle);
+    }
+  }
+
+  // Run start = a real user gesture (the START tap), which clears the autoplay guard.
   window.startEngine = function(){
-    started = true;
-    try{ cur.currentTime=0; cur.playbackRate=rate(); cur.volume=vol(); cur.play().catch(()=>{}); }catch(_){}
-  };
-  // Crash / quit to menu: cut both elements dead so nothing roars over the scoreboard.
-  window.stopEngine = function(){
-    try{ [a,b].forEach(e=>{ e.pause(); e.currentTime=0; e.volume=0; }); }catch(_){}
-  };
-  // Every frame from the loop: rev with screen speed, manage the crossfade loop + pause/resume + mute.
-  window.setEnginePitch = function(){
     try{
-      if(!state.running){ if(!a.paused||!b.paused){ a.pause(); b.pause(); } return; }  // freeze over menu/pause/over
-      const v = vol(), r = rate();
-      if(started && cur.paused) cur.play().catch(()=>{});                              // resume after a pause
-      cur.playbackRate = r;
-      const dur = cur.duration;
-      if(dur && isFinite(dur) && cur.currentTime >= dur - XFADE){
-        // overlap the tail of `cur` with the head of `nxt`, ramping volumes across the seam
-        if(nxt.paused){ nxt.currentTime=0; nxt.play().catch(()=>{}); }
-        nxt.playbackRate = r;
-        const k = Math.min(1, (cur.currentTime - (dur - XFADE)) / XFADE);             // 0..1 fade progress
-        cur.volume = v*(1-k); nxt.volume = v*k;
-        if(k>=1){ cur.pause(); cur.currentTime=0; cur.volume=0; const t=cur; cur=nxt; nxt=t; }  // swap roles
-      } else {
-        cur.volume = v;
-        if(!nxt.paused){ nxt.pause(); nxt.currentTime=0; nxt.volume=0; }              // safety: clear any stray nxt
+      if(!ctx){
+        ctx = new (window.AudioContext||window.webkitAudioContext)();
+        master = ctx.createGain(); master.gain.value=0;
+        const comp = ctx.createDynamicsCompressor();
+        comp.threshold.value=-22; comp.knee.value=20; comp.ratio.value=5;
+        comp.attack.value=0.003; comp.release.value=0.16;
+        master.connect(comp).connect(ctx.destination);
       }
+      if(ctx.state==="suspended") ctx.resume().catch(()=>{});
+      rpm=P.idle; lastPulse=ctx.currentTime; running=true;
+      if(!timer) timer=setInterval(step, 12);
     }catch(_){}
   };
+  // Crash / quit to menu: stop scheduling and fade the master out so nothing roars over the scoreboard.
+  window.stopEngine = function(){
+    running=false;
+    try{ if(timer){ clearInterval(timer); timer=null; } }catch(_){}
+    try{ if(master && ctx) master.gain.setTargetAtTime(0, ctx.currentTime, 0.08); }catch(_){}
+  };
+  // Loop calls this every frame; speed is read directly inside step(), so this is a no-op.
+  window.setEnginePitch = function(){};
 })();
 
 (function(){
@@ -2770,6 +2827,43 @@ window._adsPayload = "WwogIHsKICAgICJpZCI6ICJ4emlsbGEtaG9tZSIsCiAgICAidGV4dCI6IC
     /* refresh HUD lives to reflect upgraded max HP on boot ------------------- */
     renderLives();
   })();
+
+/* ============================================================================
+   RUG-BOSS DANGER GRID — a red neon grid on the ground that appears ONLY while a
+   RUG BOSS is on the field and scrolls toward the player, exactly like the classic
+   synthwave grid ("red lights run on the ground, same as the green"). Standalone &
+   last so it wraps window.__frame after every other hook; fades in/out smoothly and
+   is hidden on menus/pause/game-over. Uses globals scene/CAM/active/TYPE/state. ==*/
+(function bossDangerGrid(){
+  if(typeof THREE==="undefined" || typeof scene==="undefined" || typeof active==="undefined") return;
+  const RED = 0xff2b3c;
+  const BASE_Z = -6, CELL = 180/90;            // 90 divisions over 180 => 2-unit cell = seamless wrap step
+  const grid = new THREE.GridHelper(180, 90, RED, RED);
+  grid.position.set(0, -1.43, BASE_Z);         // just above the grass floor (-1.45), below the sprites (0.9)
+  grid.material.transparent = true; grid.material.opacity = 0; grid.material.depthWrite = false;
+  grid.visible = false;
+  scene.add(grid);
+
+  const bossOnField = () => {
+    const rb = (typeof TYPE!=="undefined" && TYPE.RUGBOSS!=null) ? TYPE.RUGBOSS : 7;
+    for(const a of active){ if(a && !a.dead && a.type===rb) return true; }
+    return false;
+  };
+
+  let op = 0;                                  // current (eased) opacity
+  const prev = window.__frame;
+  window.__frame = function(dt){
+    if(prev) prev(dt);
+    const on = !!(state && state.running && bossOnField());
+    op += ((on ? 0.6 : 0) - op) * Math.min(1, dt*6);   // smooth ~0.4s fade in/out
+    if(op < 0.01 && !on){ if(grid.visible) grid.visible = false; return; }
+    grid.visible = true; grid.material.opacity = op;
+    // scroll toward the player and wrap one cell at a time so the lines stream seamlessly
+    const sp = (state.running ? state.speed : 3.5) * dt;
+    grid.position.z += sp;
+    if(grid.position.z > BASE_Z + CELL) grid.position.z -= CELL;
+  };
+})();
 
   // (Removed the rear-tire overlay: a vertical squash on a billboarded sprite read as
   //  jittering feet, not rotation. A real spinning illusion needs an animated tire
