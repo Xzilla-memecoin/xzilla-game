@@ -308,6 +308,11 @@ window._adsPayload = "WwogIHsKICAgICJpZCI6ICJ4emlsbGEtaG9tZSIsCiAgICAidGV4dCI6IC
     const api=econApi(), init=tgInit(); if(!api||!init) return;
     const sp=(tg.initDataUnsafe&&tg.initDataUnsafe.start_param)||"";
     if(!/^[0-9]{1,20}$/.test(sp)) return;       // no/invalid referrer param
+    // Self-referral guard: opening your OWN invite link must never credit you or add you
+    // to the TOP INVITERS board. The Worker also rejects ref===invitee, but block it here
+    // too so your own link never even fires a /refer call (matches the server's intent).
+    const myId=(tg.initDataUnsafe&&tg.initDataUnsafe.user&&tg.initDataUnsafe.user.id);
+    if(myId!=null && sp===String(myId)){ store.set("xz_ref_done",true); return; }
     if(store.get("xz_ref_done",false)) return;  // already processed on this device
     fetch(api+"/refer",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({initData:init,ref:sp})})
       .then(r=>r.json()).then(d=>{ if(d&&d.ok){ store.set("xz_ref_done",true);
