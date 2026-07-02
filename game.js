@@ -1854,7 +1854,13 @@ window._adsPayload = "WwogIHsKICAgICJpZCI6ICJ4emlsbGEtaG9tZSIsCiAgICAidGV4dCI6IC
         try{sfx.power();}catch(_){} burst(p.x,p.y,p.z,GOLD,18); shake(0.7); flashColor("rgba(255,210,63,.4)",0.6); popup(p,"LIQUIDATED!",GOLD);
         try{ window.__buzz && window.__buzz([30,20,60],"impact"); }catch(_){}
         for(let i=active.length-1;i>=0;i--){ const a=active[i]; if(a!==e&&a.type===TYPE.SCAMMER&&!a.dead){
-          a.dead=true; const ap=a.sprite.position.clone(); burst(ap.x,ap.y,ap.z,MAG,6); state.kills++; run.kills++; window.addScore(CFG.scammerPoints,ap); freeEntity(a); } }
+          a.dead=true; const ap=a.sprite.position.clone(); burst(ap.x,ap.y,ap.z,MAG,6);
+          // the bomb now BUILDS your combo (each cleared scammer counts) instead of wasting it —
+          // combo++ before addScore so every subsequent kill also banks at the higher multiplier.
+          state.combo++; state.kills++; run.kills++; if(state.combo>run.combo) run.combo=state.combo;
+          window.addScore(CFG.scammerPoints,ap); const tok=Math.round(2*dropMult); econ.tokens+=tok; run.earned+=tok;
+          freeEntity(a); } }
+        renderCombo();
         e.dead=true; freeEntity(e); updateHUDtokens(); return;
       }
       // fallback
@@ -2871,6 +2877,40 @@ window._adsPayload = "WwogIHsKICAgICJpZCI6ICJ4emlsbGEtaG9tZSIsCiAgICAidGV4dCI6IC
     const sp = (state.running ? state.speed : 3.5) * dt;
     grid.position.z += sp;
     if(grid.position.z > BASE_Z + CELL) grid.position.z -= CELL;
+  };
+})();
+
+/* ============================================================================
+   SHIELD BUBBLE — a visible teal aura around Xrider whenever a shield is armed
+   (HEAD START, a picked-up SHIELD, or the one handed back by SECOND WIND). The
+   shield always WORKED — including eating a boss ram — but there was no visual,
+   so players couldn't tell they had one or that a hit consumed it. This draws an
+   additive glow sprite that tracks the player and fades in/out with `shieldActive`.
+   Standalone & last so it wraps __frame after everything else. ==================*/
+(function shieldBubble(){
+  if(typeof THREE==="undefined" || typeof scene==="undefined" || typeof player==="undefined") return;
+  const S=128, cv=document.createElement("canvas"); cv.width=cv.height=S; const x=cv.getContext("2d");
+  const g=x.createRadialGradient(S/2,S/2,S*0.30,S/2,S/2,S*0.5);   // hollow centre, bright rim => bubble
+  g.addColorStop(0.00,"rgba(45,226,214,0)");
+  g.addColorStop(0.70,"rgba(45,226,214,0.06)");
+  g.addColorStop(0.88,"rgba(120,249,255,0.60)");
+  g.addColorStop(1.00,"rgba(45,226,214,0)");
+  x.fillStyle=g; x.beginPath(); x.arc(S/2,S/2,S/2,0,Math.PI*2); x.fill();
+  const tex=new THREE.CanvasTexture(cv);
+  const mat=new THREE.SpriteMaterial({map:tex,transparent:true,depthWrite:false,blending:THREE.AdditiveBlending,opacity:0});
+  const bub=new THREE.Sprite(mat); bub.scale.set(4.6,4.6,1); bub.visible=false; scene.add(bub);
+  let op=0;
+  const prev=window.__frame;
+  window.__frame=function(dt){
+    if(prev) prev(dt);
+    const want=!!(typeof shieldActive!=="undefined" && shieldActive && state && state.running);
+    op += ((want?1:0)-op) * Math.min(1, dt*12);        // snappy ~0.15s fade so a consumed shield visibly pops off
+    if(op<0.02 && !want){ if(bub.visible) bub.visible=false; return; }
+    bub.visible=true;
+    bub.position.set(player.position.x, player.position.y, player.position.z+0.05);
+    const pulse=1+Math.sin(performance.now()*0.006)*0.05; // gentle breathing so it reads as an active field
+    bub.scale.set(4.6*pulse, 4.6*pulse, 1);
+    mat.opacity=op*0.9;
   };
 })();
 

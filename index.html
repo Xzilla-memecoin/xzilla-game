@@ -1107,12 +1107,12 @@ function loop(){ requestAnimationFrame(loop); const dt=Math.min(clock.getDelta()
         // (TYPE.RUGBOSS/BOSS are added by game.js; undefined-safe before it loads).
         if((e.type===TYPE.RUGBOSS||e.type===TYPE.BOSS) && !e.dead){ e.sprite.position.z=SPAWN_Z-4; e.prevZ=e.sprite.position.z; e._nm=false; continue; }
         if(e.type===TYPE.SCAMMER){ state.combo=0; renderCombo(); } e._nm=false; freeEntity(e); } }
-    // combo decay: any increase in the streak this frame refreshes the deadline; if it lapses, the streak drops
-    if(state.combo>_lastCombo) state.comboUntil=now+CFG.comboWindow;
+    // SKILL-BASED COMBO: no wall-clock decay. The streak breaks ONLY when the player actually
+    // whiffs — a scammer slips past (handled just above) or a bad item is grabbed (decoy/honeypot/
+    // holder/boss-ram, handled in resolve). Idle spawn gaps the player can't control never drop it,
+    // so the combo bar just shows "locked" (full) while a streak is live.
     _lastCombo=state.combo;
-    if(state.combo>1 && now>state.comboUntil){ state.combo=0; _lastCombo=0; renderCombo(); }
-    if(comboBarFill){ const left=Math.max(0,Math.min(1,(state.comboUntil-now)/CFG.comboWindow));
-      comboBarFill.style.width=(left*100)+"%"; comboBarFill.style.background= left<0.34?"#ff3b5c":(left<0.66?"#ffd23f":"#39ff7a"); } }
+    if(comboBarFill){ comboBarFill.style.width=(state.combo>1?100:0)+"%"; comboBarFill.style.background="#39ff7a"; } }
 
   updateParticles(dt);
   const bob=pulse*0.10; if(state.shake>0.001){ const s=state.shake; placeCamera((Math.random()-0.5)*s,(Math.random()-0.5)*s*0.6+bob); state.shake*=0.86; } else placeCamera(0,bob);
@@ -1272,6 +1272,6 @@ document.querySelectorAll("#startScreen .btn").forEach(b=>{
 document.addEventListener("visibilitychange",()=>{ if(document.hidden&&state.running) pauseGame(); });
 document.getElementById("bestScore").textContent=state.best;
 </script>
-<script src="game.js?v=67"></script>
+<script src="game.js?v=68"></script>
 </body>
 </html>
