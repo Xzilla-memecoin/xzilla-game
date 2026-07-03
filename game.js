@@ -357,47 +357,58 @@ window._adsPayload = "WwogIHsKICAgICJpZCI6ICJ4emlsbGEtaG9tZSIsCiAgICAidGV4dCI6IC
   // texture: pixel = luminance × tint, preserving the silhouette + shading. We load the
   // source art from its own CORS image (NOT the in-scene texture) so we never bake the
   // loading PLACEHOLDER sprite into a skin. The default skin uses the untinted art.
-  // Animated biker spritesheet: XzillaBiker.webp is a 5×4 grid (20 frames, 640×640).
-  // We show one frame via texture repeat+offset and cycle frames in the render loop
-  // (speed-linked, see #tire-anim). Relative path → loads from the local server now and
-  // GitHub Pages once pushed (same-origin, so the skin recolor canvas isn't tainted).
-  // 5×4 grid = 20 cells, but the last cell (bottom-right) is empty → cycle only 19 frames.
-  const BIKER_URL="images/XzillaBiker.webp", BIKER_COLS=5, BIKER_ROWS=4, BIKER_FRAMES=19;
+  // TWO-LAYER Xzilla art (MainCol/): Main_Character.webp = the ORIGINAL black rider body + tyre
+  // (NEVER recoloured); Main_Bike.webp = the recolourable layer (mohawk, "Xzilla" logo, green
+  // accents + the chrome bike hardware). Each is a 1×4 vertical sheet of 640×640 frames. A skin
+  // recolours ONLY the bike layer, then we composite bike-UNDER-character into one texture and
+  // cycle the 4 frames via repeat+offset in the render loop (#tire-anim). Same-origin paths so
+  // the recolour canvas isn't tainted on GitHub Pages.
+  const BIKE_URL="MainCol/Main_Bike.webp", CHAR_URL="MainCol/Main_Character.webp";
+  const BIKER_COLS=1, BIKER_ROWS=4, BIKER_FRAMES=4;
   window.__BIKER={cols:BIKER_COLS, rows:BIKER_ROWS, frames:BIKER_FRAMES};
-  let _riderBase=null, _riderLoading=false, _riderOrigTex=null, _skinLastId=null, _skinRetry=0;
+  let _bikeBase=null, _charBase=null, _riderLoading=false, _riderOrigTex=null, _skinLastId=null, _skinRetry=0;
   const _skinTex={};
-  function _ensureRiderBase(cb){
-    if(_riderBase){ cb&&cb(); return; }
+  function _ensureRiderBase(cb){          // load BOTH layers; fire cb once both are ready
+    if(_bikeBase && _charBase){ cb&&cb(); return; }
     if(_riderLoading) return;
     _riderLoading=true;
-    const im=new Image(); im.crossOrigin="anonymous";
-    im.onload=()=>{ _riderBase=im; _riderLoading=false; cb&&cb(); };
-    im.onerror=()=>{ _riderLoading=false; };
-    try{ im.src = BIKER_URL; }catch(e){ _riderLoading=false; }
+    let pending=2; const done=()=>{ if(--pending===0){ _riderLoading=false; cb&&cb(); } };
+    const load=(url,set)=>{ const im=new Image(); im.crossOrigin="anonymous";
+      im.onload=()=>{ set(im); done(); };
+      im.onerror=()=>{ _riderLoading=false; };
+      try{ im.src=url; }catch(e){ _riderLoading=false; } };
+    load(BIKE_URL, im=>{ _bikeBase=im; });
+    load(CHAR_URL, im=>{ _charBase=im; });
   }
   function _frameRepeat(t){ if(t&&t.repeat) t.repeat.set(1/BIKER_COLS, 1/BIKER_ROWS); return t; }   // show a single frame
-  function _riderTexFor(tint){   // tint=null → original (untinted) sheet
+  // Recolour the BIKE layer to `tint` (luminance × tint keeps the chrome shading); tint=null →
+  // original bike untouched. Returns a canvas, or null if the source can't be read (tainted).
+  function _recolorBike(tint){
+    const b=_bikeBase, w=b.naturalWidth||b.width, h=b.naturalHeight||b.height;
+    const c=document.createElement("canvas"); c.width=w; c.height=h;
+    const x=c.getContext("2d"); x.drawImage(b,0,0,w,h);
+    if(!tint) return c;
+    let id; try{ id=x.getImageData(0,0,w,h); }catch(e){ return null; }
+    const d=id.data, col=new THREE.Color(tint), tr=col.r, tg=col.g, tb=col.b;
+    for(let i=0;i<d.length;i+=4){
+      let a=d[i+3]; if(!a) continue;
+      if(a<170){ a=Math.round(a*a/170); d[i+3]=a; if(!a) continue; }   // soften edge aura → no halo
+      let lum=(0.299*d[i]+0.587*d[i+1]+0.114*d[i+2])/255;
+      lum=Math.min(1, Math.pow(lum,0.72));          // brighten midtones, keep darks dark
+      d[i]=tr*255*lum; d[i+1]=tg*255*lum; d[i+2]=tb*255*lum; }
+    x.putImageData(id,0,0);
+    return c;
+  }
+  function _riderTexFor(tint){   // composite: recoloured bike UNDER the original Xzilla body
     if(tint){ if(_skinTex[tint]) return _skinTex[tint]; } else if(_riderOrigTex) return _riderOrigTex;
-    if(!_riderBase) return null;
-    let t;
-    if(!tint){
-      t=new THREE.Texture(_riderBase); t.needsUpdate=true;   // untinted sheet — no per-pixel work
-    } else {
-      const w=_riderBase.naturalWidth||_riderBase.width, h=_riderBase.naturalHeight||_riderBase.height;
-      const c=document.createElement("canvas"); c.width=w; c.height=h;
-      const x=c.getContext("2d"); x.drawImage(_riderBase,0,0,w,h);
-      let id; try{ id=x.getImageData(0,0,w,h); }catch(e){ return null; }
-      const d=id.data, col=new THREE.Color(tint), tr=col.r, tg=col.g, tb=col.b;
-      for(let i=0;i<d.length;i+=4){
-        let a=d[i+3]; if(!a) continue;
-        // Fade the soft aura baked into the art so the skin colour doesn't form a halo.
-        if(a<170){ a=Math.round(a*a/170); d[i+3]=a; if(!a) continue; }
-        let lum=(0.299*d[i]+0.587*d[i+1]+0.114*d[i+2])/255;
-        lum=Math.min(1, Math.pow(lum,0.72));          // brighten midtones, keep darks dark (no glow halo)
-        d[i]=tr*255*lum; d[i+1]=tg*255*lum; d[i+2]=tb*255*lum; }
-      x.putImageData(id,0,0);
-      t=new THREE.CanvasTexture(c);
-    }
+    if(!_bikeBase || !_charBase) return null;
+    const bikeC=_recolorBike(tint); if(!bikeC) return null;
+    const w=_charBase.naturalWidth||_charBase.width, h=_charBase.naturalHeight||_charBase.height;
+    const c=document.createElement("canvas"); c.width=w; c.height=h;
+    const x=c.getContext("2d");
+    x.drawImage(bikeC,0,0);              // recoloured (or original) bike underneath
+    x.drawImage(_charBase,0,0,w,h);      // ORIGINAL Xzilla body on top — never recoloured
+    const t=new THREE.CanvasTexture(c);
     try{ t.encoding=THREE.sRGBEncoding; }catch(e){}
     _frameRepeat(t);
     if(tint) _skinTex[tint]=t; else _riderOrigTex=t;

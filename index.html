@@ -1085,7 +1085,7 @@ function loop(){ requestAnimationFrame(loop); const dt=Math.min(clock.getDelta()
   player.material.rotation=lean+vib*0.5;
   // #tire-anim — spin the rear tire by cycling the biker spritesheet frames (speed-linked).
   { const m=player.material.map, B=window.__BIKER;
-    if(m && B && m.repeat && m.repeat.x<1){
+    if(m && B && m.repeat && (m.repeat.x<1 || m.repeat.y<1)){
       _tireAcc += dt * (state.running?(state.speed||6):3.0) * 3.0;
       const f=((Math.floor(_tireAcc)%B.frames)+B.frames)%B.frames, c=f%B.cols, r=(f/B.cols)|0;
       m.offset.x=c/B.cols; m.offset.y=1-(r+1)/B.rows;
@@ -1272,6 +1272,6 @@ document.querySelectorAll("#startScreen .btn").forEach(b=>{
 document.addEventListener("visibilitychange",()=>{ if(document.hidden&&state.running) pauseGame(); });
 document.getElementById("bestScore").textContent=state.best;
 </script>
-<script src="game.js?v=75"></script>
+<script src="game.js?v=76"></script>
 </body>
 </html>
