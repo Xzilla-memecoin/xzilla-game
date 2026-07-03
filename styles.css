@@ -71,7 +71,7 @@
     margin:0 0 8px; color:var(--toxic); text-shadow:0 0 14px rgba(57,255,122,.6), 3px 3px 0 #5a1a8a; }
   .game-title .title-accent{ color:var(--magenta); text-shadow:0 0 14px rgba(255,43,214,.6), 3px 3px 0 #2a0a44; }
   #heroImg{ width:210px; max-width:60vw; height:auto; margin-bottom:2px;
-    filter:drop-shadow(0 0 30px rgba(57,255,122,.6)) drop-shadow(0 0 12px rgba(0,0,0,.6));
+    filter:drop-shadow(0 0 12px rgba(0,0,0,.6));
     animation:heroFloat 3.2s ease-in-out infinite; }
   @keyframes heroFloat{ 0%,100%{transform:translateY(0) rotate(-1deg)} 50%{transform:translateY(-10px) rotate(1deg)} }
   /* Rotate-to-landscape nudge. Hidden by default; only revealed to mobile/touch
