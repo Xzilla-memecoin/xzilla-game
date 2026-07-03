@@ -429,34 +429,46 @@ window._adsPayload = "WwogIHsKICAgICJpZCI6ICJ4emlsbGEtaG9tZSIsCiAgICAidGV4dCI6IC
       }
     }catch(e){}
   }
-  // The main/start screen shows a separate static <img id="heroImg"> (mainImage.webp),
-  // not the 3D player — so recolor it too, the same way, so the menu reflects the skin.
+  // The main/start screen shows a separate static <img id="heroImg">. Recolour it with the SAME
+  // two-layer split as the in-game sprite (mainImage/Hero_Bike.webp recolours; Hero_Character.webp
+  // stays original) so the menu matches gameplay: skin tints the bike, Xzilla's body stays black.
+  // Default skin keeps the untouched original promo art.
   const _heroImgEl = document.getElementById("heroImg");
   const _heroUrl = _heroImgEl ? _heroImgEl.getAttribute("src") : null;
-  let _heroBase=null, _heroLoading=false; const _heroData={};
-  function _applyHeroSkin(tint){
-    const hero=_heroImgEl; if(!hero || !_heroUrl) return;
-    if(!tint){ if(hero.src!==_heroUrl) hero.src=_heroUrl; return; }   // default → original art
-    if(_heroData[tint]){ hero.src=_heroData[tint]; return; }
-    if(!_heroBase){
-      if(_heroLoading) return; _heroLoading=true;
-      const im=new Image(); im.crossOrigin="anonymous";
-      im.onload=()=>{ _heroBase=im; _heroLoading=false; try{ _applyHeroSkin(tint); }catch(e){} };
+  const HERO_BIKE_URL="mainImage/Hero_Bike.webp", HERO_CHAR_URL="mainImage/Hero_Character.webp";
+  let _heroBike=null, _heroChar=null, _heroLoading=false; const _heroData={};
+  function _ensureHeroBase(cb){          // load BOTH hero layers; fire cb once both are ready
+    if(_heroBike && _heroChar){ cb&&cb(); return; }
+    if(_heroLoading) return;
+    _heroLoading=true;
+    let pending=2; const done=()=>{ if(--pending===0){ _heroLoading=false; cb&&cb(); } };
+    const load=(url,set)=>{ const im=new Image(); im.crossOrigin="anonymous";
+      im.onload=()=>{ set(im); done(); };
       im.onerror=()=>{ _heroLoading=false; };
-      im.src=_heroUrl; return;                                       // re-applies once loaded
-    }
+      try{ im.src=url; }catch(e){ _heroLoading=false; } };
+    load(HERO_BIKE_URL, im=>{ _heroBike=im; });
+    load(HERO_CHAR_URL, im=>{ _heroChar=im; });
+  }
+  function _applyHeroSkin(tint){
+    const hero=_heroImgEl; if(!hero) return;
+    if(!tint){ if(_heroUrl && hero.src!==_heroUrl) hero.src=_heroUrl; return; }   // default → original promo art
+    if(_heroData[tint]){ hero.src=_heroData[tint]; return; }
+    if(!_heroBike || !_heroChar){ _ensureHeroBase(()=>{ try{ _applyHeroSkin(tint); }catch(e){} }); return; }
     try{
-      const w=_heroBase.naturalWidth||_heroBase.width, h=_heroBase.naturalHeight||_heroBase.height;
-      const c=document.createElement("canvas"); c.width=w; c.height=h;
-      const x=c.getContext("2d"); x.drawImage(_heroBase,0,0,w,h);
-      const id=x.getImageData(0,0,w,h), d=id.data, col=new THREE.Color(tint), tr=col.r, tg=col.g, tb=col.b;
+      const w=_heroChar.naturalWidth||_heroChar.width, h=_heroChar.naturalHeight||_heroChar.height;
+      // recolour the bike layer (luminance × tint), then composite it UNDER the original body
+      const bc=document.createElement("canvas"); bc.width=w; bc.height=h;
+      const bx=bc.getContext("2d"); bx.drawImage(_heroBike,0,0,w,h);
+      const id=bx.getImageData(0,0,w,h), d=id.data, col=new THREE.Color(tint), tr=col.r, tg=col.g, tb=col.b;
       for(let i=0;i<d.length;i+=4){
         let a=d[i+3]; if(!a) continue;
         if(a<170){ a=Math.round(a*a/170); d[i+3]=a; if(!a) continue; }
         let lum=(0.299*d[i]+0.587*d[i+1]+0.114*d[i+2])/255;
         lum=Math.min(1, Math.pow(lum,0.72));
         d[i]=tr*255*lum; d[i+1]=tg*255*lum; d[i+2]=tb*255*lum; }
-      x.putImageData(id,0,0);
+      bx.putImageData(id,0,0);
+      const c=document.createElement("canvas"); c.width=w; c.height=h;
+      const x=c.getContext("2d"); x.drawImage(bc,0,0); x.drawImage(_heroChar,0,0,w,h);
       const url=c.toDataURL(); _heroData[tint]=url; hero.src=url;
     }catch(e){}   // tainted canvas → leave original
   }
