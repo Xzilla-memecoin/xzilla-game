@@ -94,6 +94,13 @@ function loadImg(url, cb){
   if(_imgCache[url] && _imgCache[url].complete){ cb(_imgCache[url]); return; }
   const im = new Image(); im.onload = ()=>cb(im); im.onerror = ()=>cb(null); im.src = url; _imgCache[url] = im;
 }
+// center-crop ("cover") — mirrors the in-game drawCover so the preview never squishes art
+function coverDraw(x, img, W, H){
+  const iw=img.naturalWidth||img.width, ih=img.naturalHeight||img.height;
+  if(!iw||!ih){ x.drawImage(img,0,0,W,H); return; }
+  const s=Math.max(W/iw,H/ih), dw=iw*s, dh=ih*s;
+  x.drawImage(img,(W-dw)/2,(H-dh)/2,dw,dh);
+}
 function drawPreview(canvas, g, text, color, img){
   const long = 132; let W, H;
   if(g.rw >= g.rh){ W = long; H = Math.round(long*g.rh/g.rw); } else { H = long; W = Math.round(long*g.rw/g.rh); }
@@ -101,19 +108,26 @@ function drawPreview(canvas, g, text, color, img){
   const x = canvas.getContext("2d");
   const t = (text||"").trim();
   x.fillStyle = "#05030f"; x.fillRect(0,0,W,H);
-  if(!t && img){                                   // image-only → full bleed
-    x.drawImage(img,0,0,W,H);
+  if(!t && img){                                   // image-only → full bleed (aspect-correct)
+    coverDraw(x,img,W,H);
     x.strokeStyle = color||"#21e6ff"; x.lineWidth = 4; x.strokeRect(2,2,W-4,H-4); return;
   }
-  if(img){ x.globalAlpha=0.6; x.drawImage(img,0,0,W,H); x.globalAlpha=1; x.fillStyle="rgba(5,3,15,.35)"; x.fillRect(0,0,W,H); }
+  if(img){ x.globalAlpha=0.6; coverDraw(x,img,W,H); x.globalAlpha=1; x.fillStyle="rgba(5,3,15,.35)"; x.fillRect(0,0,W,H); }
   x.strokeStyle = color||"#21e6ff"; x.lineWidth = 4; x.strokeRect(2,2,W-4,H-4);
   if(t){
     x.fillStyle = color||"#21e6ff"; x.textAlign="center"; x.textBaseline="middle";
-    let fp = Math.max(8, Math.round(W/9)); x.font = "bold "+fp+"px monospace";
-    const words = t.toUpperCase().split(" "); let lines=[], line="";
-    for(const w of words){ const tt=line?line+" "+w:w; if(x.measureText(tt).width>W-10 && line){ lines.push(line); line=w; } else line=tt; }
-    lines.push(line);
-    const lh = Math.round(fp*1.25), y0 = H/2-(lines.length-1)*lh/2;
+    // size off the long edge + shrink to fit both dims, mirroring the in-game billboard
+    const words = t.toUpperCase().split(" "); const L=Math.max(W,H);
+    let fp = Math.max(8, Math.round(L/9)), lines=[], lh=Math.round(fp*1.25);
+    const minFp = Math.max(6, Math.round(L/22));
+    for(; fp>=minFp; fp-=1){
+      x.font = "bold "+fp+"px monospace"; lines=[]; let line="";
+      for(const w of words){ const tt=line?line+" "+w:w; if(x.measureText(tt).width>W-10 && line){ lines.push(line); line=w; } else line=tt; }
+      lines.push(line); lh=Math.round(fp*1.25);
+      let maxW=0; for(const ln of lines){ const lw=x.measureText(ln).width; if(lw>maxW) maxW=lw; }
+      if(maxW<=W-8 && lines.length*lh<=H-8) break;
+    }
+    const y0 = H/2-(lines.length-1)*lh/2;
     lines.forEach((ln,i)=>x.fillText(ln, W/2, y0+i*lh));
   }
 }

@@ -1345,16 +1345,23 @@ window._adsPayload = "WwogIHsKICAgICJpZCI6ICJ4emlsbGEtaG9tZSIsCiAgICAidGV4dCI6IC
 
     /* ----- upgrade tree (persisted, spent in XP) ----------------------------- */
     const UPGRADES = [
-      {id:"hp",    name:"REINFORCED SCALES", desc:"+1 max HP per level",       max:3, base:4000,  step:2.4},
+      {id:"hp",    name:"REINFORCED SCALES", desc:"+1 max HP per level",       max:4, base:4000,  step:2.4},
       {id:"combo", name:"DIAMOND GRIP",      desc:"Wider combo window",        max:4, base:2500,  step:2.0},
-      {id:"drop",  name:"DEGEN LUCK",        desc:"+15% XP per kill / lvl",max:4, base:3000,  step:2.1},
-      {id:"pwr",   name:"POWER MAGNET",      desc:"Power-ups spawn more often", max:3, base:5000,  step:2.6},
+      {id:"drop",  name:"DEGEN LUCK",        desc:"+15% XP per kill / lvl",max:5, base:3000,  step:2.1},
+      {id:"pwr",   name:"POWER MAGNET",      desc:"Power-ups spawn more often", max:4, base:5000,  step:2.6},
       {id:"start", name:"HEAD START",        desc:"Begin each run with a shield",max:1, base:8000,  step:1},
+      {id:"warm",  name:"WARM ENGINE",       desc:"Begin runs at combo ×2, +1 per level",max:3, base:3500, step:2.1},
+      {id:"nearmiss",name:"CLOSE CALL",      desc:"+50% near-miss dodge bonus / lvl",max:3, base:4500, step:2.2},
+      {id:"rugradar",name:"RUG RADAR",       desc:"More RUGGERs spawn — the 2× value scammer / lvl",max:3, base:5000, step:2.3},
       // ---- ELITE TIER: expensive, end-game power spikes ----
-      {id:"midas",   name:"MIDAS RUSH",     desc:"+12% to all score / lvl",        max:3, base:12000, step:2.3, elite:true},
-      {id:"buffdur", name:"OVERDRIVE CORE", desc:"Power-ups last +35% longer / lvl",max:3, base:9000,  step:2.2, elite:true},
-      {id:"nitro",   name:"NITRO LAUNCH",   desc:"Start each run with SCORE ×2 (8s)",max:1, base:16000, step:1, elite:true},
-      {id:"revive",  name:"SECOND WIND",    desc:"Cheat death once per run",        max:1, base:30000, step:1, elite:true}
+      {id:"midas",   name:"MIDAS RUSH",     desc:"+12% to all score / lvl",        max:4, base:12000, step:2.3, elite:true},
+      {id:"buffdur", name:"OVERDRIVE CORE", desc:"Power-ups last +35% longer / lvl",max:4, base:9000,  step:2.2, elite:true},
+      {id:"nitro",   name:"NITRO LAUNCH",   desc:"Open each run with SCORE ×2 (8s, +4s/lvl)",max:3, base:16000, step:1.7, elite:true},
+      {id:"bosshunt",name:"BOSS HUNTER",    desc:"+25% XP & score from Rug Bosses / lvl",max:3, base:14000, step:2.2, elite:true},
+      {id:"revive",  name:"SECOND WIND",    desc:"Cheat death once per run",        max:1, base:30000, step:1, elite:true},
+      // ---- ENDLESS SINK: small permanent score boost with no practical ceiling, so
+      //      players who've maxed everything else always have somewhere to burn XP. ----
+      {id:"overclock",name:"OVERCLOCK",     desc:"+2.5% score / lvl — no ceiling in sight",max:8, base:18000, step:1.45, elite:true}
     ];
     let upg = store.get("xz_upg", null);
     if(!upg || typeof upg!=="object"){ upg={}; }
@@ -1370,10 +1377,21 @@ window._adsPayload = "WwogIHsKICAgICJpZCI6ICJ4emlsbGEtaG9tZSIsCiAgICAidGV4dCI6IC
       window.__catchBonus = lvl("combo") * 0.22; // consumed in our resolve test
       window.__dropMult   = 1 + lvl("drop")*0.15;
       window.__pwrBonus   = lvl("pwr")*0.035;    // added to powerup chance
-      window.__scoreMult  = 1 + lvl("midas")*0.12;   // MIDAS RUSH — permanent score boost
+      window.__nearMissMult = 1 + lvl("nearmiss")*0.5;  // CLOSE CALL — bigger reward for dodging by a hair
+      window.__rugChance  = lvl("rugradar")*0.15;    // RUG RADAR — chance a spawned scammer is the high-value RUGGER
+      window.__scoreMult  = (1 + lvl("midas")*0.12) * (1 + lvl("overclock")*0.025); // MIDAS RUSH + endless OVERCLOCK
       window.__buffMult   = 1 + lvl("buffdur")*0.35; // OVERDRIVE CORE — longer power-ups
+      window.__bossBonus  = 1 + lvl("bosshunt")*0.25; // BOSS HUNTER — extra XP & score from Rug Bosses
     }
     applyUpgrades();
+
+    /* RUGGER = the high-value scammer. Identified by its material (myScammerMats[1], same
+     * check the animator uses), it's worth RUG_POINT_MULT× a normal scammer. RUG RADAR
+     * (below) then biases the spawn mix toward it. */
+    const RUG_POINT_MULT = 2;
+    function isRugger(e){ return !!(e && e.sprite && typeof myScammerMats!=="undefined" && myScammerMats && e.sprite.material===myScammerMats[1]); }
+    // RUGGERs are worth 2× ONLY once RUG RADAR is owned — no baseline score change without the upgrade.
+    function scammerPts(e){ return (lvl("rugradar")>0 && isRugger(e)) ? CFG.scammerPoints*RUG_POINT_MULT : CFG.scammerPoints; }
 
     /* ----- tier effects: holdings now grant a real gameplay edge ------------ */
     function tierScoreMult(){ return tierFor(econ.holdings).m; }      // already wired to score
@@ -1560,8 +1578,11 @@ window._adsPayload = "WwogIHsKICAgICJpZCI6ICJ4emlsbGEtaG9tZSIsCiAgICAidGV4dCI6IC
       // holder (do-not-hit)
       cum += wp.holderChance;
       if(r<cum){ e.type=TYPE.HOLDER; e.sprite.material=myHolderMat; place(2.7); return; }
-      // default scammer
-      e.type=TYPE.SCAMMER; e.sprite.material=myScammerMats[(Math.random()*myScammerMats.length)|0];
+      // default scammer — RUG RADAR biases the mix toward the high-value RUGGER (index 1)
+      e.type=TYPE.SCAMMER;
+      let _mi=(Math.random()*myScammerMats.length)|0;
+      if(Math.random() < (window.__rugChance||0)) _mi=1;
+      e.sprite.material=myScammerMats[_mi];
       place(2.8);
     };
 
@@ -1642,7 +1663,7 @@ window._adsPayload = "WwogIHsKICAgICJpZCI6ICJ4emlsbGEtaG9tZSIsCiAgICAidGV4dCI6IC
     window.__nearMiss = function(e){
       if(!(e.type===TYPE.HOLDER || e.type===TYPE.HONEYPOT)) return;
       const p=e.sprite.position.clone();
-      const bonus=Math.round(8 * tierScoreMult() * (powActive(px.x2Until)?2:1));
+      const bonus=Math.round(8 * tierScoreMult() * (powActive(px.x2Until)?2:1) * (window.__nearMissMult||1));
       state.score+=bonus; renderScore();
       popup(p,"NEAR MISS +"+bonus,CYAN); burst(p.x,p.y,p.z,CYAN,6); pop=Math.max(pop,1.12);
       try{ window.__sfx && window.__sfx.nearmiss && window.__sfx.nearmiss(); }catch(_){}
@@ -1743,15 +1764,25 @@ window._adsPayload = "WwogIHsKICAgICJpZCI6ICJ4emlsbGEtaG9tZSIsCiAgICAidGV4dCI6IC
       // defeated
       burst(p.x,p.y,p.z,MAG,46); burst(p.x,p.y,p.z,RED,40); burst(p.x,p.y,p.z,GOLD,24);
       shake(1.8); flashColor("rgba(255,59,92,.5)",0.85);
-      const gain=Math.round(900*tierScoreMult()*(window.__scoreMult||1)); state.score+=gain; renderScore();
-      const tok=Math.round(800*dropMult); econ.tokens+=tok; run.earned+=tok; run.boss++;
+      const bb=window.__bossBonus||1;   // BOSS HUNTER
+      const gain=Math.round(900*tierScoreMult()*(window.__scoreMult||1)*bb); state.score+=gain; renderScore();
+      const tok=Math.round(800*dropMult*bb); econ.tokens+=tok; run.earned+=tok; run.boss++;
       run.score=Math.max(run.score,state.score);
       popup(p,"+"+gain,GOLD); bigBanner("RUG SHREDDED");
       try{sfx.power();}catch(_){}
       hideRugBar(); clearBullets(); gunOff();
+      // The boss's death shockwave clears every scammer still on the field — and each
+      // one now COUNTS toward your combo/kills/score, exactly like shredding it. Before,
+      // the boss silently deleted them, robbing you of the combo you'd otherwise build.
+      let cleared=0;
       for(let i=active.length-1;i>=0;i--){ const a=active[i];
         if(a!==e && a.type===TYPE.SCAMMER && !a.dead){ a.dead=true;
-          const ap=a.sprite.position.clone(); burst(ap.x,ap.y,ap.z,MAG,5); freeEntity(a); } }
+          const ap=a.sprite.position.clone();
+          state.combo++; state.kills++; run.kills++; if(state.combo>run.combo) run.combo=state.combo;
+          window.addScore(scammerPts(a),ap);
+          burst(ap.x,ap.y,ap.z,MAG,5); freeEntity(a); cleared++; } }
+      if(cleared){ renderCombo(); try{sfx.catch(state.combo);}catch(_){}
+        if(state.combo>0 && state.combo%5===0){ showBanner(state.combo+" COMBO!"); } }
       try{ window.__buzz ? window.__buzz([60,40,120],"success") : (tg&&tg.HapticFeedback&&tg.HapticFeedback.notificationOccurred("success")); }catch(_){}
       // Space the NEXT boss at least 4 waves after this defeat, measured off the
       // post-reward score so the +900 (and farmed scammer points) can't immediately
@@ -1761,11 +1792,14 @@ window._adsPayload = "WwogIHsKICAgICJpZCI6ICJ4emlsbGEtaG9tZSIsCiAgICAidGV4dCI6IC
       return true;
     }
 
-    // Tracers pass through the good drops (power-ups + extra-life hearts) so you never
-    // shoot away a reward. HODLER / HONEYPOT / DECOY are NOT here on purpose — shooting
-    // those triggers their hazard effect after 3 rounds (see the collision branch below).
+    // The auto-cannon fires on its own during a boss fight and the player can't aim it, so
+    // it must NEVER punish them for something they can't control. Tracers pass through every
+    // non-scammer entity — good drops (power-ups + hearts) AND the dodge hazards (HODLER /
+    // HONEYPOT / DECOY, which the boss sprite often hides). The cannon only damages SCAMMERs
+    // and the RUG BOSS; you still avoid hazards by steering (ramming one still costs a life).
     const BULLET_PASS = {};
-    [TYPE.SHIELD,TYPE.BOMB,TYPE.PWR_SLOW,TYPE.PWR_X2,TYPE.PWR_MAG,TYPE.HEART].forEach(t=>BULLET_PASS[t]=1);
+    [TYPE.SHIELD,TYPE.BOMB,TYPE.PWR_SLOW,TYPE.PWR_X2,TYPE.PWR_MAG,TYPE.HEART,
+     TYPE.HOLDER,TYPE.HONEYPOT,TYPE.DECOY].forEach(t=>BULLET_PASS[t]=1);
 
     window.updateCannon = function(dt){
       // Freeze + flush + silence the gun whenever the run isn't live (pause / menu / over).
@@ -1787,25 +1821,15 @@ window._adsPayload = "WwogIHsKICAgICJpZCI6ICJ4emlsbGEtaG9tZSIsCiAgICAidGV4dCI6IC
           const rad=(a.type===TYPE.RUGBOSS)?2.6:1.25;
           if(Math.abs(b.position.x-ax)<rad && Math.abs(b.position.z-az)<rad){
             if(a.type===TYPE.RUGBOSS){ bossKilled=damageBoss(a); hit=true; break; }
-            // Every OTHER target takes 3 tracer rounds; the 3rd triggers the SAME effect
-            // you'd get by colliding with it (friendly fire on hodler/honeypot included).
+            // Only SCAMMERs reach here — the boss is handled above, and hodlers/hazards plus
+            // good drops all pass through (BULLET_PASS). Three tracer rounds shred a scammer,
+            // scoring exactly like catching it.
             const ap=a.sprite.position.clone();
-            if((a.bhits=(a.bhits||0)+1) < 3){
-              burst(ap.x,ap.y,ap.z, (a.type===TYPE.HOLDER||a.type===TYPE.HONEYPOT)?RED:MAG, 3);
-              hit=true; break;
-            }
+            if((a.bhits=(a.bhits||0)+1) < 3){ burst(ap.x,ap.y,ap.z,MAG,3); hit=true; break; }
             a.dead=true;
-            if(a.type===TYPE.SCAMMER){            // shredded -> combo + score, like catching it
-              state.combo++; state.kills++; run.kills++; if(state.combo>run.combo) run.combo=state.combo;
-              burst(ap.x,ap.y,ap.z,MAG,12); window.addScore(CFG.scammerPoints,ap); renderCombo();
-              try{sfx.catch(state.combo);}catch(_){}
-            } else if(a.type===TYPE.HOLDER){       // friendly fire -> hodler dies AND you lose a life
-              burst(ap.x,ap.y,ap.z,RED,14); popup(ap,"SHOT A HODLER!",RED); loseLife(ap);
-            } else if(a.type===TYPE.HONEYPOT){     // shot the trap -> it stings, lose a life
-              burst(ap.x,ap.y,ap.z,RED,14); popup(ap,"SHOT A HONEYPOT!",RED); loseLife(ap);
-            } else if(a.type===TYPE.DECOY){        // shot the fake airdrop -> combo wiped
-              state.combo=0; renderCombo(); burst(ap.x,ap.y,ap.z,CYAN,14); popup(ap,"COMBO LOST",CYAN);
-            }
+            state.combo++; state.kills++; run.kills++; if(state.combo>run.combo) run.combo=state.combo;
+            burst(ap.x,ap.y,ap.z,MAG,12); window.addScore(scammerPts(a),ap); renderCombo();
+            try{sfx.catch(state.combo);}catch(_){}
             freeEntity(a); try{sfx.catch(1);}catch(_){}
             hit=true; break;
           }
@@ -1861,7 +1885,7 @@ window._adsPayload = "WwogIHsKICAgICJpZCI6ICJ4emlsbGEtaG9tZSIsCiAgICAidGV4dCI6IC
       if(e.type===TYPE.SCAMMER){
         state.combo++; state.kills++; run.kills++; if(state.combo>run.combo) run.combo=state.combo;
         try{sfx.catch(state.combo);}catch(_){}
-        burst(p.x,p.y,p.z,MAG,14); window.addScore(CFG.scammerPoints,p); renderCombo();
+        burst(p.x,p.y,p.z,MAG,14); window.addScore(scammerPts(e),p); renderCombo();
         const tok=Math.round(2*dropMult); econ.tokens+=tok; run.earned+=tok; pop=1.22;
         if(state.combo>0 && state.combo%5===0){ showBanner(state.combo+" COMBO!"); flashColor("rgba(57,255,122,.35)",0.5); shake(0.5); }
         try{ if(tg&&tg.HapticFeedback) tg.HapticFeedback.impactOccurred("light"); }catch(_){}
@@ -1881,7 +1905,7 @@ window._adsPayload = "WwogIHsKICAgICJpZCI6ICJ4emlsbGEtaG9tZSIsCiAgICAidGV4dCI6IC
           // the bomb now BUILDS your combo (each cleared scammer counts) instead of wasting it —
           // combo++ before addScore so every subsequent kill also banks at the higher multiplier.
           state.combo++; state.kills++; run.kills++; if(state.combo>run.combo) run.combo=state.combo;
-          window.addScore(CFG.scammerPoints,ap); const tok=Math.round(2*dropMult); econ.tokens+=tok; run.earned+=tok;
+          window.addScore(scammerPts(a),ap); const tok=Math.round(2*dropMult); econ.tokens+=tok; run.earned+=tok;
           freeEntity(a); } }
         renderCombo();
         e.dead=true; freeEntity(e); updateHUDtokens(); return;
@@ -2000,8 +2024,9 @@ window._adsPayload = "WwogIHsKICAgICJpZCI6ICJ4emlsbGEtaG9tZSIsCiAgICAidGV4dCI6IC
       px.slowUntil=px.x2Until=px.magUntil=0; rugPending=false; nextBossWave=4; rugWarnUntil=0; window.__rugWarn=false; window.__rugBossAt=0;
       hideRugBar();
       if(lvl("start")>0){ shieldActive=true; }
+      if(lvl("warm")>0){ state.combo = 1 + lvl("warm"); if(state.combo>run.combo) run.combo=state.combo; renderCombo(); }   // WARM ENGINE: open at combo ×(1+lvl)
       reviveAvail = lvl("revive")>0;                 // SECOND WIND: arm one charge per run
-      if(lvl("nitro")>0){ px.x2Until = nowS()+8; }   // NITRO LAUNCH: open every run with SCORE ×2
+      if(lvl("nitro")>0){ px.x2Until = nowS() + 8 + (lvl("nitro")-1)*4; }   // NITRO LAUNCH: 8s +4s/lvl opening SCORE ×2
     }
     ["startBtn","retryBtn"].forEach(id=>{ const b=$(id); if(b) b.addEventListener("click", set2BeforeRun); });
 
@@ -2566,6 +2591,14 @@ window._adsPayload = "WwogIHsKICAgICJpZCI6ICJ4emlsbGEtaG9tZSIsCiAgICAidGV4dCI6IC
       // face) — it never grows. Longer text instead auto-shrinks its font
       // (28px down to 14px) and re-wraps until it fits, so the message
       // always stays fully on the screen no matter how long it is.
+      // Draw an image to FILL W×H while preserving its aspect ratio (center-crop / "cover"),
+      // so a 2:1 source borrowed onto a 9:16 panel fills the frame cleanly instead of squishing.
+      function drawCover(x,img,W,H){
+        const iw=img.naturalWidth||img.width, ih=img.naturalHeight||img.height;
+        if(!iw||!ih){ x.drawImage(img,0,0,W,H); return; }
+        const s=Math.max(W/iw,H/ih), dw=iw*s, dh=ih*s;
+        x.drawImage(img,(W-dw)/2,(H-dh)/2,dw,dh);
+      }
       function drawAd(scr,msg,color,imageUrl){
         const x=scr.ctx,W=scr.canvas.width,H=scr.canvas.height;
         const img=adImage(imageUrl);
@@ -2573,14 +2606,14 @@ window._adsPayload = "WwogIHsKICAgICJpZCI6ICJ4emlsbGEtaG9tZSIsCiAgICAidGV4dCI6IC
         // IMAGE-ONLY: an ad with an image and no caption → full-bleed banner (no scrim, no text).
         if(!text && img && img._ready){
           x.fillStyle="#05030f"; x.fillRect(0,0,W,H);
-          x.drawImage(img,0,0,W,H);
+          drawCover(x,img,W,H);
           x.strokeStyle=color||"#21e6ff"; x.lineWidth=6; x.strokeRect(5,5,W-10,H-10);
           x.shadowBlur=0; scr.tex.needsUpdate=true; return;
         }
         // Background: cached ad image if decoded, else the solid neon-dark panel.
         if(img&&img._ready){
           x.fillStyle="#05030f"; x.fillRect(0,0,W,H);          // base under transparent/letterboxed art
-          x.globalAlpha=0.6; x.drawImage(img,0,0,W,H); x.globalAlpha=1;
+          x.globalAlpha=0.6; drawCover(x,img,W,H); x.globalAlpha=1;
           x.fillStyle="rgba(5,3,15,0.35)"; x.fillRect(0,0,W,H); // scrim so text stays legible
         } else {
           x.fillStyle="#05030f"; x.fillRect(0,0,W,H);
@@ -2589,8 +2622,11 @@ window._adsPayload = "WwogIHsKICAgICJpZCI6ICJ4emlsbGEtaG9tZSIsCiAgICAidGV4dCI6IC
         x.fillStyle=color; x.shadowColor=color; x.shadowBlur=18;
         x.textAlign="center"; x.textBaseline="middle";
         const words=String(msg).split(" ");
-        let fontPx=Math.max(14,Math.round(W/9)), lines=[], lh=32;   // scale start size to screen width
-        const minPx=Math.max(10,Math.round(W/22));
+        // Size the text off the LONG edge (not width) so a tall 9:16 panel gets big text too,
+        // then shrink until every line fits BOTH across (widest line) and down (all lines).
+        const L=Math.max(W,H);
+        let fontPx=Math.max(14,Math.round(L/9)), lines=[], lh=32;
+        const minPx=Math.max(10,Math.round(L/22));
         for(; fontPx>=minPx; fontPx-=2){
           x.font="bold "+fontPx+"px 'Press Start 2P',monospace";
           lines=[]; let line="";
@@ -2601,7 +2637,8 @@ window._adsPayload = "WwogIHsKICAgICJpZCI6ICJ4emlsbGEtaG9tZSIsCiAgICAidGV4dCI6IC
           }
           lines.push(line);
           lh=Math.round(fontPx*1.15);
-          if(lines.length*lh<=H-16) break;   // fits vertically at this size -> use it
+          let maxW=0; for(const ln of lines){ const lw=x.measureText(ln).width; if(lw>maxW) maxW=lw; }
+          if(maxW<=W-16 && lines.length*lh<=H-16) break;   // fits across AND down -> use it
         }
         x.font="bold "+fontPx+"px 'Press Start 2P',monospace";
         const y0=H/2-(lines.length-1)*lh/2;

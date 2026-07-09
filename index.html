@@ -11,7 +11,7 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@500;700;900&family=Press+Start+2P&display=swap" rel="stylesheet">
 
-<link rel="stylesheet" href="styles.css?v=31">
+<link rel="stylesheet" href="styles.css?v=32">
 </head>
 <body>
   <div id="game"></div>
@@ -48,6 +48,16 @@
     <button class="tab" data-tab="SKINS">SKINS</button>
   </div>
 
+  <!-- FORCE-LANDSCAPE gate: full-screen animated "rotate your device" prompt shown to
+       phone players while in portrait. Toggled by the forceLandscape() script below. -->
+  <div id="rotateOverlay" aria-hidden="true">
+    <div class="ro-inner">
+      <div class="ro-phone"><span class="ro-dot"></span></div>
+      <div class="ro-title">ROTATE YOUR DEVICE</div>
+      <div class="ro-sub">XZILLA plays in landscape</div>
+    </div>
+  </div>
+
   <div id="startScreen" class="overlay">
     <!-- Title sits ABOVE the hero art; .heroWrap keeps the two together as the LEFT
          half of the landscape split (title stays above the image in both orientations). -->
@@ -67,6 +77,7 @@
       <div id="vipStatus" class="status-line"></div>
       <button id="mainInvite" class="btn invite small" style="margin-top:16px;">🦖 INVITE FRIENDS · +3000 XP EACH</button>
       <div class="invite-hint">You and your friend both earn XP</div>
+      <button id="joinTgBtn" class="btn tg small" style="margin-top:16px;">💬 JOIN THE XZILLA TELEGRAM</button>
     </div>
   </div>
 
@@ -446,11 +457,16 @@ const BOT_SHARE_URL       = "https://t.me/RugSmasher_bot/";
 window.__BOT_SHARE_URL = BOT_SHARE_URL;
 
 const CFG = { lives:3, baseSpeed:9, speedRampPerSec:0.18, baseSpawnGap:0.92, minSpawnGap:0.34,
-  holderChance:0.32, powerupChance:0.05, scammerPoints:10, vipMultiplier:1.2, playerSpeedLerp:0.22,
-  comboWindow:2.6 };   // seconds before an un-fed combo decays back to zero
+  holderChance:0.32, powerupChance:0.05, scammerPoints:10, vipMultiplier:1.2, playerSpeedLerp:0.30,
+  comboWindow:2.6,   // seconds before an un-fed combo decays back to zero
+  // SPEED GEARS — the run climbs through 10 gears. gearSecs is how long each gear lasts.
+  // Gears 1–5 (first minute) mirror the old gentle ramp; gears 6–10 (added) accelerate it
+  // for a punchier late game, capped at the top gear so it stays playable. speedCurve is the
+  // super-linear curvature — 0 would be the old plain linear ramp.
+  gearSecs:12, maxGear:10, speedCurve:0.0032 };
 
 /* ============================================================ STATE */
-const state = { running:false, score:0, lives:CFG.lives, combo:0, kills:0, wave:1, vip:false, best:0,
+const state = { running:false, score:0, lives:CFG.lives, combo:0, kills:0, wave:1, gear:1, vip:false, best:0,
   speed:CFG.baseSpeed, spawnGap:CFG.baseSpawnGap, spawnTimer:0, elapsed:0, playerTargetX:0, shake:0, soundOn:true,
   comboUntil:0, walletConnected:false };      // comboUntil: combo-expiry deadline · walletConnected: verified $XZILLA holder
 try { state.best = parseInt(localStorage.getItem("xzilla_best")||"0",10)||0; } catch(e){}
@@ -878,10 +894,18 @@ resize();
 // Normalize against the canvas/visual-viewport width (same source as camera.aspect
 // in resize()), NOT window.innerWidth — they diverge under Telegram chrome / zoom,
 // which skewed steering. #game sits at (0,0) so clientX is already canvas-relative. (BUG #2)
-function pointerToWorldX(clientX){ const nx=(clientX/getViewportSize().w)*2-1; return THREE.MathUtils.clamp(nx*playHalfWidth,-playHalfWidth,playHalfWidth); }
-let dragging=false;
-function onDown(x){ if(!state.running) return; dragging=true; state.playerTargetX=pointerToWorldX(x); }
-function onMove(x){ if(!state.running||!dragging) return; state.playerTargetX=pointerToWorldX(x); }
+// SWIPE STEERING (touch): the bike follows RELATIVE finger movement — a stationary TAP
+// does nothing (no jump-to-lane). SWIPE_GAIN>1 means less finger travel covers the whole
+// lane, so steering reacts faster; the delta is normalized against viewport width so it
+// feels identical on every screen size. Kept smooth by the eased follow in the loop.
+const SWIPE_GAIN = 1.9;
+let dragging=false, lastTouchX=0;
+function onDown(x){ if(!state.running) return; dragging=true; lastTouchX=x; }   // arm the swipe; don't move yet
+function onMove(x){ if(!state.running||!dragging) return;
+  const dxWorld = ((x-lastTouchX)/getViewportSize().w) * (2*playHalfWidth) * SWIPE_GAIN;
+  state.playerTargetX = THREE.MathUtils.clamp(state.playerTargetX + dxWorld, -playHalfWidth, playHalfWidth);
+  lastTouchX = x;
+}
 function onUp(){ dragging=false; }
 renderer.domElement.addEventListener("touchstart",e=>{ e.preventDefault(); onDown(e.touches[0].clientX); },{passive:false});
 renderer.domElement.addEventListener("touchmove", e=>{ e.preventDefault(); onMove(e.touches[0].clientX); },{passive:false});
@@ -906,9 +930,15 @@ let tiltEnabled = false, tiltCenter = null, tiltAvailable = false;
 // lane is. That's the landscape fix — a fixed per-degree sensitivity under-reacted there
 // because the landscape lane is wider (aspect>=1), so max tilt only moved you part-way.
 // Landscape also gets a smaller max angle for sharp, snappy arcade response.
-const TILT_DEADZONE_DEG     = 2.5;   // center slack — bike stays perfectly straight when ~level
-const TILT_MAX_DEG_PORTRAIT  = 28;   // ~28° tilt = full-lock steering in portrait
-const TILT_MAX_DEG_LANDSCAPE = 14;   // ~14° = full-lock in landscape (sharper, snappier)
+const TILT_DEADZONE_DEG     = 3;     // center slack — bike stays perfectly straight when ~level
+const TILT_MAX_DEG_PORTRAIT  = 30;   // ~30° tilt = full-lock steering in portrait
+const TILT_MAX_DEG_LANDSCAPE = 18;   // ~18° = full-lock in landscape (sharp, but not twitchy)
+// --- robustness (foolproof tilt): low-pass smoothing + multi-sample neutral + auto-recenter ---
+const TILT_SMOOTH = 0.25;   // EMA on the raw sensor axis (lower = smoother, slightly more lag)
+const CAL_SAMPLES = 10;     // readings AVERAGED to fix the "straight ahead" neutral (vs 1 noisy sample)
+const TILT_EXPO   = 1.4;    // response curve >1: gentle near center, still reaches full lane at max tilt
+let tiltRaw=null, calSum=0, calN=0;
+function resetTiltCal(){ tiltCenter=null; tiltRaw=null; calSum=0; calN=0; }   // re-run calibration next reading
 
 function isLandscape(){ return window.innerWidth > window.innerHeight; }
 function screenAngle(){
@@ -931,23 +961,42 @@ function tiltSteerValue(e){
 function onTilt(e){
   if(!tiltEnabled || !state.running || dragging) return;     // a finger-drag always wins while it's active
   const g = tiltSteerValue(e); if(g===null) return;          // that axis not reported yet on this device
-  if(tiltCenter===null){ tiltCenter=g; return; }             // first reading after enable/rotate = "neutral" pose
-  let delta = g - tiltCenter;                                // degrees of tilt past neutral
-  if(Math.abs(delta) < TILT_DEADZONE_DEG){ state.playerTargetX = 0; return; }   // deadzone: hold dead straight
+
+  // 1) LOW-PASS the raw axis — the #1 cause of twitchy over/under-reaction is raw sensor
+  //    noise passing straight through. EMA smooths it before it ever touches steering.
+  tiltRaw = (tiltRaw===null) ? g : tiltRaw + (g - tiltRaw)*TILT_SMOOTH;
+
+  // 2) ROBUST NEUTRAL — average the first CAL_SAMPLES readings for "straight ahead" instead
+  //    of trusting one noisy sample (which used to lean the bike permanently to one side).
+  if(tiltCenter===null){
+    calSum += g; calN++;
+    if(calN >= CAL_SAMPLES) tiltCenter = calSum/calN;
+    state.playerTargetX = 0; return;                         // hold dead straight while calibrating
+  }
+
+  let delta = tiltRaw - tiltCenter;                          // smoothed degrees past neutral
+  if(Math.abs(delta) < TILT_DEADZONE_DEG){
+    // 3) AUTO-RECENTER — while the player is holding roughly straight, drift the neutral
+    //    toward the current pose so slow hand/table drift never becomes a permanent lean.
+    tiltCenter += delta*0.02;
+    state.playerTargetX = 0; return;
+  }
   delta = delta>0 ? delta-TILT_DEADZONE_DEG : delta+TILT_DEADZONE_DEG;          // smooth onset just past the deadzone
   const maxDeg = isLandscape() ? TILT_MAX_DEG_LANDSCAPE : TILT_MAX_DEG_PORTRAIT;
-  const norm = THREE.MathUtils.clamp(delta / maxDeg, -1, 1); // -1..+1, full lock at ±maxDeg
-  state.playerTargetX = norm * playHalfWidth;                // full lane at a modest tilt, any lane width
+  let norm = THREE.MathUtils.clamp(delta / maxDeg, -1, 1);   // -1..+1, full lock at ±maxDeg
+  // 4) RESPONSE CURVE — ease-in so small tilts stay calm while max tilt still hits the edge.
+  norm = Math.sign(norm) * Math.pow(Math.abs(norm), TILT_EXPO);
+  state.playerTargetX = norm * playHalfWidth;                // full lane at a firm tilt, any lane width
 }
 // On rotation the steering axis AND the neutral pose change — null the center so the
 // next reading recalibrates, preventing the tilt controls from locking or going dead.
-function recalibrateTilt(){ tiltCenter=null; }
+function recalibrateTilt(){ resetTiltCal(); }
 window.addEventListener("orientationchange", recalibrateTilt);
 if(screen.orientation && screen.orientation.addEventListener) screen.orientation.addEventListener("change", recalibrateTilt);
 // (D7) removed empty setTiltLabel() no-op; the .on class color is the only state cue.
 function enableTilt(){
   window.addEventListener("deviceorientation", onTilt);
-  tiltEnabled = true; tiltCenter = null;
+  tiltEnabled = true; resetTiltCal();
   if(tiltBtn) tiltBtn.classList.add("on");
   try{ localStorage.setItem("xzilla_tilt","1"); }catch(_){}   // persist the toggle preference
 }
@@ -1093,7 +1142,16 @@ function loop(){ requestAnimationFrame(loop); const dt=Math.min(clock.getDelta()
   if(typeof setEnginePitch==="function") setEnginePitch(Math.abs(vx));
 
   if(state.running){
-    state.elapsed+=dt; state.speed=CFG.baseSpeed+state.elapsed*CFG.speedRampPerSec; state.spawnGap=Math.max(CFG.minSpawnGap,CFG.baseSpawnGap-state.elapsed*0.012);
+    state.elapsed+=dt;
+    // GEAR RAMP: accelerating speed with a top-gear cap. rampUnits grows super-linearly
+    // (elapsed·(1+elapsed·curve)) so the late game gets noticeably faster, then holds at the
+    // maxGear cap. Still built from CFG.baseSpeed/speedRampPerSec so the boss-slow & slow-mo
+    // scalers in game.js keep working (they halve both, which halves the whole result).
+    { const capE=CFG.gearSecs*CFG.maxGear, e=Math.min(state.elapsed,capE);
+      state.speed=CFG.baseSpeed+e*(1+e*CFG.speedCurve)*CFG.speedRampPerSec;
+      const g=Math.min(CFG.maxGear,1+Math.floor(state.elapsed/CFG.gearSecs));
+      if(g>state.gear){ state.gear=g; showBanner("GEAR "+g); } }
+    state.spawnGap=Math.max(CFG.minSpawnGap,CFG.baseSpawnGap-state.elapsed*0.012);
     player.position.x+=(state.playerTargetX-player.position.x)*CFG.playerSpeedLerp; player.position.x=THREE.MathUtils.clamp(player.position.x,-playHalfWidth,playHalfWidth);
     state.spawnTimer-=dt; if(state.spawnTimer<=0){ spawn(); state.spawnTimer=state.spawnGap*(0.7+Math.random()*0.6); }
     const catchX=1.85, catchZ=1.6, nearX=catchX+1.05;   // nearX: outer band that still counts as a "by-a-hair" dodge
@@ -1122,13 +1180,14 @@ loop();
 
 /* ============================================================ GAME FLOW */
 function resetGame(){ for(let i=active.length-1;i>=0;i--) freeEntity(active[i]);
-  Object.assign(state,{score:0,lives:CFG.lives,combo:0,kills:0,wave:1,speed:CFG.baseSpeed,spawnGap:CFG.baseSpawnGap,spawnTimer:0,elapsed:0,playerTargetX:0,shake:0,comboUntil:0});
+  Object.assign(state,{score:0,lives:CFG.lives,combo:0,kills:0,wave:1,gear:1,speed:CFG.baseSpeed,spawnGap:CFG.baseSpawnGap,spawnTimer:0,elapsed:0,playerTargetX:0,shake:0,comboUntil:0});
   _lastCombo=0; shieldActive=false; player.position.x=0; renderScore(); renderLives(); renderCombo(); }
 function startGame(){ audioInit(); startMusic(); startEngine(); resetGame();
   document.getElementById("startScreen").classList.add("hidden"); document.getElementById("gameOverScreen").classList.add("hidden");
   document.getElementById("pauseScreen").classList.add("hidden");
   el.hud.classList.remove("hidden"); /* sound toggle is always visible now */ el.vipBadge.style.display=state.vip?"inline-block":"none"; vipGlow.material.opacity=0; state.running=true;
   document.getElementById("pauseBtn").classList.remove("hidden");
+  if(tiltEnabled) resetTiltCal();   // re-neutralize tilt to however the phone is held at run start
   maybeShowTutorial(); }
 /* First-run only: a brief controls hint over the live run. Stored so it never nags again. */
 function maybeShowTutorial(){
@@ -1261,6 +1320,13 @@ async function connectWallet(){ audioInit();
 document.getElementById("connectBtn").addEventListener("click",connectWallet);
 document.getElementById("startBtn").addEventListener("click",startGame);
 document.getElementById("retryBtn").addEventListener("click",startGame);
+// Join the XZILLA Telegram group — opens inside Telegram when running as a Mini App,
+// else a normal new tab on the open web.
+document.getElementById("joinTgBtn").addEventListener("click",()=>{
+  const url="https://t.me/xzilla_memecoin";
+  try{ if(tg && tg.openTelegramLink) tg.openTelegramLink(url); else window.open(url,"_blank"); }
+  catch(_){ try{ window.open(url,"_blank"); }catch(e){} }
+});
 el.sound.addEventListener("click",()=>{ state.soundOn=!state.soundOn; el.sound.textContent=state.soundOn?"🔊":"🔇"; audioInit(); if(masterGain) masterGain.gain.value=state.soundOn?1:0; });
 // Rev the bike ONLY on hover / pointer-enter (a preview cue) — never bound to the
 // click/tap that actually starts the game or connects the wallet. pointerenter unifies
@@ -1270,8 +1336,42 @@ document.querySelectorAll("#startScreen .btn").forEach(b=>{
   b.addEventListener("pointerenter", playRev);
 });
 document.addEventListener("visibilitychange",()=>{ if(document.hidden&&state.running) pauseGame(); });
+
+/* ============================================================ FORCE LANDSCAPE (phones)
+ * Phones must play in landscape. In portrait we show a full-screen animated "rotate your
+ * device" overlay (and pause any live run). Once landscape, we attempt a REAL lock so it
+ * can't flip back: Telegram's native lock inside the Mini App (works on iOS + Android),
+ * else the web Screen Orientation API (Android Chrome; needs fullscreen — best-effort).
+ * iOS Safari on the open web exposes no lock API, so the overlay is the fallback there. */
+(function forceLandscape(){
+  const overlay = document.getElementById("rotateOverlay");
+  if(!overlay) return;
+  const coarse = window.matchMedia("(pointer:coarse)").matches || ("ontouchstart" in window) || navigator.maxTouchPoints>0;
+  if(!coarse) return;                                   // desktop / mouse: never gate on orientation
+  let locked=false;
+  const isPortrait = ()=> (window.innerHeight||0) > (window.innerWidth||0);
+  async function tryLock(){
+    if(locked) return;
+    try{ if(tg && typeof tg.lockOrientation==="function"){ tg.lockOrientation(); locked=true; return; } }catch(_){}   // TMA: locks current (landscape) orientation
+    try{ if(screen.orientation && screen.orientation.lock){ await screen.orientation.lock("landscape"); locked=true; } }catch(_){}   // web: needs fullscreen; ignore if it throws
+  }
+  function update(){
+    if(isPortrait()){
+      overlay.classList.add("show");
+      if(state.running && typeof pauseGame==="function") pauseGame();   // don't run the game behind the prompt
+    } else {
+      overlay.classList.remove("show");
+      tryLock();
+    }
+  }
+  window.addEventListener("resize", update);
+  window.addEventListener("orientationchange", ()=> setTimeout(update,120));
+  if(window.visualViewport) window.visualViewport.addEventListener("resize", update);
+  update();
+})();
+
 document.getElementById("bestScore").textContent=state.best;
 </script>
-<script src="game.js?v=78"></script>
+<script src="game.js?v=80"></script>
 </body>
 </html>
