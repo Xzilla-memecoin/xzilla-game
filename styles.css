@@ -232,16 +232,23 @@
      within 100vh (overflow hidden on the row; the right column caps at 100vh with an
      auto-scroll safety net) so the player never has to scroll to reach START. */
   @media (orientation:landscape) and (max-height:600px){
+    /* padding-top clears the fixed tabbar so the menu never sits under it */
     #startScreen{ flex-direction:row; flex-wrap:nowrap; align-items:center; justify-content:center;
-      gap:22px; padding:8px 22px; padding-top:calc(8px + env(safe-area-inset-top)); overflow:hidden; }
-    #startScreen .heroWrap{ flex:0 1 44%; max-width:44%; max-height:96vh; justify-content:center; }
+      gap:22px; padding:8px 22px; padding-top:calc(58px + env(safe-area-inset-top)); overflow:hidden; }
+    #startScreen .heroWrap{ flex:0 1 42%; max-width:42%; max-height:96vh; justify-content:center; }
     #startScreen .game-title{ font-size:13px; margin-bottom:5px; }
-    #startScreen .heroWrap #heroImg{ width:auto; max-width:100%; max-height:78vh; margin:0; }
-    #startScreen .startCol{ display:flex; flex-direction:column; align-items:center; justify-content:center;
-      flex:1 1 50%; max-width:440px; max-height:100vh; overflow-y:auto; gap:5px; text-align:center; }
-    #startScreen #startBtn{ font-size:12px; padding:13px 22px; }
-    #startScreen #connectBtn{ margin-top:8px !important; font-size:8px; padding:9px 12px; }
-    #startScreen .wallet, #startScreen .status-line{ font-size:9px; margin-top:4px; }
+    #startScreen .heroWrap #heroImg{ width:auto; max-width:100%; max-height:72vh; margin:0; }
+    /* flex-start (not center) so overflow never pushes START up under the tabbar — it stays
+       reachable at the top and the column just scrolls if a short screen can't fit it all. */
+    #startScreen .startCol{ display:flex; flex-direction:column; align-items:center; justify-content:flex-start;
+      flex:1 1 52%; max-width:440px; max-height:calc(100vh - 66px); overflow-y:auto; gap:4px; text-align:center; }
+    #startScreen #startBtn{ font-size:11px; padding:11px 18px; }
+    #startScreen #connectBtn{ margin-top:6px !important; font-size:7px; padding:8px 10px; }
+    #startScreen .wallet, #startScreen .status-line{ font-size:8px; margin-top:3px; min-height:0; }
+    /* keep the invite + Telegram CTAs compact so the whole column fits a short landscape screen */
+    #startScreen .btn.small{ font-size:7px; padding:8px 12px; max-width:230px; }
+    #startScreen #mainInvite, #startScreen #joinTgBtn{ margin-top:8px !important; }
+    #startScreen .invite-hint{ font-size:7px; margin-top:3px; }
     /* In the split layout the action buttons live on the RIGHT, so move the floating
        sound/tilt toggles to the bottom-LEFT (over the non-interactive hero art) where
        they stay completely clear of the menu buttons and wallet text. */
