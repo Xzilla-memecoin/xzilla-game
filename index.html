@@ -456,7 +456,7 @@ window.__LB_API = LEADERBOARD_API;
 const BOT_SHARE_URL       = "https://t.me/RugSmasher_bot/";
 window.__BOT_SHARE_URL = BOT_SHARE_URL;
 
-const CFG = { lives:3, baseSpeed:9, speedRampPerSec:0.18, baseSpawnGap:0.92, minSpawnGap:0.34,
+const CFG = { lives:3, baseSpeed:12, speedRampPerSec:0.18, baseSpawnGap:0.92, minSpawnGap:0.34,
   holderChance:0.32, powerupChance:0.05, scammerPoints:10, vipMultiplier:1.2, playerSpeedLerp:0.30,
   comboWindow:2.6,   // seconds before an un-fed combo decays back to zero
   // SPEED GEARS — the run climbs through 10 gears. gearSecs is how long each gear lasts.
@@ -1372,6 +1372,6 @@ document.addEventListener("visibilitychange",()=>{ if(document.hidden&&state.run
 
 document.getElementById("bestScore").textContent=state.best;
 </script>
-<script src="game.js?v=82"></script>
+<script src="game.js?v=83"></script>
 </body>
 </html>
