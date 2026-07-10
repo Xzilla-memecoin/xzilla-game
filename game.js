@@ -349,8 +349,8 @@ window._adsPayload = "WwogIHsKICAgICJpZCI6ICJ4emlsbGEtaG9tZSIsCiAgICAidGV4dCI6IC
     {id:"cyan",    name:"PAPERHAND ICE", tint:CYAN,   cost:4000},
     {id:"gold",    name:"PUMP GOLD",     tint:GOLD,   cost:9000},
     // RANK REWARDS — earned by reaching a milestone (best score), not bought with XP.
-    {id:"blood",   name:"RUG RED",       tint:RED,    cost:0, rankReq:3500,  rankName:"WHALE WRECKER"},
-    {id:"toxic",   name:"ONCHAIN GLOW",  tint:TEAL,   cost:0, rankReq:12000, rankName:"APEX PREDATOR"}
+    {id:"blood",   name:"RUG RED",       tint:RED,    cost:0, rankReq:16000, rankName:"WHALE WRECKER"},
+    {id:"toxic",   name:"ONCHAIN GLOW",  tint:TEAL,   cost:0, rankReq:68000, rankName:"APEX PREDATOR"}
   ];
   // Recolor the WHOLE Xrider+bike to the skin's color. THREE's material.color only
   // MULTIPLIES the texture (can't brighten → muddy), so instead we bake a per-skin
@@ -605,17 +605,21 @@ window._adsPayload = "WwogIHsKICAgICJpZCI6ICJ4emlsbGEtaG9tZSIsCiAgICAidGV4dCI6IC
 
   /* ----------------------------- leaderboard ------------------------------ */
   /* run-score milestones — purely cosmetic titles, separate from the wallet-holdings VIP tiers */
+  // Thresholds rescaled UP after the upgrade/scoring update (2× ruggers, BOSS HUNTER,
+  // OVERCLOCK, faster gears) inflated scores — the old top rank (18k) was trivial once a
+  // player had upgrades. Early ranks stay gentle for newcomers; the top end stretches so
+  // XZILLA LEGEND (100k) is a real endgame achievement again.
   const SCORE_TITLES = [
-    {score:100,   name:"SCAM SPOTTER"},
-    {score:250,   name:"RUG DODGER"},
-    {score:500,   name:"FUD SLAYER"},
-    {score:1000,  name:"KOL CRUSHER"},
-    {score:2000,  name:"DEGEN DESTROYER"},
-    {score:3500,  name:"WHALE WRECKER"},
-    {score:5500,  name:"CHAIN GUARDIAN"},
-    {score:8000,  name:"KAIJU AWAKENED"},
-    {score:12000, name:"APEX PREDATOR"},
-    {score:18000, name:"XZILLA LEGEND"}
+    {score:300,    name:"SCAM SPOTTER"},
+    {score:900,    name:"RUG DODGER"},
+    {score:2000,   name:"FUD SLAYER"},
+    {score:4500,   name:"KOL CRUSHER"},
+    {score:9000,   name:"DEGEN DESTROYER"},
+    {score:16000,  name:"WHALE WRECKER"},
+    {score:28000,  name:"CHAIN GUARDIAN"},
+    {score:45000,  name:"KAIJU AWAKENED"},
+    {score:68000,  name:"APEX PREDATOR"},
+    {score:100000, name:"XZILLA LEGEND"}
   ];
   function titleForScore(score){
     // Highest tier whose threshold the score actually clears. Scans every entry and
