@@ -18,8 +18,10 @@
 
 const TOP_KEY   = "lb:v1";
 const MAX_KEEP  = 200;
-const MAX_SCORE = 50000;   // sanity ceiling — a higher score on launch day means an exploit script → reject
-const RATE_MS   = 30000;   // minimum ms between accepted submits per user → blocks rapid API spam
+const MAX_SCORE = 1000000; // sanity ceiling — blocks absurd exploit values. Raised from 50k after the
+                           // scoring update (2× ruggers, BOSS HUNTER, OVERCLOCK, faster gears) pushed the
+                           // legit ceiling well past 50k, which was silently rejecting real high scores.
+const RATE_MS   = 30000;   // throttle window — applies ONLY to non-improving resubmits (see /submit)
 
 // $XZILLA SPL mint — the token whose balance sets a player's holder tier/multiplier.
 // Overridable via env.XZILLA_MINT if the mint ever changes.
@@ -98,21 +100,31 @@ export default {
       // (1) SANITY CAP — reject impossible scores instead of recording them.
       if(score > MAX_SCORE) return json({ error: "score_rejected" }, 400, origin);
 
-      // (2) RATE LIMIT — one accepted submit per user per RATE_MS (per-user timestamp in KV).
-      const tsKey = "ts:" + id;
-      const last  = parseInt((await env.LB.get(tsKey)) || "0", 10);
-      const now   = Date.now();
-      if(last && (now - last) < RATE_MS) return json({ error: "rate_limited" }, 429, origin);
-      await env.LB.put(tsKey, String(now));
-
       const list = JSON.parse((await env.LB.get(TOP_KEY)) || "[]");
       const idx  = list.findIndex(e => e.id === id);
-      let changed = false;
-      if(idx >= 0){ if(score > list[idx].score){ list[idx].score = score; list[idx].name = name; changed = true; } }
-      else { list.push({ id, name, score }); changed = true; }
+      const prev = idx >= 0 ? list[idx].score : -1;
+
+      // A genuine NEW PERSONAL BEST is ALWAYS recorded — it must never be dropped just
+      // because it landed soon after the previous run (the client re-posts your best on
+      // every game-over, and short runs/quick retries used to trip the old blanket rate
+      // limiter, losing real high scores). Non-improving resubmits are the spam case, and
+      // they're handled below WITHOUT a write, so no rate limiter is needed for correctness.
+      if(score <= prev){
+        // Not an improvement — throttle churn but still report the player's standing.
+        const tsKey = "ts:" + id, now = Date.now();
+        const last = parseInt((await env.LB.get(tsKey)) || "0", 10);
+        if(!(last && (now - last) < RATE_MS)) await env.LB.put(tsKey, String(now));
+        const sorted = list.slice().sort((a, b) => b.score - a.score);
+        const rank = sorted.findIndex(e => e.id === id) + 1;
+        return json({ ok: true, rank, top: sorted.slice(0, 10).map(e => ({ name: e.name, score: e.score })) }, 200, origin);
+      }
+
+      // record the new best
+      if(idx >= 0){ list[idx].score = score; list[idx].name = name; }
+      else { list.push({ id, name, score }); }
       list.sort((a, b) => b.score - a.score);
       const trimmed = list.slice(0, MAX_KEEP);
-      if(changed) await env.LB.put(TOP_KEY, JSON.stringify(trimmed));   // only write the board when it actually changes
+      await env.LB.put(TOP_KEY, JSON.stringify(trimmed));
       const rank = trimmed.findIndex(e => e.id === id) + 1;
       return json({ ok: true, rank, top: trimmed.slice(0, 10).map(e => ({ name: e.name, score: e.score })) }, 200, origin);
     }
