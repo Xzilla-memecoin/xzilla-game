@@ -4,7 +4,10 @@
   }
   *{ box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
   html,body{ margin:0; padding:0; width:100%; height:100%; height:100dvh; overflow:hidden; background:#070318;
-    overscroll-behavior:none; touch-action:none; user-select:none; -webkit-user-select:none; }
+    overscroll-behavior:none; touch-action:none; user-select:none; -webkit-user-select:none;
+    /* Stop Android font-boosting from inflating button text (why buttons looked too big on
+       Android/OnePlus but fine on iOS). Pins text to the CSS-specified sizes on all platforms. */
+    -webkit-text-size-adjust:100%; -moz-text-size-adjust:100%; text-size-adjust:100%; }
   /* The container is sized precisely by JS (resize() in index.html) to the TRUE visible
      viewport every frame, so the canvas always exactly fills the visible area — never
      taller than the screen (which would crop it and read as "zoomed"). The vw/dvh values
