@@ -1555,7 +1555,7 @@ window._adsPayload = "WwogIHsKICAgICJpZCI6ICJ4emlsbGEtaG9tZSIsCiAgICAidGV4dCI6IC
     // cascading every few seconds late-game. Floor the spacing with a real TIME cooldown:
     // no new boss until MIN_BOSS_GAP seconds after the last one was defeated.
     let lastBossEnd = 0;
-    const MIN_BOSS_GAP = 15;   // seconds of normal play guaranteed between boss fights
+    const MIN_BOSS_GAP = 30;   // seconds of normal play guaranteed between boss fights
     window.spawn = function(){
       // every 4th wave -> rug boss (replaces plain whale cadence). A 3s warning runs
       // first (rugWarnUntil) during which every ad-screen flashes "RUG INCOMING".
@@ -2014,11 +2014,14 @@ window._adsPayload = "WwogIHsKICAgICJpZCI6ICJ4emlsbGEtaG9tZSIsCiAgICAidGV4dCI6IC
      *  near-miss scammers in slightly when DIAMOND GRIP is owned.             *
      * ===================================================================== */
     (function(){
-      const grip = window.__catchBonus||0;
-      if(grip<=0) return;
+      // ALWAYS install the hook and read __catchBonus LIVE each frame. The old code captured
+      // grip ONCE at load and skipped installing the hook when it was 0 — so DIAMOND GRIP bought
+      // (or upgraded) mid-session did nothing until a page reload. Now it applies immediately.
       const prevF = window.__frame;
       window.__frame = function(dt){
         prevF(dt);
+        const grip = window.__catchBonus||0;
+        if(grip<=0) return;
         // nudge scammers near the catch line toward the player a touch
         for(const a of active){ if(a.type===TYPE.SCAMMER && !a.dead){
           const z=a.sprite.position.z;
