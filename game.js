@@ -1251,7 +1251,12 @@ window._adsPayload = "WwogIHsKICAgICJpZCI6ICJ4emlsbGEtaG9tZSIsCiAgICAidGV4dCI6IC
     _gameOver();
     // economy + missions + leaderboard
     run.score=Math.max(run.score, state.score);
-    // run earnings were already added live during play; just persist now (D5: removed `econ.tokens += 0;` no-op)
+    // SCORE BONUS — XP used to come only from kill/boss COUNT, so a high-score run driven by
+    // combos & multipliers could earn LESS XP than a grindy low-score run. Reward the actual
+    // run score too (×0.10) so a better run always pays more XP.
+    const scoreXP = Math.round(run.score * 0.10);
+    if(scoreXP > 0){ econ.tokens += scoreXP; toast("Score bonus +"+fmt(scoreXP)+" XP", GOLD); }
+    // (kill/boss earnings were already added live during play; persist everything now)
     saveEcon();
     missions.forEach(m=>{
       if(m.done) return;
