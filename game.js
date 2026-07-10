@@ -1546,6 +1546,11 @@ window._adsPayload = "WwogIHsKICAgICJpZCI6ICJ4emlsbGEtaG9tZSIsCiAgICAidGV4dCI6IC
      *  SPAWN OVERRIDE — wider enemy roster + waves + power variety            *
      * ===================================================================== */
     let rugPending=false, nextBossWave=4, rugWarnUntil=0;   // first boss at wave 4, then 4 waves after each defeat
+    // Waves advance off SCORE, which the upgrade update inflated hard — so bosses were
+    // cascading every few seconds late-game. Floor the spacing with a real TIME cooldown:
+    // no new boss until MIN_BOSS_GAP seconds after the last one was defeated.
+    let lastBossEnd = 0;
+    const MIN_BOSS_GAP = 15;   // seconds of normal play guaranteed between boss fights
     window.spawn = function(){
       // every 4th wave -> rug boss (replaces plain whale cadence). A 3s warning runs
       // first (rugWarnUntil) during which every ad-screen flashes "RUG INCOMING".
@@ -1637,6 +1642,7 @@ window._adsPayload = "WwogIHsKICAgICJpZCI6ICJ4emlsbGEtaG9tZSIsCiAgICAidGV4dCI6IC
       // fight, which inflates the wave; without this gate it would stack a second boss
       // that spawns the instant the first dies. nextBossWave advances on defeat (below).
       if(state.wave > prevWave && state.wave >= nextBossWave
+         && nowS() >= lastBossEnd + MIN_BOSS_GAP     // enforce a real time gap between fights
          && !rugPending && !active.some(a=>a.type===TYPE.RUGBOSS||a.type===TYPE.BOSS)){
         rugPending=true; rugWarnUntil=nowS()+3; window.__rugWarn=true;   // 3s "RUG INCOMING" ad-screen warning before the boss
         window.__rugBossAt=rugWarnUntil;   // absolute time the boss will land — the red danger grid fades in 2s before this
@@ -1792,6 +1798,7 @@ window._adsPayload = "WwogIHsKICAgICJpZCI6ICJ4emlsbGEtaG9tZSIsCiAgICAidGV4dCI6IC
       // post-reward score so the +900 (and farmed scammer points) can't immediately
       // re-trigger another boss.
       nextBossWave = (1 + Math.floor(state.score/150)) + 4;
+      lastBossEnd = nowS();   // start the MIN_BOSS_GAP cooldown before the next boss can schedule
       e.dead=true; freeEntity(e); updateHUDtokens();
       return true;
     }
@@ -2025,7 +2032,7 @@ window._adsPayload = "WwogIHsKICAgICJpZCI6ICJ4emlsbGEtaG9tZSIsCiAgICAidGV4dCI6IC
     function set2BeforeRun(){
       applyUpgrades();
       renderLives();                 // reflect new max HP
-      px.slowUntil=px.x2Until=px.magUntil=0; rugPending=false; nextBossWave=4; rugWarnUntil=0; window.__rugWarn=false; window.__rugBossAt=0;
+      px.slowUntil=px.x2Until=px.magUntil=0; rugPending=false; nextBossWave=4; rugWarnUntil=0; lastBossEnd=0; window.__rugWarn=false; window.__rugBossAt=0;
       hideRugBar();
       if(lvl("start")>0){ shieldActive=true; }
       if(lvl("warm")>0){ state.combo = 1 + lvl("warm"); if(state.combo>run.combo) run.combo=state.combo; renderCombo(); }   // WARM ENGINE: open at combo ×(1+lvl)
