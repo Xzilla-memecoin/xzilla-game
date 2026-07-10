@@ -2668,7 +2668,15 @@ window._adsPayload = "WwogIHsKICAgICJpZCI6ICJ4emlsbGEtaG9tZSIsCiAgICAidGV4dCI6IC
         lines.forEach((ln,i)=>x.fillText(ln,W/2,y0+i*lh));
         x.shadowBlur=0; scr.tex.needsUpdate=true;
       }
-      // Render the live global TOP 5 onto a square ad-screen canvas (same neon vocabulary as
+      // Short, rounded score for the tight billboard: WHOLE K (rounded), 1-decimal M.
+      //   81,430 -> "81K"   ·   81,530 -> "82K"   ·   82,000 -> "82K"   ·   1.24M -> "1.2M"
+      function abbrScore(n){
+        n=Math.round(n)||0;
+        if(n>=1e6) return (n/1e6).toFixed(1).replace(/\.0$/,"")+"M";
+        if(n>=1e3) return (n/1e3).toFixed(0)+"K";
+        return ""+n;
+      }
+      // Render the live global TOP 3 onto a square ad-screen canvas (same neon vocabulary as
       // drawAd). Only called on data change, so there's no per-frame canvas work.
       function drawLeaderboard(scr, list){
         const x=scr.ctx, W=scr.canvas.width, H=scr.canvas.height;
@@ -2697,16 +2705,24 @@ window._adsPayload = "WwogIHsKICAgICJpZCI6ICJ4emlsbGEtaG9tZSIsCiAgICAidGV4dCI6IC
         for(let i=0;i<3;i++){
           const cy=y0+rowH*i+rowH/2, col=medal[i], e=rows[i];
           // medal rank badge (circle)
-          x.beginPath(); x.arc(26,cy,14,0,Math.PI*2); x.fillStyle=col;
+          x.beginPath(); x.arc(24,cy,13,0,Math.PI*2); x.fillStyle=col;
           x.shadowColor=col; x.shadowBlur=10; x.fill(); x.shadowBlur=0;
-          x.fillStyle="#0a0518"; x.textAlign="center"; x.font="bold 15px 'Orbitron',sans-serif";
-          x.fillText(String(i+1), 26, cy+1);
+          x.fillStyle="#0a0518"; x.textAlign="center"; x.font="bold 13px 'Orbitron',sans-serif";
+          x.fillText(String(i+1), 24, cy+1);
           if(!e) continue;
-          let name=String(e.name||"—"); if(name.length>10) name=name.slice(0,9)+"…";
-          x.textAlign="left"; x.fillStyle="#eaf2ff"; x.font="bold 17px 'Orbitron',sans-serif";
-          x.fillText(name, 48, cy);
-          x.textAlign="right"; x.fillStyle=col; x.font="bold 16px 'Orbitron',sans-serif";
-          x.fillText(fmt(e.score||0), W-14, cy);
+          // Draw the (short) score FIRST, measure it, then fit the name in the leftover width so
+          // the two can never overlap no matter how long the name or score is.
+          const scoreStr=abbrScore(e.score||0);
+          x.textAlign="right"; x.fillStyle=col; x.font="bold 15px 'Orbitron',sans-serif";
+          x.fillText(scoreStr, W-12, cy);
+          const nameX=42, avail=(W-12)-x.measureText(scoreStr).width-8-nameX;   // 8px gap before score
+          x.textAlign="left"; x.fillStyle="#eaf2ff"; x.font="bold 15px 'Orbitron',sans-serif";
+          let name=String(e.name||"—");
+          if(x.measureText(name).width>avail){
+            while(name.length>1 && x.measureText(name+"…").width>avail) name=name.slice(0,-1);
+            name+="…";
+          }
+          x.fillText(name, nameX, cy);
         }
         scr.tex.needsUpdate=true;
       }
