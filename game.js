@@ -2537,6 +2537,10 @@ window._adsPayload = "WwogIHsKICAgICJpZCI6ICJ4emlsbGEtaG9tZSIsCiAgICAidGV4dCI6IC
 
       /* ---------- reactive ad-screen (canvas mounted on a tower) ---------- */
       const adScreens=[];
+      // LEADERBOARD BILLBOARD — one 1:1 (square) screen shows the live global TOP 5 instead of
+      // cycling ads. Data comes from the same Worker /top endpoint the game already uses.
+      const LB_API=(window.__LB_API||"").replace(/\/+$/,"");
+      let lbTop=null, lbDirty=false, lbClaimed=false;
       // Ad screens come in 3 aspect ratios, grouped so the admin can target each:
       //   wide 2:1 (small buildings) · square 1:1 (big) · tall 9:16 portrait (big).
       const SCREEN_KINDS = {
@@ -2664,6 +2668,48 @@ window._adsPayload = "WwogIHsKICAgICJpZCI6ICJ4emlsbGEtaG9tZSIsCiAgICAidGV4dCI6IC
         lines.forEach((ln,i)=>x.fillText(ln,W/2,y0+i*lh));
         x.shadowBlur=0; scr.tex.needsUpdate=true;
       }
+      // Render the live global TOP 5 onto a square ad-screen canvas (same neon vocabulary as
+      // drawAd). Only called on data change, so there's no per-frame canvas work.
+      function drawLeaderboard(scr, list){
+        const x=scr.ctx, W=scr.canvas.width, H=scr.canvas.height;
+        // gold-tinted vignette background so it reads as "special", not another ad
+        x.fillStyle="#0a0518"; x.fillRect(0,0,W,H);
+        const bg=x.createRadialGradient(W/2,H*0.42,8,W/2,H/2,W*0.78);
+        bg.addColorStop(0,"rgba(255,210,63,0.12)"); bg.addColorStop(1,"rgba(5,3,15,0)");
+        x.fillStyle=bg; x.fillRect(0,0,W,H);
+        // double gold frame
+        x.strokeStyle=GOLD; x.lineWidth=6; x.strokeRect(5,5,W-10,H-10);
+        x.strokeStyle="rgba(255,210,63,0.35)"; x.lineWidth=2; x.strokeRect(11,11,W-22,H-22);
+        x.textBaseline="middle"; x.textAlign="center";
+        // header + subtitle
+        x.fillStyle=GOLD; x.shadowColor=GOLD; x.shadowBlur=14;
+        x.font="bold "+Math.round(W/11)+"px 'Press Start 2P',monospace";
+        x.fillText("TOP 3", W/2, 30); x.shadowBlur=0;
+        x.fillStyle="#ffe9a8"; x.font="14px 'Orbitron',sans-serif";
+        x.fillText("★ GLOBAL RANKS ★", W/2, 54);
+        const rows=(list&&list.length)?list:null;
+        if(!rows){
+          x.fillStyle="#9fb6c9"; x.font="14px 'Orbitron',sans-serif";
+          x.fillText(LB_API?"LOADING…":"—", W/2, H*0.66);
+          scr.tex.needsUpdate=true; return;
+        }
+        const y0=76, rowH=(H-y0-14)/3, medal=["#ffd23f","#dfe7f0","#ff9a3a"];
+        for(let i=0;i<3;i++){
+          const cy=y0+rowH*i+rowH/2, col=medal[i], e=rows[i];
+          // medal rank badge (circle)
+          x.beginPath(); x.arc(26,cy,14,0,Math.PI*2); x.fillStyle=col;
+          x.shadowColor=col; x.shadowBlur=10; x.fill(); x.shadowBlur=0;
+          x.fillStyle="#0a0518"; x.textAlign="center"; x.font="bold 15px 'Orbitron',sans-serif";
+          x.fillText(String(i+1), 26, cy+1);
+          if(!e) continue;
+          let name=String(e.name||"—"); if(name.length>10) name=name.slice(0,9)+"…";
+          x.textAlign="left"; x.fillStyle="#eaf2ff"; x.font="bold 17px 'Orbitron',sans-serif";
+          x.fillText(name, 48, cy);
+          x.textAlign="right"; x.fillStyle=col; x.font="bold 16px 'Orbitron',sans-serif";
+          x.fillText(fmt(e.score||0), W-14, cy);
+        }
+        scr.tex.needsUpdate=true;
+      }
       function mountScreen(group, w, faceY, kind){
         kind = SCREEN_KINDS[kind] ? kind : "wide";
         const K = SCREEN_KINDS[kind];
@@ -2679,8 +2725,13 @@ window._adsPayload = "WwogIHsKICAgICJpZCI6ICJ4emlsbGEtaG9tZSIsCiAgICAidGV4dCI6IC
           new THREE.MeshBasicMaterial({map:scr.tex,transparent:true,depthWrite:false,fog:true}));
         m.position.set(0, faceY, 0);   // z offset applied by caller via group depth
         m._scr=scr; m._group=kind; m._t=Math.random()*4; m._mode="msg";
+        // Dedicate the FIRST square (1:1) screen to the live TOP-5 leaderboard (if the board API
+        // is configured); every other screen keeps cycling ads as before.
+        if(kind==="square" && !lbClaimed && LB_API){ m._lb=true; m._mode="lb"; lbClaimed=true;
+          m._baseSc=1.22; m.scale.set(1.22,1.22,1); }   // bigger than ad screens so it stands out
         const grp=groupFor(kind); m._msg=(Math.random()*grp.m.length)|0;
-        drawAd(scr, grp.m[m._msg], grp.c[m._msg]||CYAN, grp.img[m._msg]);
+        if(m._lb) drawLeaderboard(scr, lbTop);
+        else drawAd(scr, grp.m[m._msg], grp.c[m._msg]||CYAN, grp.img[m._msg]);
         group.add(m); adScreens.push(m);
         return m;
       }
@@ -2777,7 +2828,8 @@ window._adsPayload = "WwogIHsKICAgICJpZCI6ICJ4emlsbGEtaG9tZSIsCiAgICAidGV4dCI6IC
           lastSig = sig;
           AD_GROUPS.wide=W; AD_GROUPS.square=S; AD_GROUPS.tall=T;
           [W,S,T].forEach(g=>g.img.forEach(adImage));   // warm image caches
-          for(const s of adScreens){ const grp=groupFor(s._group); if(!grp.m.length) continue;
+          for(const s of adScreens){ if(s._lb) continue;   // leave the leaderboard billboard alone
+            const grp=groupFor(s._group); if(!grp.m.length) continue;
             s._msg=s._msg%grp.m.length; s._t=0;
             drawAd(s._scr, grp.m[s._msg], grp.c[s._msg]||CYAN, grp.img[s._msg]); }
           return true;
@@ -2795,6 +2847,19 @@ window._adsPayload = "WwogIHsKICAgICJpZCI6ICJ4emlsbGEtaG9tZSIsCiAgICAidGV4dCI6IC
         const pollAds = ()=>{ if(!document.hidden) tryUrl(ADS_WORKER).then(d=>{ if(d) applyAds(d); }).catch(()=>{}); };
         setInterval(pollAds, 60000);
         document.addEventListener("visibilitychange", ()=>{ if(!document.hidden) pollAds(); });
+
+        // LEADERBOARD BILLBOARD — poll the global TOP 5 and flag a redraw when it changes.
+        function fetchLbTop(){
+          if(!LB_API) return;
+          fetch(LB_API+"/top?t="+Date.now(),{cache:"no-store"}).then(r=>r.ok?r.json():null).then(d=>{
+            if(d && Array.isArray(d.top)){ lbTop=d.top.slice(0,3); lbDirty=true; }
+          }).catch(()=>{});
+        }
+        if(LB_API){
+          fetchLbTop();
+          setInterval(()=>{ if(!document.hidden) fetchLbTop(); }, 60000);
+          document.addEventListener("visibilitychange", ()=>{ if(!document.hidden) fetchLbTop(); });
+        }
       })();
 
       /* ---------- slow parallax silhouette layers ---------- */
@@ -2833,6 +2898,13 @@ window._adsPayload = "WwogIHsKICAgICJpZCI6ICJ4emlsbGEtaG9tZSIsCiAgICAidGV4dCI6IC
         const combo=state.combo||0;
         const warn = boss || !!window.__rugWarn;   // flash during the 3s pre-warning AND the fight
         for(const s of adScreens){ s._t+=dt;
+          if(s._lb){   // leaderboard billboard — always shows the live TOP 3 (never the ad cycle/boss flash)
+            s.material.opacity=1;
+            const base=s._baseSc||1, p=base*(1+Math.sin(t*2.2)*0.045);   // gentle breathing pulse draws the eye
+            s.scale.set(p,p,1);
+            if(lbDirty || s._mode!=="lb"){ s._mode="lb"; drawLeaderboard(s._scr, lbTop); lbDirty=false; }
+            continue;
+          }
           if(warn){
             if(s._mode!=="boss"){ s._mode="boss"; drawAd(s._scr,"RUG INCOMING",RED); }
             s.material.opacity=0.6+0.4*Math.sin(t*12);
