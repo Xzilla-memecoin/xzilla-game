@@ -456,7 +456,7 @@ window.__LB_API = LEADERBOARD_API;
 const BOT_SHARE_URL       = "https://t.me/RugSmasher_bot/";
 window.__BOT_SHARE_URL = BOT_SHARE_URL;
 
-const CFG = { lives:3, baseSpeed:12, speedRampPerSec:0.18, baseSpawnGap:0.92, minSpawnGap:0.34,
+const CFG = { lives:3, baseSpeed:14.4, speedRampPerSec:0.18, baseSpawnGap:0.92, minSpawnGap:0.34,
   holderChance:0.32, powerupChance:0.05, scammerPoints:10, vipMultiplier:1.2, playerSpeedLerp:0.30,
   comboWindow:2.6,   // seconds before an un-fed combo decays back to zero
   // SPEED GEARS — the run climbs through 10 gears. gearSecs is how long each gear lasts.
@@ -1143,11 +1143,12 @@ function loop(){ requestAnimationFrame(loop); const dt=Math.min(clock.getDelta()
 
   if(state.running){
     state.elapsed+=dt;
-    // GEAR RAMP: accelerating speed with a top-gear cap. rampUnits grows super-linearly
-    // (elapsed·(1+elapsed·curve)) so the late game gets noticeably faster, then holds at the
-    // maxGear cap. Still built from CFG.baseSpeed/speedRampPerSec so the boss-slow & slow-mo
-    // scalers in game.js keep working (they halve both, which halves the whole result).
-    { const capE=CFG.gearSecs*CFG.maxGear, e=Math.min(state.elapsed,capE);
+    // GEAR RAMP: accelerating speed with NO cap — the run keeps getting faster forever until
+    // game over. rampUnits grows super-linearly (elapsed·(1+elapsed·curve)) so the late game
+    // gets noticeably faster and never plateaus. Still built from CFG.baseSpeed/speedRampPerSec
+    // so the boss-slow & slow-mo scalers in game.js keep working (they halve both, which halves
+    // the whole result). Only the GEAR banner is capped at maxGear so it stops spamming.
+    { const e=state.elapsed;
       state.speed=CFG.baseSpeed+e*(1+e*CFG.speedCurve)*CFG.speedRampPerSec;
       const g=Math.min(CFG.maxGear,1+Math.floor(state.elapsed/CFG.gearSecs));
       if(g>state.gear){ state.gear=g; showBanner("GEAR "+g); } }
@@ -1372,6 +1373,6 @@ document.addEventListener("visibilitychange",()=>{ if(document.hidden&&state.run
 
 document.getElementById("bestScore").textContent=state.best;
 </script>
-<script src="game.js?v=86"></script>
+<script src="game.js?v=87"></script>
 </body>
 </html>

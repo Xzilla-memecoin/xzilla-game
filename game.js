@@ -1555,7 +1555,7 @@ window._adsPayload = "WwogIHsKICAgICJpZCI6ICJ4emlsbGEtaG9tZSIsCiAgICAidGV4dCI6IC
     // cascading every few seconds late-game. Floor the spacing with a real TIME cooldown:
     // no new boss until MIN_BOSS_GAP seconds after the last one was defeated.
     let lastBossEnd = 0;
-    const MIN_BOSS_GAP = 30;   // seconds of normal play guaranteed between boss fights
+    const MIN_BOSS_GAP = 45;   // seconds of normal play guaranteed between boss fights
     window.spawn = function(){
       // every 4th wave -> rug boss (replaces plain whale cadence). A 3s warning runs
       // first (rugWarnUntil) during which every ad-screen flashes "RUG INCOMING".
