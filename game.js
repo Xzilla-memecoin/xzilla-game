@@ -1589,15 +1589,18 @@ window._adsPayload = "WwogIHsKICAgICJpZCI6ICJ4emlsbGEtaG9tZSIsCiAgICAidGV4dCI6IC
       // decoy airdrop
       cum += wp.decoyChance;
       if(r<cum){ e.type=TYPE.DECOY; e.sprite.material=matDecoy; place(2.5); return; }
-      // holder (do-not-hit)
+      // holder (do-not-hit) — SUPPRESSED during a boss fight so the boss and its thrown
+      // projectiles are the only hazard on the field; the holder probability mass falls
+      // through to a scammer instead of spawning a friendly you must dodge.
       cum += wp.holderChance;
-      if(r<cum){ e.type=TYPE.HOLDER; e.sprite.material=myHolderMat; place(2.7); return; }
+      if(r<cum && !bossOnField()){ e.type=TYPE.HOLDER; e.sprite.material=myHolderMat; place(2.7); return; }
       // default scammer — RUG RADAR biases the mix toward the high-value RUGGER (index 1)
       e.type=TYPE.SCAMMER;
       let _mi=(Math.random()*myScammerMats.length)|0;
       if(Math.random() < (window.__rugChance||0)) _mi=1;
       e.sprite.material=myScammerMats[_mi];
       place(2.8);
+      e._rugger=(_mi===1); e._threw=false;   // ruggers can lob "empty promises" (see updateThrows)
     };
 
     function spawnRug(){
@@ -1785,7 +1788,7 @@ window._adsPayload = "WwogIHsKICAgICJpZCI6ICJ4emlsbGEtaG9tZSIsCiAgICAidGV4dCI6IC
       run.score=Math.max(run.score,state.score);
       popup(p,"+"+gain,GOLD); bigBanner("RUG SHREDDED");
       try{sfx.power();}catch(_){}
-      hideRugBar(); clearBullets(); gunOff();
+      hideRugBar(); clearBullets(); clearThrows(); gunOff();
       // The boss's death shockwave clears every scammer still on the field — and each
       // one now COUNTS toward your combo/kills/score, exactly like shredding it. Before,
       // the boss silently deleted them, robbing you of the combo you'd otherwise build.
@@ -1852,6 +1855,126 @@ window._adsPayload = "WwogIHsKICAgICJpZCI6ICJ4emlsbGEtaG9tZSIsCiAgICAidGV4dCI6IC
         }
         if(bossKilled) break;   // clearBullets() already flushed the pool
         if(hit){ burst(b.position.x,b.position.y,b.position.z,GOLD,4); freeBullet(b); }
+      }
+    };
+
+    /* ===================================================================== *
+     *  THROWN PROJECTILES                                                     *
+     *  RUG BOSS hurls bearish RED CANDLES (lethal — dodge or lose a life);    *
+     *  RUGGERS lob "empty promises" buzzword bubbles (non-lethal — they only  *
+     *  break your combo and shove you). Both fly from the thrower toward the   *
+     *  player's lane; you dodge by steering. Own sprite pool, mirrors CANNON.  *
+     * ===================================================================== */
+    const THROWS = { pool:[], live:[] };
+    const PROMO_WORDS = ["SOON™","WEN MOON","100X","TRUST ME","ROADMAP","NGMI"];
+    const THROW_CANDLE_VZ = 22;   // world units/sec toward the player (lethal boss shot)
+    const THROW_PROMO_VZ  = 17;   // slower nuisance lob from ruggers
+    let _candleMat=null, _promoMats=null, candleCd=0.9, promoCd=1.2;
+
+    function candleMat(){
+      if(_candleMat) return _candleMat;
+      // Art: images/candlestick.png — relative path so it loads locally AND live (the file
+      // ships in the repo). The procedural red candle below is only the graceful fallback if
+      // the image ever fails to load.
+      _candleMat = spriteMatURL("images/candlestick.png", (x,S)=>{
+        x.clearRect(0,0,S,S); const cx=S/2;
+        x.strokeStyle="#ff3b5c"; x.lineWidth=S*0.05;                 // wick
+        x.beginPath(); x.moveTo(cx,S*0.07); x.lineTo(cx,S*0.93); x.stroke();
+        const bw=S*0.44, bh=S*0.52, bx=cx-bw/2, by=S*0.24;          // red bearish body
+        const g=x.createLinearGradient(bx,by,bx,by+bh);
+        g.addColorStop(0,"#ff6480"); g.addColorStop(1,"#b70f30");
+        x.fillStyle=g; x.fillRect(bx,by,bw,bh);
+        x.strokeStyle="#ffd0da"; x.lineWidth=S*0.022; x.strokeRect(bx,by,bw,bh);
+        x.fillStyle="#fff"; x.font="bold "+(S*0.3)+"px Orbitron, sans-serif";
+        x.textAlign="center"; x.textBaseline="middle"; x.fillText("↓",cx,by+bh/2);
+      }, 128);
+      return _candleMat;
+    }
+    function promoMats(){
+      if(_promoMats) return _promoMats;
+      _promoMats = PROMO_WORDS.map(word => spriteMat((x,S)=>{
+        x.clearRect(0,0,S,S);
+        const w=S*0.84, h=S*0.56, bx=(S-w)/2, by=S*0.13, r=S*0.13;   // speech bubble
+        x.fillStyle="rgba(14,9,36,0.94)"; x.strokeStyle="#8b5cff"; x.lineWidth=S*0.035;
+        roundRect(x,bx,by,w,h,r); x.fill(); x.stroke();
+        x.beginPath(); x.moveTo(S*0.40,by+h-2); x.lineTo(S*0.5,by+h+S*0.15); x.lineTo(S*0.60,by+h-2);
+        x.closePath(); x.fillStyle="rgba(14,9,36,0.94)"; x.fill();   // bubble tail
+        x.fillStyle="#cdb6ff"; x.textAlign="center"; x.textBaseline="middle";
+        let fs=S*0.2; x.font="bold "+fs+"px Orbitron, sans-serif";   // shrink to fit
+        while(x.measureText(word).width > w*0.84 && fs>S*0.09){ fs-=2; x.font="bold "+fs+"px Orbitron, sans-serif"; }
+        x.fillText(word, S*0.5, by+h/2);
+      }, 128));
+      return _promoMats;
+    }
+
+    function getThrow(mat){
+      let t=THROWS.pool.pop();
+      if(!t){ t=new THREE.Sprite(mat); scene.add(t); } else t.material=mat;
+      t.visible=true; THROWS.live.push(t); return t;
+    }
+    function freeThrow(t){ const i=THROWS.live.indexOf(t); if(i<0) return; t.visible=false; THROWS.live.splice(i,1); THROWS.pool.push(t); }
+    function clearThrows(){ for(let i=THROWS.live.length-1;i>=0;i--) freeThrow(THROWS.live[i]); }
+
+    // Aim a thrown sprite at the player's current lane, under-leading by `lead` (<1) so
+    // steering reliably dodges it instead of it being a guaranteed hit.
+    function aimThrow(t, vz, lead){
+      const dz=Math.max(4, PLAYER_Z - t.position.z), eta=dz/vz;
+      const aimX=THREE.MathUtils.clamp(player.position.x,-playHalfWidth,playHalfWidth);
+      t._vx=((aimX - t.position.x)/eta)*lead; t._vz=vz;
+    }
+    function throwCandle(boss){
+      if(THROWS.live.length>=6) return;
+      const t=getThrow(candleMat()); t.scale.set(2.1,2.1,1);
+      const bp=boss.sprite.position; t.position.set(bp.x,1.2,bp.z+1.6);
+      aimThrow(t, THROW_CANDLE_VZ, 0.85); t._lethal=true;
+      burst(t.position.x,t.position.y,t.position.z,RED,6);
+      try{ window.__buzz && window.__buzz([20],"warning"); }catch(_){}
+    }
+    function throwPromo(rug){
+      if(THROWS.live.length>=6) return;
+      const t=getThrow(promoMats()[(Math.random()*_promoMats.length)|0]); t.scale.set(2.4,1.6,1);
+      const rp=rug.sprite.position; t.position.set(rp.x,1.5,rp.z+0.6);
+      aimThrow(t, THROW_PROMO_VZ, 0.8); t._lethal=false; rug._threw=true;
+    }
+
+    window.updateThrows = function(dt){
+      if(!state.running){ if(THROWS.live.length) clearThrows(); candleCd=0.9; promoCd=1.2; return; }
+      const boss=bossOnField();
+
+      // boss red-candle barrage (only while a boss lives)
+      if(boss){ candleCd-=dt; if(candleCd<=0){ throwCandle(boss); candleCd=1.5+Math.random()*0.9; } }
+      else candleCd=0.9;
+
+      // rugger "empty promises" — one mid-field rugger that hasn't thrown yet lobs a bubble
+      promoCd-=dt;
+      if(promoCd<=0){
+        let rug=null;
+        for(const a of active){
+          if(a && !a.dead && a.type===TYPE.SCAMMER && a._rugger && !a._threw){
+            const z=a.sprite.position.z;
+            if(z>SPAWN_Z+6 && z<PLAYER_Z-6){ rug=a; break; }
+          }
+        }
+        if(rug){ throwPromo(rug); promoCd=1.0+Math.random()*1.0; } else promoCd=0.4;
+      }
+
+      // advance + player collision
+      const R=1.35;
+      for(let i=THROWS.live.length-1;i>=0;i--){ const t=THROWS.live[i];
+        t.position.x+=t._vx*dt; t.position.z+=t._vz*dt;
+        if(t.position.z>PLAYER_Z+2){ freeThrow(t); continue; }          // sailed past
+        if(Math.abs(t.position.z-PLAYER_Z)<R && Math.abs(t.position.x-player.position.x)<R){
+          const p=t.position.clone();
+          if(t._lethal){
+            if(shieldActive){ shieldActive=false; burst(p.x,p.y,p.z,TEAL,14); popup(p,"SHIELD!",TEAL); try{sfx.power();}catch(_){} }
+            else { popup(p,"RED CANDLE!",RED); flashColor("rgba(255,59,92,.4)",0.5); loseLife(p); }
+          } else {
+            if(state.combo>0){ state.combo=0; renderCombo(); }         // empty promise breaks your combo
+            burst(p.x,p.y,p.z,"#8b5cff",10); popup(p,"EMPTY PROMISE","#b79bff"); shake(0.35);
+            try{ window.__buzz && window.__buzz([25],"warning"); }catch(_){}
+          }
+          freeThrow(t); continue;
+        }
       }
     };
 
@@ -1983,6 +2106,7 @@ window._adsPayload = "WwogIHsKICAgICJpZCI6ICJ4emlsbGEtaG9tZSIsCiAgICAidGV4dCI6IC
         if(bar && bar.style.display!=="none" && !active.some(a=>a.type===TYPE.RUGBOSS||a.type===TYPE.BOSS)) hideRugBar(); }
       // TEST: auto-cannon — fire + advance + collide tracer rounds while a boss lives
       if(window.updateCannon) window.updateCannon(dt);
+      if(window.updateThrows) window.updateThrows(dt);
       // active-buff HUD ticker
       renderBuffs(t);
     };

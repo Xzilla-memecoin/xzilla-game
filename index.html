@@ -463,7 +463,7 @@ const CFG = { lives:3, baseSpeed:14.4, speedRampPerSec:0.18, baseSpawnGap:0.92, 
   // Gears 1–5 (first minute) mirror the old gentle ramp; gears 6–10 (added) accelerate it
   // for a punchier late game, capped at the top gear so it stays playable. speedCurve is the
   // super-linear curvature — 0 would be the old plain linear ramp.
-  gearSecs:12, maxGear:10, speedCurve:0.0032 };
+  gearSecs:12, maxGear:12, speedCurve:0.0032 };
 
 /* ============================================================ STATE */
 const state = { running:false, score:0, lives:CFG.lives, combo:0, kills:0, wave:1, gear:1, vip:false, best:0,
@@ -1143,12 +1143,12 @@ function loop(){ requestAnimationFrame(loop); const dt=Math.min(clock.getDelta()
 
   if(state.running){
     state.elapsed+=dt;
-    // GEAR RAMP: accelerating speed with NO cap — the run keeps getting faster forever until
-    // game over. rampUnits grows super-linearly (elapsed·(1+elapsed·curve)) so the late game
-    // gets noticeably faster and never plateaus. Still built from CFG.baseSpeed/speedRampPerSec
-    // so the boss-slow & slow-mo scalers in game.js keep working (they halve both, which halves
-    // the whole result). Only the GEAR banner is capped at maxGear so it stops spamming.
-    { const e=state.elapsed;
+    // GEAR RAMP: accelerating speed with a top-gear cap. rampUnits grows super-linearly
+    // (elapsed·(1+elapsed·curve)) so the late game gets noticeably faster, then holds at the
+    // maxGear cap (now gear 12 — a faster top end than before). Still built from
+    // CFG.baseSpeed/speedRampPerSec so the boss-slow & slow-mo scalers in game.js keep working
+    // (they halve both, which halves the whole result).
+    { const capE=CFG.gearSecs*CFG.maxGear, e=Math.min(state.elapsed,capE);
       state.speed=CFG.baseSpeed+e*(1+e*CFG.speedCurve)*CFG.speedRampPerSec;
       const g=Math.min(CFG.maxGear,1+Math.floor(state.elapsed/CFG.gearSecs));
       if(g>state.gear){ state.gear=g; showBanner("GEAR "+g); } }
@@ -1373,6 +1373,6 @@ document.addEventListener("visibilitychange",()=>{ if(document.hidden&&state.run
 
 document.getElementById("bestScore").textContent=state.best;
 </script>
-<script src="game.js?v=87"></script>
+<script src="game.js?v=89"></script>
 </body>
 </html>
