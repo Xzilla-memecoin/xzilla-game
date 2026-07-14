@@ -17,9 +17,9 @@ window._adsPayload = "WwogIHsKICAgICJpZCI6ICJ4emlsbGEtaG9tZSIsCiAgICAidGV4dCI6IC
    ENGINE AUDIO — procedural HEAVY CHOPPER (ported from moter.html "heavy" preset).
    OVERRIDES the engine hooks index.html calls (startGame -> startEngine, the loop
    -> setEnginePitch, gameOver/quit -> stopEngine) so there's exactly ONE engine
-   voice. It's DYNAMIC: throttle/RPM track state.speed, so when a RUG BOSS drops the
-   bike to BOSS_SLOW (~half speed) the engine sinks into a deep slow lope, then revs
-   back up once the boss is gone. Own AudioContext; honors mute via state.soundOn.
+   voice. It's DYNAMIC: throttle/RPM track state.speed, so the engine screams during the
+   full-speed RUG BOSS chase and settles as you slow. Own AudioContext; honors mute via
+   state.soundOn.
    ========================================================================== */
 (function engineAudio(){
   const ENGINE_AUDIO = "on";   // "off" => no-op the hooks (full silence, no synth)
@@ -1609,6 +1609,23 @@ window._adsPayload = "WwogIHsKICAgICJpZCI6ICJ4emlsbGEtaG9tZSIsCiAgICAidGV4dCI6IC
       e._rugger=(_mi===1); e._threw=false;   // ruggers can lob "empty promises" (see updateThrows)
     };
 
+    // BOSS AURA — a pulsing red halo drawn BEHIND the truck so its dark silhouette reads
+    // against the neon skyline (fixes the "faint/transparent" look). Additive glow, built once.
+    let _bossGlow=null;
+    function bossGlowSprite(){
+      if(_bossGlow) return _bossGlow;
+      const S=256, c=document.createElement("canvas"); c.width=c.height=S;
+      const x=c.getContext("2d");
+      const g=x.createRadialGradient(S/2,S/2,8, S/2,S/2,S/2);
+      g.addColorStop(0,"rgba(255,70,110,0.95)");
+      g.addColorStop(0.38,"rgba(255,40,120,0.5)");
+      g.addColorStop(1,"rgba(255,40,120,0)");
+      x.fillStyle=g; x.fillRect(0,0,S,S);
+      const m=new THREE.SpriteMaterial({ map:new THREE.CanvasTexture(c), transparent:true,
+        blending:THREE.AdditiveBlending, depthWrite:false });
+      _bossGlow=new THREE.Sprite(m); _bossGlow.renderOrder=-1; _bossGlow.visible=false; scene.add(_bossGlow);
+      return _bossGlow;
+    }
     function spawnRug(){
       const e=getEntity();
       // TEST: HP is scaled up so the auto-cannon visibly grinds the boss down
@@ -1616,8 +1633,9 @@ window._adsPayload = "WwogIHsKICAgICJpZCI6ICJ4emlsbGEtaG9tZSIsCiAgICAidGV4dCI6IC
       px.rugMax = (3 + Math.floor(state.wave/4)) * 8;   // grows over the run
       px.rugHp  = px.rugMax;
       e.type=TYPE.RUGBOSS; e.hp=px.rugHp; e.sprite.material=matRug;
-      e.sprite.scale.set(6.8,6.8,1);
-      e.sprite.position.set(0,1.9,SPAWN_Z-6); e.prevZ=e.sprite.position.z; active.push(e);
+      e.sprite.scale.set(BOSS_W,BOSS_H,1);
+      e._bw=BOSS_W; e._bh=BOSS_H; e._by=BOSS_BASE_Y;   // base dims for the aspect-preserving "alive" anim
+      e.sprite.position.set(0,BOSS_BASE_Y,SPAWN_Z-6); e.prevZ=e.sprite.position.z; active.push(e);
       bigBanner("⚠ RUG BOSS ⚠"); flashColor("rgba(255,59,92,.45)",0.7); shake(1.0);
       showRugBar();
       try{ if(tg&&tg.HapticFeedback) tg.HapticFeedback.notificationOccurred("warning"); }catch(_){}
@@ -1703,9 +1721,22 @@ window._adsPayload = "WwogIHsKICAgICJpZCI6ICJ4emlsbGEtaG9tZSIsCiAgICAidGV4dCI6IC
      *  (see resolve above) — the gun is the only way to take it down.         *
      * ===================================================================== */
     const CANNON = { pool:[], live:[], cd:0, rate:0.05, speed:48, mat:null };
-    // While ANY rug boss is on the field the whole game slows to this fraction of the
-    // live speed (a consistent "wave-4 first-boss" feel); normal speed resumes once it dies.
-    const BOSS_SLOW = 0.5;
+    // CHASE BOSS — the Rug Boss is a whale that FLEES down the lane with the bag while
+    // Xrider guns the chopper after it. It flies in from off-screen, then LOCKS a fixed
+    // distance ahead (CHASE_Z) and holds there — weaving + hurling candles — until it dies.
+    // The world keeps scrolling at FULL speed, which carries the whole "we're both flying
+    // forward, I'm chasing it" illusion (the boss's z barely moves; the lane rushing past
+    // sells the motion). Because it never reaches the player line it can't be rammed and
+    // never "passes" you to re-fight — you stay engaged from spawn to kill.
+    const CHASE_Z   = -5;    // world-z the fleeing boss holds (player at PLAYER_Z=8; farther = bigger chase gap)
+    const CHASE_IN  = 2.5;   // fly-in easing rate toward CHASE_Z on spawn
+    let   _jetCd    = 0;     // thruster-trail emit cadence accumulator
+    // Rug Boss art = images/rugbossontruck.webp (kaiju on a monster truck, cropped 715×983).
+    // The sprite is PORTRAIT, so size/ground it explicitly instead of the old 6.8 square. Held
+    // close (CHASE_Z) + large so the dark truck reads as an imposing boss, not a faint speck.
+    const BOSS_H      = 9.0;            // truck sprite world height
+    const BOSS_W      = BOSS_H*0.727;   // ≈6.54 — matches the cropped art aspect (no stretch)
+    const BOSS_BASE_Y = 3.8;            // center height so the monster-truck wheels sit ~on the floor
 
     /* Machine-gun audio — ONE-SHOT per bullet using sounds/shot.m4a. A small pool of
      * <audio> elements is cycled round-robin so rapid fire can overlap. Plain <audio>
@@ -1879,10 +1910,10 @@ window._adsPayload = "WwogIHsKICAgICJpZCI6ICJ4emlsbGEtaG9tZSIsCiAgICAidGV4dCI6IC
 
     function candleMat(){
       if(_candleMat) return _candleMat;
-      // Art: images/candlestick.png — relative path so it loads locally AND live (the file
+      // Art: images/redcandle.webp — relative path so it loads locally AND live (the file
       // ships in the repo). The procedural red candle below is only the graceful fallback if
       // the image ever fails to load.
-      _candleMat = spriteMatURL("images/candlestick.png", (x,S)=>{
+      _candleMat = spriteMatURL("images/redcandle.webp", (x,S)=>{
         x.clearRect(0,0,S,S); const cx=S/2;
         x.strokeStyle="#ff3b5c"; x.lineWidth=S*0.05;                 // wick
         x.beginPath(); x.moveTo(cx,S*0.07); x.lineTo(cx,S*0.93); x.stroke();
@@ -1930,8 +1961,10 @@ window._adsPayload = "WwogIHsKICAgICJpZCI6ICJ4emlsbGEtaG9tZSIsCiAgICAidGV4dCI6IC
     }
     function throwCandle(boss){
       if(THROWS.live.length>=6) return;
-      const t=getThrow(candleMat()); t.scale.set(2.1,2.1,1);
-      const bp=boss.sprite.position; t.position.set(bp.x,1.2,bp.z+1.6);
+      // redcandle.webp is a tall/thin portrait (aspect ~0.30) — scale to match so it reads as
+      // a real candlestick, not a squashed block. Collision stays a fair fixed radius (see R).
+      const t=getThrow(candleMat()); t.scale.set(0.72,2.4,1);
+      const bp=boss.sprite.position; t.position.set(bp.x,1.5,bp.z+1.6);
       aimThrow(t, THROW_CANDLE_VZ, 0.85); t._lethal=true;
       burst(t.position.x,t.position.y,t.position.z,RED,6);
       try{ window.__buzz && window.__buzz([20],"warning"); }catch(_){}
@@ -2088,14 +2121,11 @@ window._adsPayload = "WwogIHsKICAgICJpZCI6ICJ4emlsbGEtaG9tZSIsCiAgICAidGV4dCI6IC
       const t=nowS();
       // slow-mo scales the live speed the base loop just set this frame
       if(powActive(px.slowUntil)) state.speed *= 0.5;
-      // TEST: while a rug boss is on the field, slow the whole game down. We scale CFG
-      // (NOT state.speed) because index.html recomputes state.speed from CFG and moves
-      // every enemy BEFORE this hook runs — so only a CFG change reaches the movement
-      // math (next frame). Restored the instant the boss dies.
-      if(state.running && bossOnField()){
-        if(CFG._baseSave===undefined){ CFG._baseSave=CFG.baseSpeed; CFG._rampSave=CFG.speedRampPerSec; }
-        CFG.baseSpeed=CFG._baseSave*BOSS_SLOW; CFG.speedRampPerSec=CFG._rampSave*BOSS_SLOW;
-      } else if(CFG._baseSave!==undefined){
+      // CHASE BOSS runs at FULL speed — no world slow-down. The urgency comes from the
+      // lane rushing past while you close on the fleeing whale, not from a sluggish crawl
+      // (which also dodges the iOS boss-fight lag the old 0.5x scaling could aggravate).
+      // Guard: if a prior build left CFG scaled, restore it once.
+      if(CFG._baseSave!==undefined){
         CFG.baseSpeed=CFG._baseSave; CFG.speedRampPerSec=CFG._rampSave; CFG._baseSave=undefined;
       }
       // magnet: ease scammers toward the player's lane
@@ -2103,9 +2133,55 @@ window._adsPayload = "WwogIHsKICAgICJpZCI6ICJ4emlsbGEtaG9tZSIsCiAgICAidGV4dCI6IC
         for(const a of active){ if(a.type===TYPE.SCAMMER && !a.dead){
           a.sprite.position.x += (player.position.x - a.sprite.position.x)*0.06; } }
       }
-      // rug boss weave + bar follow
+      // CHASE: keep the boss weaving on x and PINNED a fixed distance ahead on z.
+      // The base loop (index.html) already nudged its z toward the player this frame; we
+      // pull it back to CHASE_Z so the gap stays constant. On spawn it flies in from far
+      // ahead (SPAWN_Z-6), then hard-locks. prevZ is re-synced every frame so the base
+      // loop's catch/ram test can never fire (the boss never crosses the player line).
+      let _boss=null;
       for(const a of active){ if(a.type===TYPE.RUGBOSS){
-        a.sprite.position.x = Math.sin(t*2.4)*1.1; } }
+        _boss=a;
+        // FRANTIC WEAVE — wide primary sweep across most of the lane plus a faster
+        // secondary wobble, so the fleeing whale juke-dodges instead of drifting on a
+        // lazy metronome. Kept just inside playHalfWidth (~3) so it stays gunnable and
+        // its candles stay dodgeable.
+        a.sprite.position.x = Math.sin(t*2.9)*2.2 + Math.sin(t*4.6)*0.55;
+        if(a.sprite.position.z < CHASE_Z-0.4){
+          a.sprite.position.z += (CHASE_Z-a.sprite.position.z)*Math.min(1,dt*CHASE_IN);  // fly in
+        } else {
+          a.sprite.position.z = CHASE_Z;   // locked ahead
+        }
+        a.prevZ = a.sprite.position.z;
+      } }
+      // JET/THRUSTER TRAIL — hot exhaust streaming off the fleeing whale back toward the
+      // pursuer (+z, past the camera). Rate-capped so it stays cheap on mobile. Only runs
+      // once the boss has flown in and locked (skips the streaky fly-in).
+      if(_boss && _boss.sprite.position.z >= CHASE_Z-0.4 && window.emitParticle){
+        _jetCd -= dt;
+        while(_jetCd <= 0){
+          _jetCd += 0.028;   // ~36 puffs/sec
+          const bx=_boss.sprite.position.x, bz=_boss.sprite.position.z;
+          const col = (Math.random()<0.5) ? "#ff7a1f" : RED;   // orange core / rug-red flame
+          window.emitParticle(
+            bx + (Math.random()-0.5)*1.6,          // spread across the whale's tail
+            1.05 + Math.random()*0.7,               // just below body height
+            bz + 1.8 + Math.random()*0.6,           // emit behind it, toward the camera
+            col, 0.9,
+            (Math.random()-0.5)*3.2,                // slight lateral scatter
+            (Math.random()-0.5)*1.6,                // slight vertical scatter
+            10 + Math.random()*6,                   // vz: blast back past the player
+            0.45 + Math.random()*0.15);             // life
+        }
+      } else { _jetCd = 0; }
+      // BOSS AURA — pin the halo on the truck and pulse it; hide when no boss.
+      const _glow=bossGlowSprite();
+      if(_boss){
+        const bp=_boss.sprite.position;
+        _glow.visible=true;
+        _glow.position.set(bp.x, bp.y-0.4, bp.z-0.15);
+        _glow.material.opacity = 0.55 + 0.22*Math.sin(t*4.0);
+        _glow.scale.set(_boss.sprite.scale.x*1.75, _boss.sprite.scale.y*1.18, 1);
+      } else if(_glow.visible){ _glow.visible=false; }
       // self-heal: if the boss left the screen un-defeated (dodged), its health bar must
       // not linger — hide it whenever there is no boss on the field.
       { const bar=$("rugBar");
@@ -2450,6 +2526,20 @@ window._adsPayload = "WwogIHsKICAgICJpZCI6ICJ4emlsbGEtaG9tZSIsCiAgICAidGV4dCI6IC
         for(const a of active){
           const s=a.sprite; if(!s||!s.visible) continue;
           if(a._bs===undefined){ a._bs=s.scale.x; a._ph=Math.random()*TAU; a._born=t; }
+          // RUG BOSS = a portrait truck sprite. The generic anim below assumes a SQUARE
+          // sprite (drives both axes off scale.x), which would squish it — so the boss gets
+          // its own aspect-preserving "alive" motion: monster-truck suspension bob + a fast
+          // engine idle-judder, a gentle rock as it barrels down the lane, and a subtle
+          // suspension squash & breathe. x (weave) and z (chase pin) are owned by the SET2
+          // hook that ran earlier this frame; we only touch y, rotation and scale here.
+          if(a.type===TYPE.RUGBOSS){
+            const ph2=a._ph||0, bw=a._bw||s.scale.x, bh=a._bh||s.scale.x, by=(a._by!==undefined?a._by:1.9);
+            s.position.y = by + Math.sin(t*3.0+ph2)*0.14 + Math.sin(t*15.0+ph2)*0.035;  // bob + engine judder
+            s.material.rotation = Math.sin(t*2.1+ph2)*0.035;                             // drive-rock (~2°)
+            const br=1+Math.sin(t*3.0+ph2)*0.02, sq=1+Math.sin(t*3.0+ph2+Math.PI*0.5)*0.03;
+            s.scale.x = bw*br/Math.sqrt(sq); s.scale.y = bh*br*sq;                       // squash preserves aspect
+            continue;
+          }
           const pr=profile(a), ph=a._ph||0, age=t-(a._born||t);
           let pop=1;
           if(age<0.30){ const k=age/0.30, c=2.2; pop=1+(c+1)*Math.pow(k-1,3)+c*Math.pow(k-1,2); pop=Math.max(0.06,pop); }
