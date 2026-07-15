@@ -1864,13 +1864,20 @@ window._adsPayload = "WwogIHsKICAgICJpZCI6ICJ4emlsbGEtaG9tZSIsCiAgICAidGV4dCI6IC
     }
 
     // The auto-cannon fires on its own during a boss fight and the player can't aim it, so
-    // it must NEVER punish them for something they can't control. Tracers pass through every
-    // non-scammer entity — good drops (power-ups + hearts) AND the dodge hazards (HODLER /
-    // HONEYPOT / DECOY, which the boss sprite often hides). The cannon only damages SCAMMERs
-    // and the RUG BOSS; you still avoid hazards by steering (ramming one still costs a life).
+    // it must NEVER cost them something they can't control. Tracers therefore pass through
+    // the player's OWN pickups (power-ups + hearts + shield + bomb) and the friendly HODLER.
+    // Everything hostile is fair game: SCAMMERs, the RUG BOSS, and — since a honeypot and a
+    // fake airdrop are scams too — HONEYPOT / DECOY, which the boss sprite often hides and
+    // which now pay out when shredded (see the SHOOTABLE branch below).
+    // Red candles and rugger "empty promises" need no entry here: they live in THROWS, a
+    // separate pool the bullet loop never iterates, so they are immune by construction.
     const BULLET_PASS = {};
     [TYPE.SHIELD,TYPE.BOMB,TYPE.PWR_SLOW,TYPE.PWR_X2,TYPE.PWR_MAG,TYPE.HEART,
-     TYPE.HOLDER,TYPE.HONEYPOT,TYPE.DECOY].forEach(t=>BULLET_PASS[t]=1);
+     TYPE.HOLDER].forEach(t=>BULLET_PASS[t]=1);
+    // Hostile entities the cannon shreds for score. Each takes 3 tracers (~0.15s at 20
+    // rounds/sec) and pays exactly like catching a scammer: points + combo + kill.
+    const BULLET_KILL = {};
+    [TYPE.SCAMMER,TYPE.HONEYPOT,TYPE.DECOY].forEach(t=>BULLET_KILL[t]=1);
 
     window.updateCannon = function(dt){
       // Freeze + flush + silence the gun whenever the run isn't live (pause / menu / over).
@@ -1892,9 +1899,11 @@ window._adsPayload = "WwogIHsKICAgICJpZCI6ICJ4emlsbGEtaG9tZSIsCiAgICAidGV4dCI6IC
           const rad=(a.type===TYPE.RUGBOSS)?2.6:1.25;
           if(Math.abs(b.position.x-ax)<rad && Math.abs(b.position.z-az)<rad){
             if(a.type===TYPE.RUGBOSS){ bossKilled=damageBoss(a); hit=true; break; }
-            // Only SCAMMERs reach here — the boss is handled above, and hodlers/hazards plus
-            // good drops all pass through (BULLET_PASS). Three tracer rounds shred a scammer,
-            // scoring exactly like catching it.
+            // Hostiles only (SCAMMER / HONEYPOT / DECOY). Checked as an allowlist rather than
+            // trusting BULLET_PASS to list every exception, so a type added later can't quietly
+            // become cannon fodder and cost the player a pickup they had no way to steer to.
+            if(!BULLET_KILL[a.type]) continue;
+            // Three tracer rounds shred it, scoring exactly like catching a scammer.
             const ap=a.sprite.position.clone();
             if((a.bhits=(a.bhits||0)+1) < 3){ burst(ap.x,ap.y,ap.z,MAG,3); hit=true; break; }
             a.dead=true;
