@@ -1737,17 +1737,21 @@ window._adsPayload = "WwogIHsKICAgICJpZCI6ICJ4emlsbGEtaG9tZSIsCiAgICAidGV4dCI6IC
     // forward, I'm chasing it" illusion (the boss's z barely moves; the lane rushing past
     // sells the motion). Because it never reaches the player line it can't be rammed and
     // never "passes" you to re-fight — you stay engaged from spawn to kill.
-    const CHASE_Z   = -5;    // world-z the fleeing boss holds (player at PLAYER_Z=8; farther = bigger chase gap)
+    const CHASE_Z   = -9;    // world-z the fleeing boss holds (player at PLAYER_Z=8; farther = bigger chase gap)
     const CHASE_IN  = 2.5;   // fly-in easing rate toward CHASE_Z on spawn
+    const BOSS_SLOW = 0.5;   // world runs at HALF whatever the ramp reached when the boss lands
+    let   _speedMult= 1;     // eased toward BOSS_SLOW/1; published as window.__speedMult
     let   _jetCd    = 0;     // thruster-trail emit cadence accumulator
     let   _bossTireAcc = 0;  // boss tread-frame accumulator (#tire-anim)
     // Rug Boss art = images/bossDriving_sheet.webp (kaiju on a monster truck; 2×1 sheet of
     // 547×752 frames that differ only in tread rotation — see __BOSSSHEET).
     // The sprite is PORTRAIT, so size/ground it explicitly instead of the old 6.8 square. Held
     // close (CHASE_Z) + large so the dark truck reads as an imposing boss, not a faint speck.
-    const BOSS_H      = 9.0;            // truck sprite world height
-    const BOSS_W      = BOSS_H*0.727;   // ≈6.54 — one frame's aspect (547/752), so no stretch
-    const BOSS_BASE_Y = 3.8;            // center height so the monster-truck wheels sit ~on the floor
+    const BOSS_H      = 7.0;            // truck sprite world height
+    const BOSS_W      = BOSS_H*0.727;   // ≈5.09 — one frame's aspect (547/752), so no stretch
+    const BOSS_BASE_Y = 2.8;            // center height so the monster-truck wheels sit ~on the floor
+                                        // (= old bottom edge -0.7 + BOSS_H/2, so shrinking the
+                                        //  sprite keeps the wheels planted instead of floating)
 
     /* Machine-gun audio — ONE-SHOT per bullet using sounds/shot.m4a. A small pool of
      * <audio> elements is cycled round-robin so rapid fire can overlap. Plain <audio>
@@ -2132,9 +2136,17 @@ window._adsPayload = "WwogIHsKICAgICJpZCI6ICJ4emlsbGEtaG9tZSIsCiAgICAidGV4dCI6IC
       const t=nowS();
       // slow-mo scales the live speed the base loop just set this frame
       if(powActive(px.slowUntil)) state.speed *= 0.5;
-      // CHASE BOSS runs at FULL speed — no world slow-down. The urgency comes from the
-      // lane rushing past while you close on the fleeing whale, not from a sluggish crawl
-      // (which also dodges the iOS boss-fight lag the old 0.5x scaling could aggravate).
+      // BOSS SLOW — the world drops to BOSS_SLOW of whatever the ramp had reached the moment
+      // the boss landed, so a gear-12 fight slows proportionally to a gear-1 one. Published as
+      // window.__speedMult and folded in at the source (index.html's ramp line): scaling
+      // state.speed here would be pointless, since that ramp recomputes it from CFG every
+      // frame BEFORE the entity loop reads it, wiping anything we set from this hook.
+      // Eased, not snapped, so entering/leaving the fight doesn't feel like hitting a wall.
+      // NOTE: this restores a world slow-down an earlier build removed over iOS boss-fight
+      // lag. Unlike that version it never touches CFG, so there is no scaled-CFG state to
+      // leak into the next run.
+      _speedMult += ((bossOnField() ? BOSS_SLOW : 1) - _speedMult) * Math.min(1, dt*3.5);
+      window.__speedMult = _speedMult;
       // Guard: if a prior build left CFG scaled, restore it once.
       if(CFG._baseSave!==undefined){
         CFG.baseSpeed=CFG._baseSave; CFG.speedRampPerSec=CFG._rampSave; CFG._baseSave=undefined;

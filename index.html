@@ -1150,6 +1150,11 @@ function loop(){ requestAnimationFrame(loop); const dt=Math.min(clock.getDelta()
     // (they halve both, which halves the whole result).
     { const capE=CFG.gearSecs*CFG.maxGear, e=Math.min(state.elapsed,capE);
       state.speed=CFG.baseSpeed+e*(1+e*CFG.speedCurve)*CFG.speedRampPerSec;
+      // World-speed scaler, driven by game.js (__frame sets it; BOSS_SLOW halves the world
+      // during a rug-boss fight). It MUST be applied here at the source: this line recomputes
+      // state.speed from scratch every frame, so anything that scales state.speed after the
+      // fact is wiped before the entity loop below ever reads it.
+      state.speed *= (window.__speedMult||1);
       const g=Math.min(CFG.maxGear,1+Math.floor(state.elapsed/CFG.gearSecs));
       if(g>state.gear){ state.gear=g; showBanner("GEAR "+g); } }
     state.spawnGap=Math.max(CFG.minSpawnGap,CFG.baseSpawnGap-state.elapsed*0.012);
@@ -1373,6 +1378,6 @@ document.addEventListener("visibilitychange",()=>{ if(document.hidden&&state.run
 
 document.getElementById("bestScore").textContent=state.best;
 </script>
-<script src="game.js?v=96"></script>
+<script src="game.js?v=97"></script>
 </body>
 </html>
