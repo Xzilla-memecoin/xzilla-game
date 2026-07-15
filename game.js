@@ -1475,13 +1475,19 @@ window._adsPayload = "WwogIHsKICAgICJpZCI6ICJ4emlsbGEtaG9tZSIsCiAgICAidGV4dCI6IC
       x.fillStyle=RED; x.font="bold 34px 'Press Start 2P',monospace"; x.textAlign="center"; x.textBaseline="middle";
       x.fillText("RUG", S/2, S*0.16); });
 
+    // Rug Boss art is a 2×1 sheet (bossDriving_sheet.webp, 1094×752 = two 547×752 frames)
+    // whose only difference is the monster-truck tread rotation. Cycled via repeat+offset in
+    // the chase loop (#tire-anim) exactly like the player's __BIKER sheet.
+    window.__BOSSSHEET={cols:2, rows:1, frames:2};
+
     /* ===== embedded enemy sprites (re-embedded from uploaded grid) ===== */
     (function applyEnemySprites(){
       const SPR = window.XZILLA_SPRITES; if(!SPR) return;
-      const swap=(mat,key)=>{ if(!mat||!SPR[key]) return;
+      const swap=(mat,key,after)=>{ if(!mat||!SPR[key]) return;
         const l=new THREE.TextureLoader();
         l.load(SPR[key], t=>{ t.encoding=THREE.sRGBEncoding;
           try{ t.anisotropy=4; }catch(_){}
+          if(after) after(t);
           mat.map=t; mat.needsUpdate=true; }); };
       if (typeof myScammerMats!=="undefined" && myScammerMats){
         swap(myScammerMats[0],"kol");
@@ -1492,7 +1498,10 @@ window._adsPayload = "WwogIHsKICAgICJpZCI6ICJ4emlsbGEtaG9tZSIsCiAgICAidGV4dCI6IC
       if (typeof myHolderMat!=="undefined") swap(myHolderMat,"hodler");
       swap(matHoney,"honeypot");
       swap(matDecoy,"fakedrop");
-      swap(matRug,"rugboss");
+      swap(matRug,"rugboss", t=>{
+        const B=window.__BOSSSHEET;
+        t.repeat.set(1/B.cols, 1/B.rows); t.offset.set(0, 1-1/B.rows);
+      });
     })();
 
     /* ----- skin art: render the real Xzilla tint chips on skin cards -------- */
@@ -1731,11 +1740,13 @@ window._adsPayload = "WwogIHsKICAgICJpZCI6ICJ4emlsbGEtaG9tZSIsCiAgICAidGV4dCI6IC
     const CHASE_Z   = -5;    // world-z the fleeing boss holds (player at PLAYER_Z=8; farther = bigger chase gap)
     const CHASE_IN  = 2.5;   // fly-in easing rate toward CHASE_Z on spawn
     let   _jetCd    = 0;     // thruster-trail emit cadence accumulator
-    // Rug Boss art = images/rugbossontruck.webp (kaiju on a monster truck, cropped 715×983).
+    let   _bossTireAcc = 0;  // boss tread-frame accumulator (#tire-anim)
+    // Rug Boss art = images/bossDriving_sheet.webp (kaiju on a monster truck; 2×1 sheet of
+    // 547×752 frames that differ only in tread rotation — see __BOSSSHEET).
     // The sprite is PORTRAIT, so size/ground it explicitly instead of the old 6.8 square. Held
     // close (CHASE_Z) + large so the dark truck reads as an imposing boss, not a faint speck.
     const BOSS_H      = 9.0;            // truck sprite world height
-    const BOSS_W      = BOSS_H*0.727;   // ≈6.54 — matches the cropped art aspect (no stretch)
+    const BOSS_W      = BOSS_H*0.727;   // ≈6.54 — one frame's aspect (547/752), so no stretch
     const BOSS_BASE_Y = 3.8;            // center height so the monster-truck wheels sit ~on the floor
 
     /* Machine-gun audio — ONE-SHOT per bullet using sounds/shot.m4a. A small pool of
@@ -2153,6 +2164,17 @@ window._adsPayload = "WwogIHsKICAgICJpZCI6ICJ4emlsbGEtaG9tZSIsCiAgICAidGV4dCI6IC
         }
         a.prevZ = a.sprite.position.z;
       } }
+      // #tire-anim (boss) — cycle the 2-frame sheet so the monster-truck treads spin.
+      // Speed-linked like the player's tires, so they blur faster as the run ramps up.
+      // Guarded on repeat.x<1 so it no-ops until the sheet texture has actually loaded.
+      if(_boss){
+        const _bt=matRug.map, B=window.__BOSSSHEET;
+        if(_bt && B && _bt.repeat && _bt.repeat.x<1){
+          _bossTireAcc += dt * (state.running?(state.speed||6):3.0) * 3.0;
+          const f=((Math.floor(_bossTireAcc)%B.frames)+B.frames)%B.frames;
+          _bt.offset.x=(f%B.cols)/B.cols; _bt.offset.y=1-(((f/B.cols)|0)+1)/B.rows;
+        }
+      } else _bossTireAcc=0;
       // JET/THRUSTER TRAIL — hot exhaust streaming off the fleeing whale back toward the
       // pursuer (+z, past the camera). Rate-capped so it stays cheap on mobile. Only runs
       // once the boss has flown in and locked (skips the streaky fly-in).
