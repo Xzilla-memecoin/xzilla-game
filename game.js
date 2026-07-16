@@ -1358,6 +1358,7 @@ window._adsPayload = "WwogIHsKICAgICJpZCI6ICJ4emlsbGEtaG9tZSIsCiAgICAidGV4dCI6IC
     TYPE.PWR_MAG  = 10;  // scammer magnet
     TYPE.HEART    = 11;  // heart-shaped extra-life token (TEST)
     TYPE.PWR_TRI  = 12;  // TRI-CANNON: rare gun pickup, boss-fight only (see updateCannon)
+    TYPE.PWR_ROCKET = 13; // ROCKET LAUNCHER: rare boss-fight pickup, cannon fires homing rockets
 
     /* ----- upgrade tree (persisted, spent in XP) ----------------------------- */
     const UPGRADES = [
@@ -1479,6 +1480,32 @@ window._adsPayload = "WwogIHsKICAgICJpZCI6ICJ4emlsbGEtaG9tZSIsCiAgICAidGV4dCI6IC
       x.restore();
     }
     const matTri   = spriteMat(drawTriGun);
+    // ROCKET LAUNCHER pickup — a rocket on a glowing chip. Flame-orange so it reads distinct
+    // from the TRI-CANNON's gold and telegraphs "boss-melting ordnance".
+    const ROCKET_COL = "#ff4d2e";
+    function drawRocket(x,S){
+      const cx=S/2, cy=S/2; glowBack2(x,S,ROCKET_COL,S*0.46);
+      x.save(); x.shadowColor=ROCKET_COL; x.shadowBlur=26;
+      x.fillStyle="#0a0618"; x.beginPath(); x.arc(cx,cy,70,0,7); x.fill();
+      x.lineWidth=7; x.strokeStyle=ROCKET_COL; x.beginPath(); x.arc(cx,cy,70,0,7); x.stroke(); x.restore();
+      x.save(); x.translate(cx,cy); x.shadowColor=ROCKET_COL; x.shadowBlur=14;
+      // body (pointing up toward the lane)
+      x.fillStyle="#e9e9f2"; x.beginPath();
+      x.moveTo(0,-46); x.quadraticCurveTo(16,-20,16,10); x.lineTo(-16,10);
+      x.quadraticCurveTo(-16,-20,0,-46); x.closePath(); x.fill();
+      // nose cone
+      x.fillStyle=ROCKET_COL; x.beginPath(); x.moveTo(0,-46);
+      x.quadraticCurveTo(10,-30,7,-18); x.lineTo(-7,-18); x.quadraticCurveTo(-10,-30,0,-46); x.fill();
+      // fins
+      x.beginPath(); x.moveTo(-16,10); x.lineTo(-30,26); x.lineTo(-16,-4); x.fill();
+      x.beginPath(); x.moveTo( 16,10); x.lineTo( 30,26); x.lineTo( 16,-4); x.fill();
+      // porthole
+      x.fillStyle="#0a0618"; x.beginPath(); x.arc(0,-14,7,0,7); x.fill();
+      // exhaust flame
+      x.fillStyle="#ffd23f"; x.beginPath(); x.moveTo(-10,10); x.lineTo(0,42); x.lineTo(10,10); x.closePath(); x.fill();
+      x.restore();
+    }
+    const matRocket = spriteMat(drawRocket);
     // TEST: heart-shaped extra-life token (drawn, not a glyph chip)
     const matHeart = spriteMat((x,S)=>{
       const cx=S/2, cy=S*0.52, s=S*0.30;
@@ -1568,7 +1595,7 @@ window._adsPayload = "WwogIHsKICAgICJpZCI6ICJ4emlsbGEtaG9tZSIsCiAgICAidGV4dCI6IC
     /* ===================================================================== *
      *  RUNTIME STATE for power-ups / waves                                    *
      * ===================================================================== */
-    const px = { slowUntil:0, x2Until:0, magUntil:0, rugHp:0, rugMax:0, triUntil:0 };
+    const px = { slowUntil:0, x2Until:0, magUntil:0, rugHp:0, rugMax:0, triUntil:0, rocketUntil:0 };
     let reviveAvail = false;   // SECOND WIND charge, armed at run start if owned
     function nowS(){ return performance.now()*0.001; }
     function powActive(t){ return nowS() < t; }
@@ -1612,6 +1639,10 @@ window._adsPayload = "WwogIHsKICAgICJpZCI6ICJ4emlsbGEtaG9tZSIsCiAgICAidGV4dCI6IC
       // e.bhits so the shootable-entity bookkeeping stays consistent even though you catch it.)
       if(!_triThisFight && bossOnField() && Math.random()<TRI_SPAWN_CHANCE){
         _triThisFight=true; e.type=TYPE.PWR_TRI; e.sprite.material=matTri; place(2.4); return;
+      }
+      // ROCKET LAUNCHER pickup — same boss-fight-only, once-per-fight gating as the tri-cannon.
+      if(!_rocketThisFight && bossOnField() && Math.random()<ROCKET_SPAWN_CHANCE){
+        _rocketThisFight=true; e.type=TYPE.PWR_ROCKET; e.sprite.material=matRocket; place(2.4); return;
       }
       // TEST: heart-shaped extra-life token — 2% of spawns
       cum += 0.02;
@@ -1670,7 +1701,7 @@ window._adsPayload = "WwogIHsKICAgICJpZCI6ICJ4emlsbGEtaG9tZSIsCiAgICAidGV4dCI6IC
       // (each tracer chips 1 HP at ~20 rounds/sec) instead of popping it instantly.
       px.rugMax = (3 + Math.floor(state.wave/4)) * 8;   // grows over the run
       px.rugHp  = px.rugMax;
-      _triThisFight=false;   // new fight — re-arm the one-per-fight tri-cannon drop
+      _triThisFight=false; _rocketThisFight=false;   // new fight — re-arm the one-per-fight gun drops
       e.type=TYPE.RUGBOSS; e.hp=px.rugHp; e.sprite.material=matRug;
       e.sprite.scale.set(BOSS_W,BOSS_H,1);
       e._bw=BOSS_W; e._bh=BOSS_H; e._by=BOSS_BASE_Y;   // base dims for the aspect-preserving "alive" anim
@@ -1760,6 +1791,7 @@ window._adsPayload = "WwogIHsKICAgICJpZCI6ICJ4emlsbGEtaG9tZSIsCiAgICAidGV4dCI6IC
      *  (see resolve above) — the gun is the only way to take it down.         *
      * ===================================================================== */
     const CANNON = { pool:[], live:[], cd:0, rate:0.05, speed:48, mat:null, cap:48 };
+    const ROCKETS = { pool:[], live:[], cd:0, mat:null, cap:12 };   // homing rocket-launcher shots
     // CHASE BOSS — the Rug Boss is a whale that FLEES down the lane with the bag while
     // Xrider guns the chopper after it. It flies in from off-screen, then LOCKS a fixed
     // distance ahead (CHASE_Z) and holds there — weaving + hurling candles — until it dies.
@@ -1784,6 +1816,18 @@ window._adsPayload = "WwogIHsKICAgICJpZCI6ICJ4emlsbGEtaG9tZSIsCiAgICAidGV4dCI6IC
     const TRI_SECS         = 10;     // active duration; 15 for a wallet-verified $XZILLA holder
     const TRI_SECS_HOLDER  = 15;
     let   _triThisFight    = false;  // one tri-gun per fight; reset in spawnRug + run reset
+    // ROCKET LAUNCHER — a rare boss-fight pickup that, for a few seconds, has the auto-cannon
+    // ALSO launch homing rockets that curve into the fleeing boss and detonate for a big HP
+    // chunk each, dropping its time-to-kill sharply. One per fight, gated like the tri-cannon.
+    const ROCKET_SPAWN_CHANCE = 0.045; // per eligible spawn tick while a boss lives
+    const ROCKET_SECS         = 8;     // active window; longer for a verified $XZILLA holder
+    const ROCKET_SECS_HOLDER  = 12;
+    const ROCKET_RATE  = 0.42;   // seconds between homing rockets while active
+    const ROCKET_DMG   = 6;      // boss HP removed per rocket detonation (tracer = 1)
+    const ROCKET_SPEED = 26;     // world units/sec (slower than tracers so the arc reads)
+    const ROCKET_TURN  = 3.2;    // homing steer rate, rad/sec
+    const ROCKET_HITR  = 2.4;    // detonation half-extent around the boss
+    let   _rocketThisFight = false;  // one rocket launcher per fight; reset in spawnRug + run reset
     const BULLET_XCULL     = 14;     // free a bullet once it flies this far off the lane in x
     const BOSS_SLOW = 0.5;   // world runs at HALF whatever the ramp reached when the boss lands
     const SLOWMO    = 0.5;   // SLOW-MO power-up scaler (stacks multiplicatively with BOSS_SLOW)
@@ -1925,6 +1969,91 @@ window._adsPayload = "WwogIHsKICAgICJpZCI6ICJ4emlsbGEtaG9tZSIsCiAgICAidGV4dCI6IC
       return true;
     }
 
+    /* ---- ROCKET LAUNCHER: homing rockets that seek the boss and detonate --------- */
+    // The in-flight rocket is a drawn missile (nose cone + body + fins + jet flame) so it
+    // reads as ordnance streaking up the lane, not a fuzzy dot. Auto-swaps to a real image
+    // if images/rocket.webp exists (drop a Grok-generated PNG/WEBP there) — procedural fallback below.
+    function drawFlyingRocket(x,S){
+      const cx=S/2; const bw=S*0.19, topY=-S*0.34, botY=S*0.18;
+      glowBG(x,S,ROCKET_COL,S*0.52,"cc");   // halo so it pops against the neon lane
+      x.save(); x.translate(cx,S*0.5);
+      // exhaust flame streaming out the tail
+      const fg=x.createLinearGradient(0,botY,0,botY+S*0.30);
+      fg.addColorStop(0,"#fff6c0"); fg.addColorStop(0.45,"#ffd23f"); fg.addColorStop(1,"rgba(255,77,46,0)");
+      x.fillStyle=fg; x.beginPath();
+      x.moveTo(-bw*0.72,botY); x.quadraticCurveTo(0,botY+S*0.32,bw*0.72,botY); x.closePath(); x.fill();
+      // metal body
+      x.shadowColor=ROCKET_COL; x.shadowBlur=S*0.09;
+      const bg=x.createLinearGradient(-bw,0,bw,0);
+      bg.addColorStop(0,"#9aa2bd"); bg.addColorStop(0.5,"#ffffff"); bg.addColorStop(1,"#8a91ac");
+      x.fillStyle=bg; x.beginPath();
+      x.moveTo(0,topY); x.quadraticCurveTo(bw,topY+S*0.12,bw,0);
+      x.lineTo(bw,botY); x.lineTo(-bw,botY); x.lineTo(-bw,0);
+      x.quadraticCurveTo(-bw,topY+S*0.12,0,topY); x.closePath(); x.fill();
+      // nose cone
+      x.shadowBlur=0; x.fillStyle=ROCKET_COL; x.beginPath();
+      x.moveTo(0,topY); x.quadraticCurveTo(bw,topY+S*0.12,bw*0.55,topY+S*0.15);
+      x.lineTo(-bw*0.55,topY+S*0.15); x.quadraticCurveTo(-bw,topY+S*0.12,0,topY); x.fill();
+      // swept fins
+      x.beginPath(); x.moveTo(-bw,botY-S*0.07); x.lineTo(-bw-S*0.12,botY+S*0.04); x.lineTo(-bw,botY); x.closePath(); x.fill();
+      x.beginPath(); x.moveTo( bw,botY-S*0.07); x.lineTo( bw+S*0.12,botY+S*0.04); x.lineTo( bw,botY); x.closePath(); x.fill();
+      // porthole
+      x.fillStyle="#0a0618"; x.beginPath(); x.arc(0,-S*0.05,bw*0.44,0,7); x.fill();
+      x.fillStyle="#7df9ff"; x.beginPath(); x.arc(0,-S*0.05,bw*0.30,0,7); x.fill();
+      x.restore();
+    }
+    function rocketMat(){
+      if(ROCKETS.mat) return ROCKETS.mat;
+      ROCKETS.mat = spriteMatURL("images/rocket.webp", drawFlyingRocket);
+      return ROCKETS.mat;
+    }
+    function getRocket(){
+      let r=ROCKETS.pool.pop();
+      if(!r){ r=new THREE.Sprite(rocketMat()); r.scale.set(1.5,2.6,1); scene.add(r); }
+      r.visible=true; ROCKETS.live.push(r); return r;
+    }
+    function freeRocket(r){ const i=ROCKETS.live.indexOf(r); if(i<0) return; r.visible=false; ROCKETS.live.splice(i,1); ROCKETS.pool.push(r); }
+    function clearRockets(){ for(let i=ROCKETS.live.length-1;i>=0;i--) freeRocket(ROCKETS.live[i]); ROCKETS.cd=0; }
+    function fireRocket(boss){
+      if(ROCKETS.live.length>=ROCKETS.cap) return;
+      const r=getRocket();
+      r.position.set(player.position.x, player.position.y+0.3, PLAYER_Z-0.8);
+      let dx=boss.sprite.position.x-r.position.x, dz=boss.sprite.position.z-r.position.z;
+      const dl=Math.hypot(dx,dz)||1;
+      r._vx=(dx/dl)*ROCKET_SPEED; r._vz=(dz/dl)*ROCKET_SPEED;
+      burst(r.position.x,r.position.y,r.position.z,ROCKET_COL,6);
+      try{ blip(120,0.16,"sawtooth",0.14); }catch(_){}
+    }
+    // Steer each live rocket toward the boss (x-z homing), move, trail, and detonate on contact.
+    function updateRockets(dt){
+      const boss=bossOnField();
+      if(!boss){ if(ROCKETS.live.length) clearRockets(); return; }
+      const bx=boss.sprite.position.x, by=boss.sprite.position.y, bz=boss.sprite.position.z;
+      for(let i=ROCKETS.live.length-1;i>=0;i--){ const r=ROCKETS.live[i];
+        // rotate current heading toward the boss by at most ROCKET_TURN*dt (forward = -z)
+        const curA=Math.atan2(r._vx,-r._vz);
+        const tgtA=Math.atan2(bx-r.position.x, -(bz-r.position.z));
+        let da=tgtA-curA; while(da>Math.PI)da-=2*Math.PI; while(da<-Math.PI)da+=2*Math.PI;
+        const maxA=ROCKET_TURN*dt; if(da>maxA)da=maxA; else if(da<-maxA)da=-maxA;
+        const na=curA+da;
+        r._vx=Math.sin(na)*ROCKET_SPEED; r._vz=-Math.cos(na)*ROCKET_SPEED;
+        r.position.x+=r._vx*dt; r.position.z+=r._vz*dt;
+        // jet trail — emit flame + spark just behind the tail so it streaks a contrail
+        const tx=r.position.x-(r._vx/ROCKET_SPEED)*1.1, tz=r.position.z-(r._vz/ROCKET_SPEED)*1.1;
+        burst(tx,r.position.y,tz,"#ffd23f",2); burst(tx,r.position.y-0.15,tz,ROCKET_COL,2);
+        if(Math.abs(r.position.x-bx)<ROCKET_HITR && Math.abs(r.position.z-bz)<ROCKET_HITR){
+          burst(bx,by,bz,ROCKET_COL,26); burst(bx,by,bz,GOLD,14); shake(0.7);
+          freeRocket(r);
+          let killed=false;
+          for(let k=0;k<ROCKET_DMG;k++){ if(damageBoss(boss)){ killed=true; break; } }
+          if(killed){ clearRockets(); return; }
+          continue;
+        }
+        // cull rockets that sail well past the boss without connecting
+        if(r.position.z<BULLET_CULL_Z-6 || Math.abs(r.position.x)>BULLET_XCULL+4){ freeRocket(r); }
+      }
+    }
+
     // The auto-cannon fires on its own during a boss fight and the player can't aim it, so
     // it must NEVER cost them something they can't control. Tracers therefore pass through
     // the player's OWN pickups (power-ups + hearts + shield + bomb) and the friendly HODLER.
@@ -1935,7 +2064,7 @@ window._adsPayload = "WwogIHsKICAgICJpZCI6ICJ4emlsbGEtaG9tZSIsCiAgICAidGV4dCI6IC
     // separate pool the bullet loop never iterates, so they are immune by construction.
     const BULLET_PASS = {};
     [TYPE.SHIELD,TYPE.BOMB,TYPE.PWR_SLOW,TYPE.PWR_X2,TYPE.PWR_MAG,TYPE.HEART,
-     TYPE.HOLDER,TYPE.PWR_TRI].forEach(t=>BULLET_PASS[t]=1);
+     TYPE.HOLDER,TYPE.PWR_TRI,TYPE.PWR_ROCKET].forEach(t=>BULLET_PASS[t]=1);
     // Hostile entities the cannon shreds for score. Each takes 3 tracers (~0.15s at 20
     // rounds/sec) and pays exactly like catching a scammer: points + combo + kill.
     const BULLET_KILL = {};
@@ -1943,13 +2072,17 @@ window._adsPayload = "WwogIHsKICAgICJpZCI6ICJ4emlsbGEtaG9tZSIsCiAgICAidGV4dCI6IC
 
     window.updateCannon = function(dt){
       // Freeze + flush + silence the gun whenever the run isn't live (pause / menu / over).
-      if(!state.running){ if(CANNON.live.length) clearBullets(); gunOff(); return; }
+      if(!state.running){ if(CANNON.live.length) clearBullets(); if(ROCKETS.live.length) clearRockets(); gunOff(); return; }
       const boss=bossOnField();
       if(boss){
         ensureShotBuffer();   // make sure the cheap WebAudio shot is ready for sustained fire
         CANNON.cd-=dt;
         while(CANNON.cd<=0){ fireVolley(boss); CANNON.cd+=CANNON.rate; }   // 1 or 3 bullets / volley
-      } else { if(CANNON.live.length) clearBullets(); gunOff(); }
+        // ROCKET LAUNCHER — while active, lob a homing rocket every ROCKET_RATE on top of the gun.
+        if(nowS()<px.rocketUntil){ ROCKETS.cd-=dt; while(ROCKETS.cd<=0){ fireRocket(boss); ROCKETS.cd+=ROCKET_RATE; } }
+        else ROCKETS.cd=0;
+      } else { if(CANNON.live.length) clearBullets(); if(ROCKETS.live.length) clearRockets(); gunOff(); }
+      updateRockets(dt);
 
       for(let i=CANNON.live.length-1;i>=0;i--){ const b=CANNON.live[i];
         b.position.x+=b._vx*dt; b.position.z+=b._vz*dt;
@@ -2169,6 +2302,15 @@ window._adsPayload = "WwogIHsKICAgICJpZCI6ICJ4emlsbGEtaG9tZSIsCiAgICAidGV4dCI6IC
         try{ window.__buzz && window.__buzz([40,25,60],"success"); }catch(_){}
         e.dead=true; freeEntity(e); return;
       }
+      if(e.type===TYPE.PWR_ROCKET){
+        // Exact seconds (no _bm) so the 8s / 12s the player was promised is what they get.
+        const dur = window.__holderVerified ? ROCKET_SECS_HOLDER : ROCKET_SECS;
+        px.rocketUntil=nowS()+dur; ROCKETS.cd=0;   // first rocket flies on the next cannon tick
+        burst(p.x,p.y,p.z,ROCKET_COL,20); popup(p,"ROCKET LAUNCHER",ROCKET_COL);
+        showBanner("ROCKET LAUNCHER "+dur+"s"); try{sfx.power();}catch(_){}
+        try{ window.__buzz && window.__buzz([50,30,80],"success"); }catch(_){}
+        e.dead=true; freeEntity(e); return;
+      }
 
       if(e.type===TYPE.SCAMMER){
         state.combo++; state.kills++; run.kills++; if(state.combo>run.combo) run.combo=state.combo;
@@ -2380,7 +2522,7 @@ window._adsPayload = "WwogIHsKICAgICJpZCI6ICJ4emlsbGEtaG9tZSIsCiAgICAidGV4dCI6IC
     function set2BeforeRun(){
       applyUpgrades();
       renderLives();                 // reflect new max HP
-      px.slowUntil=px.x2Until=px.magUntil=px.triUntil=0; rugPending=false; nextBossWave=4; rugWarnUntil=0; lastBossEnd=0; window.__rugWarn=false; window.__rugBossAt=0;
+      px.slowUntil=px.x2Until=px.magUntil=px.triUntil=px.rocketUntil=0; _rocketThisFight=false; rugPending=false; nextBossWave=4; rugWarnUntil=0; lastBossEnd=0; window.__rugWarn=false; window.__rugBossAt=0;
       hideRugBar();
       if(lvl("start")>0){ shieldActive=true; }
       if(lvl("warm")>0){ state.combo = 1 + lvl("warm"); if(state.combo>run.combo) run.combo=state.combo; renderCombo(); }   // WARM ENGINE: open at combo ×(1+lvl)
@@ -2708,6 +2850,7 @@ window._adsPayload = "WwogIHsKICAgICJpZCI6ICJ4emlsbGEtaG9tZSIsCiAgICAidGV4dCI6IC
         else if(ty===TYPE.PWR_X2){ ring(p,GOLD,1.2,0.42); }
         else if(ty===TYPE.PWR_MAG){ ring(p,MAG,1.2,0.42); }
         else if(ty===TYPE.PWR_TRI){ ring(p,TRI_COL,1.3,0.44); }
+        else if(ty===TYPE.PWR_ROCKET){ ring(p,ROCKET_COL,1.3,0.44); }
       };
       function haptic(kind){ try{ if(tg&&tg.HapticFeedback) tg.HapticFeedback.impactOccurred(kind); }catch(_){} }
     })();
