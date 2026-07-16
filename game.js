@@ -1357,6 +1357,7 @@ window._adsPayload = "WwogIHsKICAgICJpZCI6ICJ4emlsbGEtaG9tZSIsCiAgICAidGV4dCI6IC
     TYPE.PWR_X2   = 9;   // double score window
     TYPE.PWR_MAG  = 10;  // scammer magnet
     TYPE.HEART    = 11;  // heart-shaped extra-life token (TEST)
+    TYPE.PWR_TRI  = 12;  // TRI-CANNON: rare gun pickup, boss-fight only (see updateCannon)
 
     /* ----- upgrade tree (persisted, spent in XP) ----------------------------- */
     const UPGRADES = [
@@ -1456,6 +1457,28 @@ window._adsPayload = "WwogIHsKICAgICJpZCI6ICJ4emlsbGEtaG9tZSIsCiAgICAidGV4dCI6IC
     const matSlow  = spriteMat((x,S)=>chip(x,S,"#7df9ff","⏳"));
     const matX2    = spriteMat((x,S)=>chip(x,S,GOLD,"✕2"));
     const matMag   = spriteMat((x,S)=>chip(x,S,MAG,"🧲"));
+    // TRI-CANNON pickup — a gun on a glowing chip, three muzzle flashes fanning out to
+    // telegraph the 3-way spread. Orange-gold so it reads as a rare, high-value power token.
+    const TRI_COL  = "#ff8a1e";
+    function drawTriGun(x,S){
+      const cx=S/2, cy=S/2; glowBack2(x,S,TRI_COL,S*0.46);
+      x.save(); x.shadowColor=TRI_COL; x.shadowBlur=26;
+      x.fillStyle="#0a0618"; x.beginPath(); x.arc(cx,cy,70,0,7); x.fill();
+      x.lineWidth=7; x.strokeStyle=TRI_COL; x.beginPath(); x.arc(cx,cy,70,0,7); x.stroke(); x.restore();
+      // three fanned barrels from a muzzle point low-centre, pointing "up" (toward the lane)
+      const mx=cx, my=cy+34, len=52;
+      x.save(); x.lineCap="round"; x.strokeStyle=TRI_COL; x.shadowColor=TRI_COL; x.shadowBlur=14;
+      for(const a of [-0.7, 0, 0.7]){
+        const ex=mx+Math.sin(a)*len, ey=my-Math.cos(a)*len;
+        x.lineWidth=10; x.beginPath(); x.moveTo(mx,my); x.lineTo(ex,ey); x.stroke();
+        x.fillStyle="#fff"; x.beginPath(); x.arc(ex,ey,7,0,7); x.fill();   // bright muzzle tip
+      }
+      // stubby gun body + grip under the muzzle so it reads as a weapon, not just arrows
+      x.fillStyle=TRI_COL; x.fillRect(mx-16,my-2,32,20);
+      x.fillRect(mx-4,my+16,14,22);
+      x.restore();
+    }
+    const matTri   = spriteMat(drawTriGun);
     // TEST: heart-shaped extra-life token (drawn, not a glyph chip)
     const matHeart = spriteMat((x,S)=>{
       const cx=S/2, cy=S*0.52, s=S*0.30;
@@ -1545,7 +1568,7 @@ window._adsPayload = "WwogIHsKICAgICJpZCI6ICJ4emlsbGEtaG9tZSIsCiAgICAidGV4dCI6IC
     /* ===================================================================== *
      *  RUNTIME STATE for power-ups / waves                                    *
      * ===================================================================== */
-    const px = { slowUntil:0, x2Until:0, magUntil:0, rugHp:0, rugMax:0 };
+    const px = { slowUntil:0, x2Until:0, magUntil:0, rugHp:0, rugMax:0, triUntil:0 };
     let reviveAvail = false;   // SECOND WIND charge, armed at run start if owned
     function nowS(){ return performance.now()*0.001; }
     function powActive(t){ return nowS() < t; }
@@ -1584,6 +1607,12 @@ window._adsPayload = "WwogIHsKICAgICJpZCI6ICJ4emlsbGEtaG9tZSIsCiAgICAidGV4dCI6IC
         e.sprite.position.set((Math.random()*2-1)*playHalfWidth,0.9,SPAWN_Z);
         e.prevZ=SPAWN_Z; e.sprite.scale.set(scale,scale,1); active.push(e); };
 
+      // TRI-CANNON pickup — boss-fight ONLY, at most once per fight. Checked before the normal
+      // weighted table so its rare roll isn't diluted by the other buckets. (place() resets
+      // e.bhits so the shootable-entity bookkeeping stays consistent even though you catch it.)
+      if(!_triThisFight && bossOnField() && Math.random()<TRI_SPAWN_CHANCE){
+        _triThisFight=true; e.type=TYPE.PWR_TRI; e.sprite.material=matTri; place(2.4); return;
+      }
       // TEST: heart-shaped extra-life token — 2% of spawns
       cum += 0.02;
       if(r<cum){ e.type=TYPE.HEART; e.sprite.material=matHeart; place(2.3); return; }
@@ -1641,6 +1670,7 @@ window._adsPayload = "WwogIHsKICAgICJpZCI6ICJ4emlsbGEtaG9tZSIsCiAgICAidGV4dCI6IC
       // (each tracer chips 1 HP at ~20 rounds/sec) instead of popping it instantly.
       px.rugMax = (3 + Math.floor(state.wave/4)) * 8;   // grows over the run
       px.rugHp  = px.rugMax;
+      _triThisFight=false;   // new fight — re-arm the one-per-fight tri-cannon drop
       e.type=TYPE.RUGBOSS; e.hp=px.rugHp; e.sprite.material=matRug;
       e.sprite.scale.set(BOSS_W,BOSS_H,1);
       e._bw=BOSS_W; e._bh=BOSS_H; e._by=BOSS_BASE_Y;   // base dims for the aspect-preserving "alive" anim
@@ -1729,7 +1759,7 @@ window._adsPayload = "WwogIHsKICAgICJpZCI6ICJ4emlsbGEtaG9tZSIsCiAgICAidGV4dCI6IC
      *  you can still collect the good stuff. Ramming the boss costs a life    *
      *  (see resolve above) — the gun is the only way to take it down.         *
      * ===================================================================== */
-    const CANNON = { pool:[], live:[], cd:0, rate:0.05, speed:48, mat:null };
+    const CANNON = { pool:[], live:[], cd:0, rate:0.05, speed:48, mat:null, cap:48 };
     // CHASE BOSS — the Rug Boss is a whale that FLEES down the lane with the bag while
     // Xrider guns the chopper after it. It flies in from off-screen, then LOCKS a fixed
     // distance ahead (CHASE_Z) and holds there — weaving + hurling candles — until it dies.
@@ -1745,6 +1775,16 @@ window._adsPayload = "WwogIHsKICAgICJpZCI6ICJ4emlsbGEtaG9tZSIsCiAgICAidGV4dCI6IC
     // short distance PAST the boss instead: far enough to still shred oncoming traffic in the
     // lane behind it, but not the full empty runway to the spawn line.
     const BULLET_CULL_Z = CHASE_Z - 13;   // -22: ~13 units of reach past the boss into traffic
+    // TRI-CANNON — a rare gun pickup that only drops DURING a boss fight and upgrades the
+    // auto-cannon to a 3-way spread for a few seconds. Deliberately hard to get: a low
+    // per-spawn roll, gated on an active boss, capped at one per fight — and you still have
+    // to dodge to its lane past the candle barrage to catch it.
+    const TRI_SPAWN_CHANCE = 0.05;   // per eligible spawn tick while a boss lives (difficulty knob)
+    const TRI_ANGLE        = 0.70;   // side-stream fan, radians (~40°, "a bit less than 45")
+    const TRI_SECS         = 10;     // active duration; 15 for a wallet-verified $XZILLA holder
+    const TRI_SECS_HOLDER  = 15;
+    let   _triThisFight    = false;  // one tri-gun per fight; reset in spawnRug + run reset
+    const BULLET_XCULL     = 14;     // free a bullet once it flies this far off the lane in x
     const BOSS_SLOW = 0.5;   // world runs at HALF whatever the ramp reached when the boss lands
     const SLOWMO    = 0.5;   // SLOW-MO power-up scaler (stacks multiplicatively with BOSS_SLOW)
     let   _speedMult= 1;     // eased toward the combined target; published as window.__speedMult
@@ -1820,14 +1860,29 @@ window._adsPayload = "WwogIHsKICAgICJpZCI6ICJ4emlsbGEtaG9tZSIsCiAgICAidGV4dCI6IC
     function clearBullets(){ for(let i=CANNON.live.length-1;i>=0;i--) freeBullet(CANNON.live[i]); CANNON.cd=0; }
     function bossOnField(){ for(const a of active){ if(a && !a.dead && a.type===TYPE.RUGBOSS) return a; } return null; }
 
-    function fireBullet(boss){
+    // Spawn one tracer with an explicit velocity. No audio/spark here — those are per-VOLLEY
+    // (see fireVolley) so the 3-way spread costs the same sound + muzzle fill-rate as a single
+    // shot, which is what keeps sustained fire cheap on iOS.
+    function spawnBullet(x0,vx,vz){
       const b=getBullet();
-      b.position.set(player.position.x, player.position.y+0.25, PLAYER_Z-0.6);
-      // gentle lock-on so the stream reliably connects with the weaving boss
-      b._vx=(boss.sprite.position.x-player.position.x)*0.85;
-      b._vz=-CANNON.speed;
-      burst(b.position.x,b.position.y,b.position.z,GOLD,1);   // muzzle spark (1 — keeps iOS fill-rate low at 20 shots/sec)
-      playShot();                                             // one-shot per bullet
+      b.position.set(x0, player.position.y+0.25, PLAYER_Z-0.6);
+      b._vx=vx; b._vz=vz; return b;
+    }
+    function fireVolley(boss){
+      if(CANNON.live.length > CANNON.cap) return;   // perf valve — never let the pool spiral
+      const x0=player.position.x;
+      // centre stream — gentle lock-on so it reliably connects with the weaving boss
+      spawnBullet(x0,(boss.sprite.position.x-x0)*0.85,-CANNON.speed);
+      // TRI-CANNON: add two fixed-angle side streams. They fan OUTWARD from the player, so by
+      // the time they reach the boss's depth they're far off-centre and sail past it — the
+      // boss's time-to-kill is unchanged (still the centre stream only). Their job is the
+      // off-centre TRAFFIC (scammers/honeypots/fake drops) the single cannon used to ignore.
+      if(nowS() < px.triUntil){
+        const s=Math.sin(TRI_ANGLE)*CANNON.speed, c=Math.cos(TRI_ANGLE)*CANNON.speed;
+        spawnBullet(x0,-s,-c); spawnBullet(x0, s,-c);
+      }
+      burst(x0,player.position.y+0.25,PLAYER_Z-0.6,GOLD,1);   // ONE muzzle spark per volley
+      playShot();                                             // ONE shot sound per volley
     }
 
     // Gun the boss down. Each tracer chips 1 HP; this defeats it at 0 (mirrors the
@@ -1880,7 +1935,7 @@ window._adsPayload = "WwogIHsKICAgICJpZCI6ICJ4emlsbGEtaG9tZSIsCiAgICAidGV4dCI6IC
     // separate pool the bullet loop never iterates, so they are immune by construction.
     const BULLET_PASS = {};
     [TYPE.SHIELD,TYPE.BOMB,TYPE.PWR_SLOW,TYPE.PWR_X2,TYPE.PWR_MAG,TYPE.HEART,
-     TYPE.HOLDER].forEach(t=>BULLET_PASS[t]=1);
+     TYPE.HOLDER,TYPE.PWR_TRI].forEach(t=>BULLET_PASS[t]=1);
     // Hostile entities the cannon shreds for score. Each takes 3 tracers (~0.15s at 20
     // rounds/sec) and pays exactly like catching a scammer: points + combo + kill.
     const BULLET_KILL = {};
@@ -1893,12 +1948,12 @@ window._adsPayload = "WwogIHsKICAgICJpZCI6ICJ4emlsbGEtaG9tZSIsCiAgICAidGV4dCI6IC
       if(boss){
         ensureShotBuffer();   // make sure the cheap WebAudio shot is ready for sustained fire
         CANNON.cd-=dt;
-        while(CANNON.cd<=0){ fireBullet(boss); CANNON.cd+=CANNON.rate; }   // playShot() per bullet
+        while(CANNON.cd<=0){ fireVolley(boss); CANNON.cd+=CANNON.rate; }   // 1 or 3 bullets / volley
       } else { if(CANNON.live.length) clearBullets(); gunOff(); }
 
       for(let i=CANNON.live.length-1;i>=0;i--){ const b=CANNON.live[i];
         b.position.x+=b._vx*dt; b.position.z+=b._vz*dt;
-        if(b.position.z<BULLET_CULL_Z){ freeBullet(b); continue; }
+        if(b.position.z<BULLET_CULL_Z || Math.abs(b.position.x)>BULLET_XCULL){ freeBullet(b); continue; }
         let hit=false, bossKilled=false;
         for(let j=active.length-1;j>=0;j--){ const a=active[j]; if(!a||a.dead) continue;
           if(BULLET_PASS[a.type]) continue;
@@ -2105,6 +2160,15 @@ window._adsPayload = "WwogIHsKICAgICJpZCI6ICJ4emlsbGEtaG9tZSIsCiAgICAidGV4dCI6IC
       if(e.type===TYPE.PWR_SLOW){ px.slowUntil=nowS()+4.5*_bm; burst(p.x,p.y,p.z,"#7df9ff",16); popup(p,"SLOW-MO",CYAN); showBanner("SLOW-MO"); try{sfx.power();}catch(_){} e.dead=true; freeEntity(e); return; }
       if(e.type===TYPE.PWR_X2){ px.x2Until=nowS()+6*_bm; burst(p.x,p.y,p.z,GOLD,16); popup(p,"SCORE ×2",GOLD); showBanner("DOUBLE SCORE"); try{sfx.power();}catch(_){} e.dead=true; freeEntity(e); return; }
       if(e.type===TYPE.PWR_MAG){ px.magUntil=nowS()+5*_bm; burst(p.x,p.y,p.z,MAG,16); popup(p,"MAGNET",MAG); showBanner("SCAMMER MAGNET"); try{sfx.power();}catch(_){} e.dead=true; freeEntity(e); return; }
+      if(e.type===TYPE.PWR_TRI){
+        // Wallet-verified $XZILLA holders get the longer window. Exact seconds (no _bm) so the
+        // 10s / 15s the player was promised is what they get.
+        const dur = window.__holderVerified ? TRI_SECS_HOLDER : TRI_SECS;
+        px.triUntil=nowS()+dur; burst(p.x,p.y,p.z,TRI_COL,20); popup(p,"TRI-CANNON",TRI_COL);
+        showBanner("TRI-CANNON "+dur+"s"); try{sfx.power();}catch(_){}
+        try{ window.__buzz && window.__buzz([40,25,60],"success"); }catch(_){}
+        e.dead=true; freeEntity(e); return;
+      }
 
       if(e.type===TYPE.SCAMMER){
         state.combo++; state.kills++; run.kills++; if(state.combo>run.combo) run.combo=state.combo;
@@ -2316,7 +2380,7 @@ window._adsPayload = "WwogIHsKICAgICJpZCI6ICJ4emlsbGEtaG9tZSIsCiAgICAidGV4dCI6IC
     function set2BeforeRun(){
       applyUpgrades();
       renderLives();                 // reflect new max HP
-      px.slowUntil=px.x2Until=px.magUntil=0; rugPending=false; nextBossWave=4; rugWarnUntil=0; lastBossEnd=0; window.__rugWarn=false; window.__rugBossAt=0;
+      px.slowUntil=px.x2Until=px.magUntil=px.triUntil=0; rugPending=false; nextBossWave=4; rugWarnUntil=0; lastBossEnd=0; window.__rugWarn=false; window.__rugBossAt=0;
       hideRugBar();
       if(lvl("start")>0){ shieldActive=true; }
       if(lvl("warm")>0){ state.combo = 1 + lvl("warm"); if(state.combo>run.combo) run.combo=state.combo; renderCombo(); }   // WARM ENGINE: open at combo ×(1+lvl)
@@ -2643,6 +2707,7 @@ window._adsPayload = "WwogIHsKICAgICJpZCI6ICJ4emlsbGEtaG9tZSIsCiAgICAidGV4dCI6IC
         else if(ty===TYPE.PWR_SLOW){ ring(p,"#7df9ff",1.2,0.42); }
         else if(ty===TYPE.PWR_X2){ ring(p,GOLD,1.2,0.42); }
         else if(ty===TYPE.PWR_MAG){ ring(p,MAG,1.2,0.42); }
+        else if(ty===TYPE.PWR_TRI){ ring(p,TRI_COL,1.3,0.44); }
       };
       function haptic(kind){ try{ if(tg&&tg.HapticFeedback) tg.HapticFeedback.impactOccurred(kind); }catch(_){} }
     })();
