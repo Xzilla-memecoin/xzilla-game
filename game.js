@@ -1739,8 +1739,15 @@ window._adsPayload = "WwogIHsKICAgICJpZCI6ICJ4emlsbGEtaG9tZSIsCiAgICAidGV4dCI6IC
     // never "passes" you to re-fight — you stay engaged from spawn to kill.
     const CHASE_Z   = -9;    // world-z the fleeing boss holds (player at PLAYER_Z=8; farther = bigger chase gap)
     const CHASE_IN  = 2.5;   // fly-in easing rate toward CHASE_Z on spawn
+    // Bullets used to fly all the way to SPAWN_Z-8 (-38), but the boss now sits at CHASE_Z
+    // (-9), so ~60% of each bullet's travel was dead flight past everything — a live sprite
+    // (= a draw call, the boss-fight perf bottleneck on mobile) the whole way. Cull them a
+    // short distance PAST the boss instead: far enough to still shred oncoming traffic in the
+    // lane behind it, but not the full empty runway to the spawn line.
+    const BULLET_CULL_Z = CHASE_Z - 13;   // -22: ~13 units of reach past the boss into traffic
     const BOSS_SLOW = 0.5;   // world runs at HALF whatever the ramp reached when the boss lands
-    let   _speedMult= 1;     // eased toward BOSS_SLOW/1; published as window.__speedMult
+    const SLOWMO    = 0.5;   // SLOW-MO power-up scaler (stacks multiplicatively with BOSS_SLOW)
+    let   _speedMult= 1;     // eased toward the combined target; published as window.__speedMult
     let   _jetCd    = 0;     // thruster-trail emit cadence accumulator
     let   _bossTireAcc = 0;  // boss tread-frame accumulator (#tire-anim)
     // Rug Boss art = images/bossDriving_sheet.webp (kaiju on a monster truck; 2×1 sheet of
@@ -1891,7 +1898,7 @@ window._adsPayload = "WwogIHsKICAgICJpZCI6ICJ4emlsbGEtaG9tZSIsCiAgICAidGV4dCI6IC
 
       for(let i=CANNON.live.length-1;i>=0;i--){ const b=CANNON.live[i];
         b.position.x+=b._vx*dt; b.position.z+=b._vz*dt;
-        if(b.position.z<SPAWN_Z-8){ freeBullet(b); continue; }
+        if(b.position.z<BULLET_CULL_Z){ freeBullet(b); continue; }
         let hit=false, bossKilled=false;
         for(let j=active.length-1;j>=0;j--){ const a=active[j]; if(!a||a.dead) continue;
           if(BULLET_PASS[a.type]) continue;
@@ -1915,6 +1922,21 @@ window._adsPayload = "WwogIHsKICAgICJpZCI6ICJ4emlsbGEtaG9tZSIsCiAgICAidGV4dCI6IC
           }
         }
         if(bossKilled) break;   // clearBullets() already flushed the pool
+        // THROWN PROJECTILES — these live in THROWS, a pool the loop above never touches, so
+        // they need their own pass. One tracer pops a rugger's "empty promise" bubble.
+        // The boss's RED CANDLES are deliberately NOT shootable (t._lethal): they are the
+        // fight's one real threat and must stay a steering dodge, or the auto-cannon would
+        // simply delete the boss's whole offence for you.
+        // No score: ruggers re-lob promos every ~1-2s, so paying out would be a farm.
+        if(!hit){
+          for(let j=THROWS.live.length-1;j>=0;j--){ const t=THROWS.live[j];
+            if(t._lethal) continue;
+            if(Math.abs(b.position.x-t.position.x)<1.2 && Math.abs(b.position.z-t.position.z)<1.2){
+              burst(t.position.x,t.position.y,t.position.z,"#8b5cff",10);
+              freeThrow(t); hit=true; break;
+            }
+          }
+        }
         if(hit){ burst(b.position.x,b.position.y,b.position.z,GOLD,4); freeBullet(b); }
       }
     };
@@ -2143,18 +2165,23 @@ window._adsPayload = "WwogIHsKICAgICJpZCI6ICJ4emlsbGEtaG9tZSIsCiAgICAidGV4dCI6IC
     window.__frame = function(dt){
       if(_origFrame) _origFrame(dt);
       const t=nowS();
-      // slow-mo scales the live speed the base loop just set this frame
-      if(powActive(px.slowUntil)) state.speed *= 0.5;
-      // BOSS SLOW — the world drops to BOSS_SLOW of whatever the ramp had reached the moment
-      // the boss landed, so a gear-12 fight slows proportionally to a gear-1 one. Published as
-      // window.__speedMult and folded in at the source (index.html's ramp line): scaling
-      // state.speed here would be pointless, since that ramp recomputes it from CFG every
-      // frame BEFORE the entity loop reads it, wiping anything we set from this hook.
-      // Eased, not snapped, so entering/leaving the fight doesn't feel like hitting a wall.
-      // NOTE: this restores a world slow-down an earlier build removed over iOS boss-fight
-      // lag. Unlike that version it never touches CFG, so there is no scaled-CFG state to
-      // leak into the next run.
-      _speedMult += ((bossOnField() ? BOSS_SLOW : 1) - _speedMult) * Math.min(1, dt*3.5);
+      // WORLD SPEED — both scalers ride window.__speedMult, which the base loop folds into
+      // state.speed at the source (index.html's ramp line). That placement is load-bearing:
+      // the ramp recomputes state.speed from CFG every frame BEFORE the entity loop reads it,
+      // so scaling state.speed from this hook (which runs at the END of the frame) is wiped
+      // before it can move anything. SLOW-MO used to do exactly that -- `state.speed *= 0.5`
+      // right here -- which is why it only ever slowed the grid scroll and the engine pitch
+      // while the scammers kept rushing in at full speed.
+      //   BOSS_SLOW: world drops to half of whatever the ramp had reached when the boss
+      //     landed, so a gear-12 fight slows proportionally to a gear-1 one.
+      //   SLOWMO:    the power-up, now actually slowing the hazards it always claimed to.
+      // They multiply, so slow-mo during a boss fight lands at 0.25x. Eased rather than
+      // snapped so neither one feels like hitting a wall.
+      // NOTE: BOSS_SLOW restores a world slow-down an earlier build removed over iOS
+      // boss-fight lag. Unlike that version it never touches CFG, so no scaled-CFG state
+      // can leak into the next run.
+      const _spdTarget = (bossOnField() ? BOSS_SLOW : 1) * (powActive(px.slowUntil) ? SLOWMO : 1);
+      _speedMult += (_spdTarget - _speedMult) * Math.min(1, dt*3.5);
       window.__speedMult = _speedMult;
       // Guard: if a prior build left CFG scaled, restore it once.
       if(CFG._baseSave!==undefined){
