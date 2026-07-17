@@ -18,9 +18,9 @@
 
 const TOP_KEY   = "lb:v1";
 const MAX_KEEP  = 200;
-const MAX_SCORE = 1000000; // sanity ceiling — blocks absurd exploit values. Raised from 50k after the
-                           // scoring update (2× ruggers, BOSS HUNTER, OVERCLOCK, faster gears) pushed the
-                           // legit ceiling well past 50k, which was silently rejecting real high scores.
+const MAX_SCORE = 5000000; // sanity ceiling — blocks absurd exploit values. Raised to 5M after the
+                           // scoring update (2× ruggers, BOSS HUNTER, OVERCLOCK, faster gears, rocket
+                           // launcher) pushed the legit ceiling past 1M, which was rejecting real high scores.
 const RATE_MS   = 30000;   // throttle window — applies ONLY to non-improving resubmits (see /submit)
 
 // $XZILLA SPL mint — the token whose balance sets a player's holder tier/multiplier.
