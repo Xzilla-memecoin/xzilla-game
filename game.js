@@ -1261,7 +1261,11 @@ window._adsPayload = "WwogIHsKICAgICJpZCI6ICJ4emlsbGEtaG9tZSIsCiAgICAidGV4dCI6IC
     // combos & multipliers could earn LESS XP than a grindy low-score run. Reward the actual
     // run score too (×0.10) so a better run always pays more XP.
     const scoreXP = Math.round(run.score * 0.10);
-    if(scoreXP > 0){ econ.tokens += scoreXP; toast("Score bonus +"+fmt(scoreXP)+" XP", GOLD); }
+    // Count the score bonus toward run.earned so the big "EARNED +X XP" line on the game-over
+    // screen reflects the WHOLE payout. Before, that headline showed only kill/boss XP, so a
+    // high-score/combo run (few raw kills) read as ~10k even though the score bonus quietly
+    // added 100k+ — it just flashed by as a separate toast and looked like nothing.
+    if(scoreXP > 0){ econ.tokens += scoreXP; run.earned += scoreXP; toast("Score bonus +"+fmt(scoreXP)+" XP", GOLD); }
     // (kill/boss earnings were already added live during play; persist everything now)
     saveEcon();
     missions.forEach(m=>{
@@ -1640,9 +1644,14 @@ window._adsPayload = "WwogIHsKICAgICJpZCI6ICJ4emlsbGEtaG9tZSIsCiAgICAidGV4dCI6IC
       if(!_triThisFight && bossOnField() && Math.random()<TRI_SPAWN_CHANCE){
         _triThisFight=true; e.type=TYPE.PWR_TRI; e.sprite.material=matTri; place(2.4); return;
       }
-      // ROCKET LAUNCHER pickup — same boss-fight-only, once-per-fight gating as the tri-cannon.
-      if(!_rocketThisFight && bossOnField() && Math.random()<ROCKET_SPAWN_CHANCE){
-        _rocketThisFight=true; e.type=TYPE.PWR_ROCKET; e.sprite.material=matRocket; place(2.4); return;
+      // ROCKET LAUNCHER pickup — once per fight during a boss (like the tri-cannon), OR rarely
+      // during normal play (time-gated) since rockets now home on scammers too.
+      if(bossOnField()){
+        if(!_rocketThisFight && Math.random()<ROCKET_SPAWN_CHANCE){
+          _rocketThisFight=true; e.type=TYPE.PWR_ROCKET; e.sprite.material=matRocket; place(2.4); return;
+        }
+      } else if(nowS()>=_rocketNormAt && Math.random()<ROCKET_SPAWN_CHANCE_NORM){
+        _rocketNormAt=nowS()+ROCKET_NORM_GAP; e.type=TYPE.PWR_ROCKET; e.sprite.material=matRocket; place(2.4); return;
       }
       // TEST: heart-shaped extra-life token — 2% of spawns
       cum += 0.02;
@@ -1702,6 +1711,7 @@ window._adsPayload = "WwogIHsKICAgICJpZCI6ICJ4emlsbGEtaG9tZSIsCiAgICAidGV4dCI6IC
       px.rugMax = (3 + Math.floor(state.wave/4)) * 8;   // grows over the run
       px.rugHp  = px.rugMax;
       _triThisFight=false; _rocketThisFight=false;   // new fight — re-arm the one-per-fight gun drops
+      bossFightStart=nowS();   // clock the fight so the red-candle barrage can escalate over time
       e.type=TYPE.RUGBOSS; e.hp=px.rugHp; e.sprite.material=matRug;
       e.sprite.scale.set(BOSS_W,BOSS_H,1);
       e._bw=BOSS_W; e._bh=BOSS_H; e._by=BOSS_BASE_Y;   // base dims for the aspect-preserving "alive" anim
@@ -1828,6 +1838,11 @@ window._adsPayload = "WwogIHsKICAgICJpZCI6ICJ4emlsbGEtaG9tZSIsCiAgICAidGV4dCI6IC
     const ROCKET_TURN  = 3.2;    // homing steer rate, rad/sec
     const ROCKET_HITR  = 2.4;    // detonation half-extent around the boss
     let   _rocketThisFight = false;  // one rocket launcher per fight; reset in spawnRug + run reset
+    // Normal-run rocket drop: rockets now home on scammers too, so the launcher can appear
+    // outside boss fights — but rarely, and time-gated so it stays a treat, not a crutch.
+    const ROCKET_SPAWN_CHANCE_NORM = 0.02;  // per spawn tick during normal play
+    const ROCKET_NORM_GAP          = 35;    // min seconds between normal-run rocket drops
+    let   _rocketNormAt = 0;                 // earliest nowS() a normal-run rocket may drop again
     const BULLET_XCULL     = 14;     // free a bullet once it flies this far off the lane in x
     const BOSS_SLOW = 0.5;   // world runs at HALF whatever the ramp reached when the boss lands
     const SLOWMO    = 0.5;   // SLOW-MO power-up scaler (stacks multiplicatively with BOSS_SLOW)
@@ -2014,23 +2029,59 @@ window._adsPayload = "WwogIHsKICAgICJpZCI6ICJ4emlsbGEtaG9tZSIsCiAgICAidGV4dCI6IC
     }
     function freeRocket(r){ const i=ROCKETS.live.indexOf(r); if(i<0) return; r.visible=false; ROCKETS.live.splice(i,1); ROCKETS.pool.push(r); }
     function clearRockets(){ for(let i=ROCKETS.live.length-1;i>=0;i--) freeRocket(ROCKETS.live[i]); ROCKETS.cd=0; }
-    function fireRocket(boss){
-      if(ROCKETS.live.length>=ROCKETS.cap) return;
+    // Nearest hostile (SCAMMER / HONEYPOT / DECOY) ahead of the player — the homing target
+    // for rockets during a NORMAL run (no boss). BULLET_KILL is the same hostile allowlist the
+    // auto-cannon uses; it's defined below but initialised before this ever runs.
+    function nearestEnemy(from){
+      let best=null, bd=Infinity;
+      for(let j=0;j<active.length;j++){ const a=active[j];
+        if(!a||a.dead||!BULLET_KILL[a.type]) continue;
+        const az=a.sprite.position.z;
+        if(az<BULLET_CULL_Z || az>PLAYER_Z) continue;   // only reachable enemies in the field ahead
+        const dx=a.sprite.position.x-from.x, dz=az-from.z, d=dx*dx+dz*dz;
+        if(d<bd){ bd=d; best=a; }
+      }
+      return best;
+    }
+    function fireRocket(target){
+      if(!target || ROCKETS.live.length>=ROCKETS.cap) return;
       const r=getRocket();
       r.position.set(player.position.x, player.position.y+0.3, PLAYER_Z-0.8);
-      let dx=boss.sprite.position.x-r.position.x, dz=boss.sprite.position.z-r.position.z;
+      const tp=target.sprite.position;
+      let dx=tp.x-r.position.x, dz=tp.z-r.position.z;
       const dl=Math.hypot(dx,dz)||1;
       r._vx=(dx/dl)*ROCKET_SPEED; r._vz=(dz/dl)*ROCKET_SPEED;
       burst(r.position.x,r.position.y,r.position.z,ROCKET_COL,6);
       try{ blip(120,0.16,"sawtooth",0.14); }catch(_){}
     }
-    // Steer each live rocket toward the boss (x-z homing), move, trail, and detonate on contact.
+    // A rocket detonation shreds a scammer in one shot, scoring exactly like a caught/gunned one.
+    function rocketKill(a){
+      if(!a||a.dead) return;
+      const ap=a.sprite.position.clone(); a.dead=true;
+      state.combo++; state.kills++; run.kills++; if(state.combo>run.combo) run.combo=state.combo;
+      burst(ap.x,ap.y,ap.z,ROCKET_COL,18); burst(ap.x,ap.y,ap.z,GOLD,10);
+      window.addScore(scammerPts(a),ap); renderCombo();
+      try{sfx.catch(state.combo);}catch(_){}
+      freeEntity(a);
+    }
+    // Steer each live rocket toward its target — the boss if one's on the field, otherwise the
+    // nearest scammer — move, trail, and detonate on contact. Re-acquires every frame so a
+    // rocket re-homes onto a fresh enemy if its original target dies or is caught mid-flight.
     function updateRockets(dt){
       const boss=bossOnField();
-      if(!boss){ if(ROCKETS.live.length) clearRockets(); return; }
-      const bx=boss.sprite.position.x, by=boss.sprite.position.y, bz=boss.sprite.position.z;
       for(let i=ROCKETS.live.length-1;i>=0;i--){ const r=ROCKETS.live[i];
-        // rotate current heading toward the boss by at most ROCKET_TURN*dt (forward = -z)
+        const tgt = boss || nearestEnemy(r.position);
+        // No target (launcher active but the lane's momentarily empty): coast forward, then cull.
+        if(!tgt){
+          r.position.x+=r._vx*dt; r.position.z+=r._vz*dt;
+          const tx0=r.position.x-(r._vx/ROCKET_SPEED)*1.1, tz0=r.position.z-(r._vz/ROCKET_SPEED)*1.1;
+          burst(tx0,r.position.y,tz0,ROCKET_COL,2);
+          if(r.position.z<BULLET_CULL_Z-6 || Math.abs(r.position.x)>BULLET_XCULL+4) freeRocket(r);
+          continue;
+        }
+        const bx=tgt.sprite.position.x, by=tgt.sprite.position.y, bz=tgt.sprite.position.z;
+        const isBoss=(tgt.type===TYPE.RUGBOSS);
+        // rotate current heading toward the target by at most ROCKET_TURN*dt (forward = -z)
         const curA=Math.atan2(r._vx,-r._vz);
         const tgtA=Math.atan2(bx-r.position.x, -(bz-r.position.z));
         let da=tgtA-curA; while(da>Math.PI)da-=2*Math.PI; while(da<-Math.PI)da+=2*Math.PI;
@@ -2041,15 +2092,18 @@ window._adsPayload = "WwogIHsKICAgICJpZCI6ICJ4emlsbGEtaG9tZSIsCiAgICAidGV4dCI6IC
         // jet trail — emit flame + spark just behind the tail so it streaks a contrail
         const tx=r.position.x-(r._vx/ROCKET_SPEED)*1.1, tz=r.position.z-(r._vz/ROCKET_SPEED)*1.1;
         burst(tx,r.position.y,tz,"#ffd23f",2); burst(tx,r.position.y-0.15,tz,ROCKET_COL,2);
-        if(Math.abs(r.position.x-bx)<ROCKET_HITR && Math.abs(r.position.z-bz)<ROCKET_HITR){
-          burst(bx,by,bz,ROCKET_COL,26); burst(bx,by,bz,GOLD,14); shake(0.7);
+        const hitr=isBoss?ROCKET_HITR:1.5;
+        if(Math.abs(r.position.x-bx)<hitr && Math.abs(r.position.z-bz)<hitr){
+          burst(bx,by,bz,ROCKET_COL,isBoss?26:16); burst(bx,by,bz,GOLD,isBoss?14:8); shake(isBoss?0.7:0.4);
           freeRocket(r);
-          let killed=false;
-          for(let k=0;k<ROCKET_DMG;k++){ if(damageBoss(boss)){ killed=true; break; } }
-          if(killed){ clearRockets(); return; }
+          if(isBoss){
+            let killed=false;
+            for(let k=0;k<ROCKET_DMG;k++){ if(damageBoss(boss)){ killed=true; break; } }
+            if(killed){ clearRockets(); return; }
+          } else rocketKill(tgt);
           continue;
         }
-        // cull rockets that sail well past the boss without connecting
+        // cull rockets that sail well past their target without connecting
         if(r.position.z<BULLET_CULL_Z-6 || Math.abs(r.position.x)>BULLET_XCULL+4){ freeRocket(r); }
       }
     }
@@ -2078,10 +2132,14 @@ window._adsPayload = "WwogIHsKICAgICJpZCI6ICJ4emlsbGEtaG9tZSIsCiAgICAidGV4dCI6IC
         ensureShotBuffer();   // make sure the cheap WebAudio shot is ready for sustained fire
         CANNON.cd-=dt;
         while(CANNON.cd<=0){ fireVolley(boss); CANNON.cd+=CANNON.rate; }   // 1 or 3 bullets / volley
-        // ROCKET LAUNCHER — while active, lob a homing rocket every ROCKET_RATE on top of the gun.
-        if(nowS()<px.rocketUntil){ ROCKETS.cd-=dt; while(ROCKETS.cd<=0){ fireRocket(boss); ROCKETS.cd+=ROCKET_RATE; } }
-        else ROCKETS.cd=0;
-      } else { if(CANNON.live.length) clearBullets(); if(ROCKETS.live.length) clearRockets(); gunOff(); }
+      } else { if(CANNON.live.length) clearBullets(); gunOff(); }
+      // ROCKET LAUNCHER — fires during boss fights AND normal runs while the pickup is active.
+      // Targets the boss if one's on the field, else the nearest scammer (updateRockets re-aims).
+      if(nowS()<px.rocketUntil){
+        ensureShotBuffer();
+        const tgt = boss || nearestEnemy(player.position);
+        ROCKETS.cd-=dt; while(ROCKETS.cd<=0){ fireRocket(tgt); ROCKETS.cd+=ROCKET_RATE; }
+      } else ROCKETS.cd=0;
       updateRockets(dt);
 
       for(let i=CANNON.live.length-1;i>=0;i--){ const b=CANNON.live[i];
@@ -2141,6 +2199,7 @@ window._adsPayload = "WwogIHsKICAgICJpZCI6ICJ4emlsbGEtaG9tZSIsCiAgICAidGV4dCI6IC
     const THROW_CANDLE_VZ = 22;   // world units/sec toward the player (lethal boss shot)
     const THROW_PROMO_VZ  = 17;   // slower nuisance lob from ruggers
     let _candleMat=null, _promoMats=null, candleCd=0.9, promoCd=1.2;
+    let bossFightStart=0, candleCap=6;   // fight clock + live red-candle cap (both ramp the barrage)
 
     function candleMat(){
       if(_candleMat) return _candleMat;
@@ -2194,7 +2253,7 @@ window._adsPayload = "WwogIHsKICAgICJpZCI6ICJ4emlsbGEtaG9tZSIsCiAgICAidGV4dCI6IC
       t._vx=((aimX - t.position.x)/eta)*lead; t._vz=vz;
     }
     function throwCandle(boss){
-      if(THROWS.live.length>=6) return;
+      if(THROWS.live.length>=candleCap) return;
       // redcandle.webp is a tall/thin portrait (aspect ~0.30) — scale to match so it reads as
       // a real candlestick, not a squashed block. Collision stays a fair fixed radius (see R).
       const t=getThrow(candleMat()); t.scale.set(0.72,2.4,1);
@@ -2214,9 +2273,19 @@ window._adsPayload = "WwogIHsKICAgICJpZCI6ICJ4emlsbGEtaG9tZSIsCiAgICAidGV4dCI6IC
       if(!state.running){ if(THROWS.live.length) clearThrows(); candleCd=0.9; promoCd=1.2; return; }
       const boss=bossOnField();
 
-      // boss red-candle barrage (only while a boss lives)
-      if(boss){ candleCd-=dt; if(candleCd<=0){ throwCandle(boss); candleCd=1.5+Math.random()*0.9; } }
-      else candleCd=0.9;
+      // boss red-candle barrage (only while a boss lives) — ESCALATES the longer the fight drags
+      // on. Ramp is keyed to REAL elapsed time (nowS), not slowed dt, so parking in SLOW-MO to
+      // farm easy score doesn't slow the incoming candles: camp longer, get buried in red.
+      if(boss){
+        const ramp=Math.min(1,(nowS()-bossFightStart)/30);   // 0 -> 1 over the first 30s of the fight
+        candleCap=Math.round(6+ramp*8);                      // more candles allowed in flight (6 -> 14)
+        candleCd-=dt;
+        if(candleCd<=0){
+          throwCandle(boss);
+          if(ramp>0.6) throwCandle(boss);                    // late-fight double volley
+          candleCd=(1.5-ramp*1.0)+Math.random()*(0.9-ramp*0.7);   // interval tightens 1.5s -> ~0.5s
+        }
+      } else { candleCd=0.9; candleCap=6; }
 
       // rugger "empty promises" — one mid-field rugger that hasn't thrown yet lobs a bubble
       promoCd-=dt;
@@ -2522,7 +2591,7 @@ window._adsPayload = "WwogIHsKICAgICJpZCI6ICJ4emlsbGEtaG9tZSIsCiAgICAidGV4dCI6IC
     function set2BeforeRun(){
       applyUpgrades();
       renderLives();                 // reflect new max HP
-      px.slowUntil=px.x2Until=px.magUntil=px.triUntil=px.rocketUntil=0; _rocketThisFight=false; rugPending=false; nextBossWave=4; rugWarnUntil=0; lastBossEnd=0; window.__rugWarn=false; window.__rugBossAt=0;
+      px.slowUntil=px.x2Until=px.magUntil=px.triUntil=px.rocketUntil=0; _rocketThisFight=false; _rocketNormAt=nowS()+ROCKET_NORM_GAP; rugPending=false; nextBossWave=4; rugWarnUntil=0; lastBossEnd=0; window.__rugWarn=false; window.__rugBossAt=0;
       hideRugBar();
       if(lvl("start")>0){ shieldActive=true; }
       if(lvl("warm")>0){ state.combo = 1 + lvl("warm"); if(state.combo>run.combo) run.combo=state.combo; renderCombo(); }   // WARM ENGINE: open at combo ×(1+lvl)
