@@ -190,10 +190,16 @@ async function resolvePid(env, provider, id, name){
   const profKey = PROFILE_PREFIX + pid;
   let prof = null;
   try{ prof = JSON.parse((await env.LB.get(profKey)) || "null"); }catch(_){}
+  const before = prof ? JSON.stringify(prof) : "";
   if(!prof){ prof = { name: name || "Player", providers: {}, created: Date.now() }; }
   if(name) prof.name = name;
   prof.providers[provider] = String(id);
-  await env.LB.put(profKey, JSON.stringify(prof));
+  // WRITE ONLY ON CHANGE. identify() runs on every authenticated request — score submits,
+  // XP saves, referral checks — so writing unconditionally burned a KV write per request
+  // and would have exhausted the free tier's 1,000 writes/day at very modest traffic.
+  // In the steady state a player's profile never changes, so this now costs zero writes.
+  const after = JSON.stringify(prof);
+  if(after !== before) await env.LB.put(profKey, after);
   return { pid, name: prof.name };
 }
 
@@ -395,6 +401,7 @@ const PUMP_TTL      = 60;     // seconds a FRESH price response is cached at the
 const PUMP_FAIL_TTL = 20;     // shorter cache after a failed/stale read, so recovery is quick
 const PUMP_LAST_KEY = "pump:last";
 const PUMP_LAST_TTL = 3600;   // last-known-good survives an hour of upstream flakiness
+const PUMP_WRITE_GAP = 600000;// ms between refreshes of the cached reading (KV write budget)
 
 /* Dexscreener is inconsistent: the same pair returns full data one minute and
    {"schemaVersion":"1.0.0","pairs":null} the next (undocumented rate limiting).
@@ -530,7 +537,20 @@ export default {
         // Remember the last good reading. Dexscreener is heavily rate-limited and
         // frequently answers {"pairs":null} even for a live pair, so without this the
         // game would flicker in and out of PUMP MODE all day.
-        await env.LB.put(PUMP_LAST_KEY, JSON.stringify(payload), { expirationTtl: PUMP_LAST_TTL });
+        //
+        // Refreshed at most every PUMP_WRITE_GAP rather than on every poll: the edge cache
+        // already limits upstream calls to ~1/min, and blindly persisting each one would
+        // spend ~1,440 KV writes/day — more than the entire free-tier daily allowance, for
+        // a value that barely moves. A mode CHANGE still writes immediately, so the game
+        // never lags behind an actual pump.
+        let prevMode = null, prevAt = 0;
+        try{
+          const cached = JSON.parse((await env.LB.get(PUMP_LAST_KEY)) || "null");
+          if(cached){ prevMode = cached.mode; prevAt = cached.at || 0; }
+        }catch(_){}
+        if(prevMode !== payload.mode || (Date.now() - prevAt) > PUMP_WRITE_GAP){
+          await env.LB.put(PUMP_LAST_KEY, JSON.stringify({ ...payload, at: Date.now() }), { expirationTtl: PUMP_LAST_TTL });
+        }
       } else {
         const last = await env.LB.get(PUMP_LAST_KEY);
         if(last){
