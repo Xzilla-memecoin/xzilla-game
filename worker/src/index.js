@@ -113,6 +113,34 @@ const TIERS = [
 ];
 function tierFor(bal){ for(const t of TIERS){ if(bal >= t.min) return t; } return null; }
 
+/* ------------------------------ player tags ------------------------------
+   Google hands us a FIRST NAME, not a unique handle, so two players called "Alex"
+   are indistinguishable on the board — and the client can't tell which row is the
+   viewer's own. Both need a stable per-player discriminator.
+
+   It must NOT be the pid: for Telegram players the pid IS their Telegram user id,
+   and publishing those on a public leaderboard would leak real account ids. So the
+   tag is a short one-way hash instead — stable, comparable, and reversible only by
+   brute force over a space nobody cares about.
+
+   The salt is a fixed constant, not SESSION_SECRET: rotating the session secret
+   signs everyone out, and must not silently renumber the whole leaderboard too. */
+const TAG_SALT = "xzilla-tag-v1";
+const _tagCache = new Map();
+async function shortTag(pid){
+  if(_tagCache.has(pid)) return _tagCache.get(pid);
+  const buf = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(TAG_SALT + ":" + pid));
+  const tag = toHex(buf).slice(0, 4);
+  if(_tagCache.size < 500) _tagCache.set(pid, tag);   // bounded: this is a per-isolate cache
+  return tag;
+}
+// Decorate leaderboard rows with tags for display. Never exposes `id`.
+async function withTags(rows){
+  return await Promise.all(rows.map(async e => ({
+    name: e.name, score: e.score, tier: e.tier || null, hold: e.hold || 0, tag: await shortTag(e.id),
+  })));
+}
+
 // Raw on-chain $XZILLA balance for an owner. Returns a number, or null when the
 // read fails — null means "unknown", which callers must NOT treat as zero.
 async function heliusBalance(address, env){
@@ -479,7 +507,7 @@ export default {
       const short = address.slice(0, 4) + "…" + address.slice(-4);
       const who = await resolvePid(env, "wallet", address, short);
       const token = await issueSession(env, who.pid, who.name, "wallet");
-      return json({ ok: true, token, pid: who.pid, name: who.name }, 200, origin);
+      return json({ ok: true, token, pid: who.pid, name: who.name, tag: await shortTag(who.pid) }, 200, origin);
     }
 
     if(req.method === "POST" && url.pathname === "/auth/google"){
@@ -493,20 +521,20 @@ export default {
       const nm = (payload.given_name || payload.name || (payload.email || "").split("@")[0] || "Player").slice(0, 24);
       const who = await resolvePid(env, "google", payload.sub, nm);
       const token = await issueSession(env, who.pid, who.name, "google");
-      return json({ ok: true, token, pid: who.pid, name: who.name }, 200, origin);
+      return json({ ok: true, token, pid: who.pid, name: who.name, tag: await shortTag(who.pid) }, 200, origin);
     }
 
     if(req.method === "GET" && url.pathname === "/auth/me"){
       const me = await identify(req, env, null);
       if(!me) return json({ ok: false }, 401, origin);
-      return json({ ok: true, pid: me.pid, name: me.name, provider: me.provider }, 200, origin);
+      return json({ ok: true, pid: me.pid, name: me.name, provider: me.provider, tag: await shortTag(me.pid) }, 200, origin);
     }
 
     if(req.method === "GET" && url.pathname === "/top"){
       const list = JSON.parse((await env.LB.get(TOP_KEY)) || "[]");
       // tier/hold ride along so the board can show WHO ACTUALLY HOLDS — the whole point
       // of the multiplier is that other players can see it.
-      return json({ top: list.slice(0, 10).map(e => ({ name: e.name, score: e.score, tier: e.tier || null, hold: e.hold || 0 })) }, 200, origin);
+      return json({ top: await withTags(list.slice(0, 10)) }, 200, origin);
     }
 
     /* ===================== PUMP MODE — live $XZILLA price ===================
@@ -584,7 +612,7 @@ export default {
       const list = JSON.parse((await env.LB.get(DAILY_KEY(day))) || "[]");
       return json({
         day,
-        top: list.slice(0, 20).map(e => ({ name: e.name, score: e.score, tier: e.tier || null })),
+        top: await withTags(list.slice(0, 20)),
         players: list.length,
       }, 200, origin);
     }
@@ -617,7 +645,8 @@ export default {
           ok: true, already: true,
           rank: sorted.findIndex(e => e.id === id) + 1,
           score: list[idx].score,
-          top: sorted.slice(0, 20).map(e => ({ name: e.name, score: e.score, tier: e.tier || null })),
+          top: await withTags(sorted.slice(0, 20)),
+          you: await shortTag(me.pid),
         }, 200, origin);
       }
 
@@ -636,7 +665,8 @@ export default {
         ok: true,
         rank: trimmed.findIndex(e => e.id === id) + 1,
         players: trimmed.length,
-        top: trimmed.slice(0, 20).map(e => ({ name: e.name, score: e.score, tier: e.tier || null })),
+        top: await withTags(trimmed.slice(0, 20)),
+        you: await shortTag(me.pid),
       }, 200, origin);
     }
 
@@ -693,7 +723,7 @@ export default {
         if(!(last && (now - last) < RATE_MS)) await env.LB.put(tsKey, String(now));
         const sorted = list.slice().sort((a, b) => b.score - a.score);
         const rank = sorted.findIndex(e => e.id === id) + 1;
-        return json({ ok: true, rank, tier, top: sorted.slice(0, 10).map(e => ({ name: e.name, score: e.score, tier: e.tier || null, hold: e.hold || 0 })) }, 200, origin);
+        return json({ ok: true, rank, tier, you: await shortTag(id), top: await withTags(sorted.slice(0, 10)) }, 200, origin);
       }
 
       // record the new best
@@ -703,7 +733,7 @@ export default {
       const trimmed = list.slice(0, MAX_KEEP);
       await env.LB.put(TOP_KEY, JSON.stringify(trimmed));
       const rank = trimmed.findIndex(e => e.id === id) + 1;
-      return json({ ok: true, rank, tier, top: trimmed.slice(0, 10).map(e => ({ name: e.name, score: e.score, tier: e.tier || null, hold: e.hold || 0 })) }, 200, origin);
+      return json({ ok: true, rank, tier, you: await shortTag(id), top: await withTags(trimmed.slice(0, 10)) }, 200, origin);
     }
 
     // ===================== Per-user economy (cross-device XP/upgrades) ===========

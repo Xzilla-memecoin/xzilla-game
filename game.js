@@ -1062,7 +1062,32 @@ window._adsPayload = "WwogIHsKICAgICJpZCI6ICJ4emlsbGEtaG9tZSIsCiAgICAidGV4dCI6IC
   }
   function setAuth(d, provider){
     auth.token = d.token; auth.pid = d.pid; auth.name = d.name; auth.provider = provider;
+    if(d.tag) myTag = d.tag;
     store.set(AUTH_TOKEN_KEY, d.token);
+  }
+
+  /* Which leaderboard row is MINE.
+   * Matching on display name never worked for web players — outside Telegram tgName()
+   * returns the literal "YOU", which matches nothing — and it actively mis-highlights
+   * when two players share a name, which Google logins make common (it gives a first
+   * name, not a unique handle). The server now stamps each row with a short one-way
+   * hash of the player id, and tells us our own, so rows are matched on that instead. */
+  let myTag = store.get("xz_mytag", null);
+  function setMyTag(t){ if(t && t!==myTag){ myTag=t; store.set("xz_mytag", t); } }
+  function isMe(entry){ return !!(myTag && entry && entry.tag === myTag); }
+
+  /* Display name for a board row. The tag suffix is added ONLY when the same name
+   * appears more than once in the visible list, so the common case stays clean. */
+  function boardName(entry, dupeNames){
+    const nm = escapeHtml(entry.name || "Player");
+    const dup = dupeNames && dupeNames.has(entry.name) && entry.tag;
+    return nm + (dup ? '<span class="ltag">#'+escapeHtml(entry.tag)+'</span>' : "");
+  }
+  function dupeNamesIn(list){
+    const seen = new Map(), dup = new Set();
+    for(const e of list){ const n=e && e.name; if(!n) continue;
+      if(seen.has(n)) dup.add(n); else seen.set(n, 1); }
+    return dup;
   }
   function clearAuth(){
     auth.token = auth.pid = auth.name = auth.provider = null;
@@ -1075,7 +1100,7 @@ window._adsPayload = "WwogIHsKICAgICJpZCI6ICJ4emlsbGEtaG9tZSIsCiAgICAidGV4dCI6IC
     if(!api || !auth.token){ if(cb) cb(false); return; }
     fetch(api+"/auth/me", { headers:{ "Authorization":"Bearer "+auth.token } })
       .then(r=>r.ok?r.json():null).then(d=>{
-        if(d && d.ok){ auth.pid=d.pid; auth.name=d.name; auth.provider=d.provider; if(cb) cb(true); }
+        if(d && d.ok){ auth.pid=d.pid; auth.name=d.name; auth.provider=d.provider; setMyTag(d.tag); if(cb) cb(true); }
         else { clearAuth(); if(cb) cb(false); }
       }).catch(()=>{ if(cb) cb(false); });   // network blip: keep the token, try again later
   }
@@ -1199,6 +1224,7 @@ window._adsPayload = "WwogIHsKICAgICJpZCI6ICJ4emlsbGEtaG9tZSIsCiAgICAidGV4dCI6IC
         // have produced, and a submit without it is rejected once the score is non-trivial.
         body: JSON.stringify({ initData: tgInitData(), score, wallet: connectedWallet(), stats: runStats() }) })
         .then(r=>r.json()).then(d=>{
+          if(d) setMyTag(d.you);   // Telegram players never call /auth/me — this is where they learn their tag
           const el=document.getElementById("goWorldRank"); if(!el) return;
           if(d && d.rank){ el.textContent="🌍 GLOBAL RANK #"+d.rank; el.style.color=GOLD; }
           else el.textContent="";
@@ -2898,17 +2924,16 @@ window._adsPayload = "WwogIHsKICAgICJpZCI6ICJ4emlsbGEtaG9tZSIsCiAgICAidGV4dCI6IC
         box.innerHTML='<h2 class="pnl-title" style="border-color:'+CYAN+';margin-top:4px;">TOP 10 DEGENS</h2>'+
           '<div class="sub" id="lbTopList">Loading global rankings…</div>';
         host.insertBefore(box, host.firstChild);
-        const mine = myBest && myBest.name;
         // no-store: always pull the freshest board so a cached response can't show stale order
         fetch(lbApi()+"/top", { cache:"no-store" }).then(r=>r.json()).then(d=>{
           const list=(d && d.top) || []; const el=$("lbTopList"); if(!el) return;
           if(!list.length){ el.textContent="No scores yet — be the first to rank!"; return; }
+          const dupes = dupeNamesIn(list);
           el.className=""; el.innerHTML=list.map((e,i)=>{
-            const me = mine && e.name===mine;
             const t  = titleForScore(e.score);   // each player's rank milestone, derived from their score
-            return '<div class="lrow'+(me?' you':'')+'">'+
+            return '<div class="lrow'+(isMe(e)?' you':'')+'">'+
               '<span class="lrank">#'+(i+1)+'</span>'+
-              '<span class="lname">'+escapeHtml(e.name)+holderBadge(e)+
+              '<span class="lname">'+boardName(e,dupes)+holderBadge(e)+
                 (t?' · <span style="color:'+GOLD+'">'+t.name+'</span>':'')+'</span>'+
               '<b>'+fmt(e.score)+'</b></div>';
           }).join("");
@@ -4174,6 +4199,7 @@ window._adsPayload = "WwogIHsKICAgICJpZCI6ICJ4emlsbGEtaG9tZSIsCiAgICAidGV4dCI6IC
         body:JSON.stringify({ initData:tgInitData(), score, day:drun.day,
                               wallet:connectedWallet(), stats:runStats() }) })
         .then(r=>r.json()).then(d=>{
+          if(d) setMyTag(d.you);
           if(d && d.rank){
             drun.rank=d.rank;
             drun.rec.rank=d.rank; store.set(DRUN_KEY, drun.rec);
@@ -4355,12 +4381,11 @@ window._adsPayload = "WwogIHsKICAgICJpZCI6ICJ4emlsbGEtaG9tZSIsCiAgICAidGV4dCI6IC
         .then(r=>r.json()).then(d=>{
           const list=(d&&d.top)||[]; const el=$("lbDailyList"); if(!el) return;
           if(!list.length){ el.textContent="Nobody has run today yet — be first on the board!"; return; }
-          const mine=myBest&&myBest.name;
+          const dupes=dupeNamesIn(list);
           el.className=""; el.innerHTML=list.slice(0,10).map((e,i)=>{
-            const me=mine&&e.name===mine;
-            return '<div class="lrow'+(me?' you':'')+'">'+
+            return '<div class="lrow'+(isMe(e)?' you':'')+'">'+
               '<span class="lrank">#'+(i+1)+'</span>'+
-              '<span class="lname">'+escapeHtml(e.name)+holderBadge(e)+'</span>'+
+              '<span class="lname">'+boardName(e,dupes)+holderBadge(e)+'</span>'+
               '<b>'+fmt(e.score)+'</b></div>';
           }).join("")+
           '<div class="sub dim" style="margin-top:6px">'+(d.players||list.length)+' degen'+((d.players||list.length)===1?"":"s")+' ran today · resets 00:00 UTC</div>';

@@ -393,3 +393,6 @@
   .loginOr{ font-family:'Orbitron',sans-serif; font-size:9px; color:#9fb6c9; opacity:.7; letter-spacing:2px; }
   /* GIS renders its own iframe button; keep it from overflowing the card on narrow phones. */
   #gsiButton{ max-width:100%; overflow:hidden; display:flex; justify-content:center; }
+  /* Discriminator shown after a board name only when that name is duplicated in the
+     visible list — Google logins provide a first name, not a unique handle. */
+  .ltag{ font-family:'Orbitron',sans-serif; font-size:9px; color:#9fb6c9; opacity:.7; margin-left:3px; }
