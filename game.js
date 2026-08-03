@@ -1037,9 +1037,145 @@ window._adsPayload = "WwogIHsKICAgICJpZCI6ICJ4emlsbGEtaG9tZSIsCiAgICAidGV4dCI6IC
   function lbApi(){ const u = window.__LB_API || ""; return u ? u.replace(/\/+$/,"") : ""; }
   // Currently-linked Solana address, or "" when no wallet is connected.
   function connectedWallet(){ try{ return (window.XZWallet && window.XZWallet.address) || ""; }catch(_){ return ""; } }
+
+  /* ========================= identity (Telegram OR web) =====================
+   * Telegram players authenticate with initData exactly as before. Web players
+   * sign in with their wallet or Google and get a session token, which rides in an
+   * Authorization header. Both resolve to the same server-side player id, so both
+   * land on the SAME leaderboard. */
+  const AUTH_TOKEN_KEY = "xz_auth_v1";
+  const auth = { token: store.get(AUTH_TOKEN_KEY, null), pid: null, name: null, provider: null };
+
+  function tgInitData(){ try{ return (tg && tg.initData) || ""; }catch(_){ return ""; } }
+  function signedIn(){ return !!(tgInitData() || auth.token); }
+  // Headers for any authenticated call. Telegram rides in the body (initData), web in a
+  // Bearer token — the Worker accepts either and doesn't care which.
+  function authHeaders(){
+    const h = { "content-type":"application/json" };
+    if(auth.token) h["Authorization"] = "Bearer " + auth.token;
+    return h;
+  }
+  // Per-run telemetry the Worker uses to bound a submitted score. Sending it is not
+  // optional: a submit without it is rejected once the score is non-trivial.
+  function runStats(){
+    return { secs: Math.round(state.elapsed||0), kills: run.kills|0, boss: run.boss|0 };
+  }
+  function setAuth(d, provider){
+    auth.token = d.token; auth.pid = d.pid; auth.name = d.name; auth.provider = provider;
+    store.set(AUTH_TOKEN_KEY, d.token);
+  }
+  function clearAuth(){
+    auth.token = auth.pid = auth.name = auth.provider = null;
+    try{ localStorage.removeItem(AUTH_TOKEN_KEY); }catch(_){}
+  }
+  // Re-validate a stored token on boot; a rejected/expired one is dropped rather than
+  // left to fail every subsequent submit silently.
+  function refreshAuth(cb){
+    const api = lbApi();
+    if(!api || !auth.token){ if(cb) cb(false); return; }
+    fetch(api+"/auth/me", { headers:{ "Authorization":"Bearer "+auth.token } })
+      .then(r=>r.ok?r.json():null).then(d=>{
+        if(d && d.ok){ auth.pid=d.pid; auth.name=d.name; auth.provider=d.provider; if(cb) cb(true); }
+        else { clearAuth(); if(cb) cb(false); }
+      }).catch(()=>{ if(cb) cb(false); });   // network blip: keep the token, try again later
+  }
+
+  /* Sign-In With Solana: the wallet signs a server nonce. No transaction, no gas —
+   * it only proves key ownership, and it doubles as the holder-tier source. */
+  async function loginWithWallet(){
+    const api = lbApi(); if(!api){ toast("Backend not connected", RED); return false; }
+    try{
+      if(!window.XZWallet){ toast("Wallet connector loading — try again", GOLD); return false; }
+      if(!connectedWallet()){
+        const ok = await window.XZWallet.connect();
+        if(!ok || !connectedWallet()){ return false; }   // connect() already surfaced why
+      }
+      if(!window.XZWallet.signMessage){ toast("This wallet can't sign in here — try a browser wallet", RED); return false; }
+      const n = await fetch(api+"/auth/nonce",{cache:"no-store"}).then(r=>r.json());
+      if(!n || !n.nonce){ toast("Login unavailable right now", RED); return false; }
+      const sig = await window.XZWallet.signMessage(n.message);
+      if(!sig){ return false; }                          // user rejected the signature
+      const res = await fetch(api+"/auth/wallet",{ method:"POST", headers:{"content-type":"application/json"},
+        body: JSON.stringify({ address: connectedWallet(), nonce: n.nonce, signature: sig, turnstile: window.__turnstileToken||"" }) })
+        .then(r=>r.json());
+      if(!res || !res.ok){ toast("Sign-in failed: "+((res&&res.error)||"unknown"), RED); return false; }
+      setAuth(res, "wallet");
+      toast("Signed in as "+res.name+" 🦖", TEAL);
+      onAuthChanged();
+      return true;
+    }catch(e){ toast("Sign-in failed", RED); return false; }
+  }
+
+  /* Google — the ID token is verified server-side against Google's keys. */
+  async function loginWithGoogle(credential){
+    const api = lbApi(); if(!api) return false;
+    try{
+      const res = await fetch(api+"/auth/google",{ method:"POST", headers:{"content-type":"application/json"},
+        body: JSON.stringify({ credential, turnstile: window.__turnstileToken||"" }) }).then(r=>r.json());
+      if(!res || !res.ok){ toast("Google sign-in failed: "+((res&&res.error)||"unknown"), RED); return false; }
+      setAuth(res, "google");
+      toast("Signed in as "+res.name+" 🦖", TEAL);
+      onAuthChanged();
+      return true;
+    }catch(e){ toast("Google sign-in failed", RED); return false; }
+  }
+  // Google Identity Services calls this from its own callback.
+  window.__xzGoogleCredential = c => loginWithGoogle(c && c.credential);
+
+  /* Start-screen sign-in card. Hidden entirely inside Telegram (initData already
+   * identifies the player) and while signed in on web. Guests are never blocked from
+   * playing — this only appears as the route to POSTING a score. */
+  function renderLoginCard(){
+    const host = $("loginCard"); if(!host) return;
+    if(tgInitData()){ host.style.display="none"; return; }          // Telegram: nothing to do
+    if(!lbApi()){ host.style.display="none"; return; }
+    host.style.display="";
+    if(auth.token && auth.name){
+      host.innerHTML =
+        '<div class="loginHead">✔ SIGNED IN</div>'+
+        '<div class="loginWho">'+escapeHtml(auth.name)+'<span> · '+escapeHtml(auth.provider||"")+'</span></div>'+
+        '<div class="loginSub dim">Your scores post to the global board.</div>'+
+        '<button class="btn secondary small" id="loginOut">SIGN OUT</button>';
+      $("loginOut").onclick = logout;
+      return;
+    }
+    host.innerHTML =
+      '<div class="loginHead">🔐 SIGN IN TO RANK</div>'+
+      '<div class="loginSub">Play as a guest any time — sign in only to post scores to the global leaderboard.</div>'+
+      '<button class="btn wallet-login" id="loginWallet">◆ SIGN IN WITH WALLET</button>'+
+      '<div class="loginSub dim">Free signature · no transaction · sets your holder tier</div>'+
+      (window.__GOOGLE_CLIENT_ID ? '<div class="loginOr">or</div><div id="gsiButton"></div>' : '');
+    $("loginWallet").onclick = async (ev) => {
+      const b = ev.currentTarget; b.disabled = true; b.textContent = "OPENING WALLET…";
+      try{ await loginWithWallet(); } finally { if(b.isConnected){ b.disabled=false; b.textContent="◆ SIGN IN WITH WALLET"; } }
+    };
+    mountGoogleButton();
+  }
+
+  /* Google Identity Services renders its own button; it must be re-rendered every time
+   * the card is rebuilt, and the library may still be loading on first paint. */
+  function mountGoogleButton(){
+    const el = $("gsiButton");
+    if(!el || !window.__GOOGLE_CLIENT_ID) return;
+    const g = window.google && window.google.accounts && window.google.accounts.id;
+    if(!g){ setTimeout(mountGoogleButton, 600); return; }   // library still loading
+    try{
+      g.initialize({ client_id: window.__GOOGLE_CLIENT_ID, callback: window.__xzGoogleCredential });
+      g.renderButton(el, { theme:"filled_black", size:"large", shape:"pill", text:"signin_with", width:240 });
+    }catch(_){}
+  }
+
+  function logout(){ clearAuth(); toast("Signed out", CYAN); onAuthChanged(); }
+  function onAuthChanged(){
+    try{ renderLoginCard(); }catch(_){}
+    try{ if(!$("leaderboardPanel").classList.contains("hidden")) renderLeaderboard(); }catch(_){}
+  }
+  window.__xzAuth = { get token(){ return auth.token; }, get name(){ return auth.name; },
+                      get pid(){ return auth.pid; }, signedIn, loginWithWallet, logout };
+
   function submitLeaderboard(){
     const api = lbApi(); if(!api) return;
-    if(!(tg && tg.initData)) return;                 // need verifiable Telegram identity to post
+    if(!signedIn()) return;                          // guests play freely; posting needs an identity
     // SEASONAL RESET: post ONLY the score earned in THIS run — never the persisted all-time
     // best (state.best / myBest). Those live on each player's device+account and survive a
     // server KV wipe, so submitting them re-posts pre-reset scores and refills the board within
@@ -1049,10 +1185,12 @@ window._adsPayload = "WwogIHsKICAgICJpZCI6ICJ4emlsbGEtaG9tZSIsCiAgICAidGV4dCI6IC
     const score = Math.round(state.score||0);
     if(score<=0) return;
     try{
-      fetch(api + "/submit", { method:"POST", headers:{ "content-type":"application/json" },
+      fetch(api + "/submit", { method:"POST", headers: authHeaders(),
         // wallet is a CLAIM, not proof — the Worker re-reads the balance on-chain before
         // it stamps a tier, so sending someone else's address just badges them, not you.
-        body: JSON.stringify({ initData: tg.initData, score, wallet: connectedWallet() }) })
+        // stats is REQUIRED: the Worker bounds the score by what the run could plausibly
+        // have produced, and a submit without it is rejected once the score is non-trivial.
+        body: JSON.stringify({ initData: tgInitData(), score, wallet: connectedWallet(), stats: runStats() }) })
         .then(r=>r.json()).then(d=>{
           const el=document.getElementById("goWorldRank"); if(!el) return;
           if(d && d.rank){ el.textContent="🌍 GLOBAL RANK #"+d.rank; el.style.color=GOLD; }
@@ -4024,9 +4162,10 @@ window._adsPayload = "WwogIHsKICAgICJpZCI6ICJ4emlsbGEtaG9tZSIsCiAgICAidGV4dCI6IC
                   kills:run.kills|0, combo:run.combo|0, boss:run.boss|0 };
       store.set(DRUN_KEY, drun.rec);
       const api=lbApi();
-      if(!api || !(tg && tg.initData)) return true;   // web players still get a local daily; posting needs a verified identity
-      fetch(api+"/daily-submit",{ method:"POST", headers:{"content-type":"application/json"},
-        body:JSON.stringify({ initData:tg.initData, score, day:drun.day, wallet:connectedWallet() }) })
+      if(!api || !signedIn()) return true;   // guests still get a local daily; posting needs an identity
+      fetch(api+"/daily-submit",{ method:"POST", headers:authHeaders(),
+        body:JSON.stringify({ initData:tgInitData(), score, day:drun.day,
+                              wallet:connectedWallet(), stats:runStats() }) })
         .then(r=>r.json()).then(d=>{
           if(d && d.rank){
             drun.rank=d.rank;
@@ -4223,6 +4362,10 @@ window._adsPayload = "WwogIHsKICAgICJpZCI6ICJ4emlsbGEtaG9tZSIsCiAgICAidGV4dCI6IC
 
     /* -------------------------------- boot ---------------------------------- */
     renderDailyCard();
+    renderLoginCard();
+    // Validate any stored session token, then repaint (a dead token must not sit there
+    // looking signed-in while every submit silently 401s).
+    refreshAuth(()=>renderLoginCard());
     fetchPump();
     // Re-poll every 5 min, and again whenever the player returns to the tab, so a
     // pump that starts mid-session is picked up without a reload.

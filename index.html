@@ -4,6 +4,8 @@
 <meta charset="UTF-8" />
 <!-- Telegram Web App SDK — loaded first so window.Telegram.WebApp (incl. CloudStorage) is ready before any init code runs. -->
 <script src="https://telegram.org/js/telegram-web-app.js"></script>
+<!-- Google Identity Services — only used when GOOGLE_CLIENT_ID is set below; harmless otherwise. -->
+<script src="https://accounts.google.com/gsi/client" async defer></script>
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
 <title>XZILLA: 3D Scam Destroyer</title>
 
@@ -11,7 +13,7 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@500;700;900&family=Press+Start+2P&display=swap" rel="stylesheet">
 
-<link rel="stylesheet" href="styles.css?v=35">
+<link rel="stylesheet" href="styles.css?v=36">
 </head>
 <body>
   <div id="game"></div>
@@ -76,6 +78,9 @@
       <div id="pumpBanner" class="pumpBanner" style="display:none"></div>
       <!-- DAILY RUG RUN: one shared seed, one attempt per UTC day (filled by game.js). -->
       <div id="dailyCard" class="dailyCard"></div>
+      <!-- Sign-in for players outside Telegram. Hidden inside Telegram (initData already
+           identifies them) and while already signed in. Guests can always play. -->
+      <div id="loginCard" class="loginCard" style="display:none"></div>
       <button id="connectBtn" class="btn secondary small" style="margin-top:18px;">CONNECT YOUR XZILLA HODL WALLET FOR SCORE MULTIPLIERS</button>
       <div id="walletInfo" class="wallet">Wallet not connected</div>
       <div id="vipStatus" class="status-line"></div>
@@ -411,8 +416,51 @@
         return false;
       },
       async refresh(){ if(W.address){ W.balance = await balanceFor(W.address); notify(); } },
-      async disconnect(){ await teardown(); }
+      async disconnect(){ await teardown(); },
+      /* Sign a plain-text message and return the signature base58-encoded — the shape
+       * the Worker's Ed25519 check expects. Used for Sign-In With Solana (proves key
+       * ownership, no transaction, no gas).
+       *
+       * Only the browser paths are supported. Inside Telegram the wallet is reached via
+       * Phantom's encrypted deeplink relay, where a signMessage round-trip would mean
+       * bouncing out to another app and back mid-login — and Telegram players already
+       * have a verified identity via initData, so they never need this. */
+      async signMessage(message){
+        const bytes = new TextEncoder().encode(message);
+        try{
+          const inj = getInjected();
+          if(inj && typeof inj.signMessage === "function"){
+            const res = await inj.signMessage(bytes, "utf8");
+            // Phantom returns { signature: Uint8Array }, some wallets return the array itself.
+            const sig = (res && res.signature) ? res.signature : res;
+            return b58encode(sig);
+          }
+          if(W.ready && W.appkit && typeof W.appkit.signMessage === "function"){
+            const res = await W.appkit.signMessage(bytes);
+            return b58encode((res && res.signature) ? res.signature : res);
+          }
+          if(window.__toast) window.__toast("This wallet can't sign in — open the game in a browser with Phantom", "#ffd23f");
+          return null;
+        }catch(e){
+          // User rejected the prompt, or the wallet refused — not an error worth shouting about.
+          if(e && /reject|denied|cancel/i.test(e.message||"")) return null;
+          if(window.__toast) window.__toast("Couldn't sign the login message", "#ff3b5c");
+          return null;
+        }
+      }
     };
+
+    // base58 encode (Solana's signature/address encoding) — no library needed.
+    function b58encode(bytes){
+      const A = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
+      const b = bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes);
+      let n = 0n;
+      for(const x of b) n = (n << 8n) | BigInt(x);
+      let out = "";
+      while(n > 0n){ out = A[Number(n % 58n)] + out; n /= 58n; }
+      for(const x of b){ if(x === 0) out = A[0] + out; else break; }   // preserve leading zero bytes
+      return out;
+    }
   })();
   </script>
   <!-- Postprocessing (bloom) — matches three r128 -->
@@ -464,6 +512,13 @@ window.__LB_API = (function(){
   }catch(_){}
   return LEADERBOARD_API;
 })();
+
+// Google Sign-In for web players. Paste the OAuth *Web* client ID from
+// console.cloud.google.com → APIs & Services → Credentials, and add your game's origin
+// (e.g. https://xzilla.io) to "Authorised JavaScript origins". Leave "" to hide the
+// Google button entirely — wallet sign-in works without it.
+const GOOGLE_CLIENT_ID = "";
+window.__GOOGLE_CLIENT_ID = GOOGLE_CLIENT_ID;
 
 // Your bot's Mini App link, attached to shared scores/invites so friends can tap & play.
 // Use the direct Mini App link, e.g. "https://t.me/YourBot/play" or "https://t.me/YourBot?startapp".
@@ -1450,6 +1505,6 @@ document.addEventListener("visibilitychange",()=>{ if(document.hidden&&state.run
 
 document.getElementById("bestScore").textContent=state.best;
 </script>
-<script src="game.js?v=108"></script>
+<script src="game.js?v=109"></script>
 </body>
 </html>

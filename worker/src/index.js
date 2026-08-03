@@ -3,16 +3,29 @@
 
    Endpoints
      GET  /top          -> { top: [{ name, score, tier, hold }, ...] }   (top 10, public)
-     POST /submit       -> { ok, rank, tier, top }   body: { initData, score, wallet? }
+     POST /submit       -> { ok, rank, tier, top }   body: { score, stats, wallet?, initData? }
      GET  /pump         -> { ok, priceUsd, change24, mcap, mode, mult, xpMult, label }
      GET  /daily-top    -> { day, top: [...], players }        ?day=YYYY-MM-DD (default today)
-     POST /daily-submit -> { ok, rank, top }   body: { initData, score, day, wallet? }
+     POST /daily-submit -> { ok, rank, top }   body: { score, stats, day, wallet?, initData? }
+     GET  /auth/nonce   -> { nonce, message }                  wallet login challenge
+     POST /auth/wallet  -> { ok, token, pid }   body: { address, nonce, signature }
+     POST /auth/google  -> { ok, token, pid }   body: { credential }
+     GET  /auth/me      -> { ok, pid, name, provider }         Authorization: Bearer <token>
+
+   Identity
+     Players are keyed by `pid`, not by a login provider. Telegram, wallet and Google
+     identities all MAP to a pid (see AUTH_PREFIX), so one human is one leaderboard row
+     across every surface and a second login can be linked later. A Telegram player's
+     default pid is their raw Telegram id — which is what every pre-existing record was
+     already keyed on — so introducing this layer required no data migration.
 
    Security
-     /submit verifies the Telegram WebApp `initData` HMAC with your BOT_TOKEN, so the
-     player's identity (Telegram user id + name) is trusted and can't be spoofed.
-     NB: the *score value* is still client-reported — fine for a casual board; add
-     server-side validation later if cheating becomes a problem.
+     Telegram players authenticate with the WebApp `initData` HMAC (BOT_TOKEN). Web
+     players authenticate with an Ed25519 wallet signature or a Google ID token, and
+     receive an HMAC-signed session token (SESSION_SECRET) used thereafter.
+     Scores remain client-reported, so submissions are bounded by implausible() and
+     account creation can be gated by Turnstile — both matter far more now that a
+     login no longer requires owning a real Telegram account.
 
    Storage
      A single KV key holds the sorted board (top MAX_KEEP). Simple + cheap; for very
@@ -42,7 +55,9 @@ function cors(origin){
   return {
     "Access-Control-Allow-Origin": origin || "*",
     "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
-    "Access-Control-Allow-Headers": "content-type, x-admin-token",
+    // Authorization is required for web (wallet/Google) sessions — without it the
+    // browser's preflight rejects every authenticated request from the embed.
+    "Access-Control-Allow-Headers": "content-type, x-admin-token, authorization",
     "Access-Control-Max-Age": "86400",
   };
 }
@@ -137,6 +152,227 @@ async function cachedBalance(address, env){
   return bal;
 }
 
+/* ========================================================================== *
+ *  IDENTITY — one player, many login methods                                  *
+ *                                                                             *
+ *  Every player is a `pid`. Login providers MAP to a pid rather than being the *
+ *  key themselves, so the same human who plays in Telegram and on the web is   *
+ *  one row on the leaderboard with one XP balance — and can link a second      *
+ *  login later without an un-doable merge.                                     *
+ *                                                                             *
+ *  A Telegram player's default pid is their raw Telegram id, which is exactly  *
+ *  what every existing record is already keyed on. That makes this change a    *
+ *  no-op for current players: no bulk rewrite, no lost standing, no downtime.  *
+ *  Non-Telegram pids are prefixed so they can never collide with a numeric id. *
+ * ========================================================================== */
+const AUTH_PREFIX    = "auth:";   // auth:<provider>:<providerId> -> pid  (link table)
+const PROFILE_PREFIX = "p:";      // p:<pid> -> { name, providers, created }
+const NONCE_PREFIX   = "nonce:";
+const NONCE_TTL      = 300;       // seconds a login nonce stays valid
+const SESSION_DAYS   = 30;
+
+// Default pid for a provider identity. Telegram keeps its raw id for back-compat.
+function defaultPid(provider, id){
+  if(provider === "tg") return String(id);
+  return (provider === "wallet" ? "w_" : "g_") + String(id);
+}
+
+/* Resolve a provider identity to a pid, creating the link + profile on first sight.
+   The link table is authoritative, so a future "link my wallet to my Telegram account"
+   feature just repoints the mapping without touching any game data. */
+async function resolvePid(env, provider, id, name){
+  const linkKey = AUTH_PREFIX + provider + ":" + id;
+  let pid = await env.LB.get(linkKey);
+  if(!pid){
+    pid = defaultPid(provider, id);
+    await env.LB.put(linkKey, pid);
+  }
+  const profKey = PROFILE_PREFIX + pid;
+  let prof = null;
+  try{ prof = JSON.parse((await env.LB.get(profKey)) || "null"); }catch(_){}
+  if(!prof){ prof = { name: name || "Player", providers: {}, created: Date.now() }; }
+  if(name) prof.name = name;
+  prof.providers[provider] = String(id);
+  await env.LB.put(profKey, JSON.stringify(prof));
+  return { pid, name: prof.name };
+}
+
+/* ------------------------------ session tokens ---------------------------
+   Verifying a Google JWT or an Ed25519 signature on every score submit would be
+   slow and pointless, so login issues a compact HMAC-signed token instead:
+     base64url(payload) "." base64url(hmac)
+   Signed with SESSION_SECRET, which must be set (`wrangler secret put`). Without
+   it, web login is disabled outright rather than silently unauthenticated. */
+function b64urlEncode(bytes){
+  let s = ""; for(const b of bytes) s += String.fromCharCode(b);
+  return btoa(s).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+}
+function b64urlDecode(str){
+  const s = str.replace(/-/g, "+").replace(/_/g, "/");
+  const bin = atob(s + "=".repeat((4 - (s.length % 4)) % 4));
+  const out = new Uint8Array(bin.length);
+  for(let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+  return out;
+}
+async function issueSession(env, pid, name, provider){
+  if(!env.SESSION_SECRET) return null;
+  const enc = new TextEncoder();
+  const payload = { pid, name, pv: provider, exp: Date.now() + SESSION_DAYS * 86400000 };
+  const body = b64urlEncode(enc.encode(JSON.stringify(payload)));
+  const sig  = b64urlEncode(new Uint8Array(await hmac(enc.encode(env.SESSION_SECRET), enc.encode(body))));
+  return body + "." + sig;
+}
+async function readSession(env, token){
+  if(!env.SESSION_SECRET || !token || token.indexOf(".") < 0) return null;
+  const [body, sig] = token.split(".");
+  const enc = new TextEncoder();
+  const expect = b64urlEncode(new Uint8Array(await hmac(enc.encode(env.SESSION_SECRET), enc.encode(body))));
+  // constant-time-ish compare: same length + full scan, no early return on mismatch
+  if(sig.length !== expect.length) return null;
+  let diff = 0; for(let i = 0; i < sig.length; i++) diff |= sig.charCodeAt(i) ^ expect.charCodeAt(i);
+  if(diff !== 0) return null;
+  try{
+    const p = JSON.parse(new TextDecoder().decode(b64urlDecode(body)));
+    if(!p || !p.pid || !p.exp || Date.now() > p.exp) return null;
+    return p;
+  }catch(_){ return null; }
+}
+
+/* ------------------------------- base58 / Ed25519 ------------------------- */
+const B58_ALPHA = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
+function b58decode(s){
+  const bytes = [0];
+  for(const ch of s){
+    const v = B58_ALPHA.indexOf(ch);
+    if(v < 0) throw new Error("bad base58");
+    let carry = v;
+    for(let i = 0; i < bytes.length; i++){ const x = bytes[i] * 58 + carry; bytes[i] = x & 0xff; carry = x >> 8; }
+    while(carry){ bytes.push(carry & 0xff); carry >>= 8; }
+  }
+  for(let i = 0; i < s.length && s[i] === B58_ALPHA[0]; i++) bytes.push(0);
+  return new Uint8Array(bytes.reverse());
+}
+// Sign-In With Solana: the wallet signs our nonce, proving it holds the private key.
+// workerd verifies Ed25519 natively, so this needs no library.
+async function verifySolanaSignature(address, message, signatureB58){
+  try{
+    const pub = b58decode(address), sig = b58decode(signatureB58);
+    if(pub.length !== 32 || sig.length !== 64) return false;
+    const key = await crypto.subtle.importKey("raw", pub, { name: "Ed25519" }, false, ["verify"]);
+    return await crypto.subtle.verify({ name: "Ed25519" }, key, sig, new TextEncoder().encode(message));
+  }catch(_){ return false; }
+}
+function loginMessage(nonce){
+  return "Sign in to XZILLA: RUG SMASHER\n\nThis proves you own this wallet.\nIt is free and sends no transaction.\n\nNonce: " + nonce;
+}
+
+/* --------------------------------- Google -------------------------------- */
+// Verifies a Google Identity Services ID token against Google's published keys.
+// The JWKS is cached at the edge, so this costs one extra fetch per ~hour, not per login.
+let _googleKeys = null, _googleKeysAt = 0;
+async function googleKeys(){
+  if(_googleKeys && Date.now() - _googleKeysAt < 3600000) return _googleKeys;
+  const r = await fetch("https://www.googleapis.com/oauth2/v3/certs");
+  const d = await r.json();
+  _googleKeys = d.keys || []; _googleKeysAt = Date.now();
+  return _googleKeys;
+}
+async function verifyGoogleToken(idToken, clientId){
+  try{
+    const [h, p, s] = String(idToken).split(".");
+    if(!h || !p || !s) return null;
+    const header  = JSON.parse(new TextDecoder().decode(b64urlDecode(h)));
+    const payload = JSON.parse(new TextDecoder().decode(b64urlDecode(p)));
+    if(payload.aud !== clientId) return null;
+    if(payload.iss !== "accounts.google.com" && payload.iss !== "https://accounts.google.com") return null;
+    if(!payload.exp || Date.now() / 1000 > payload.exp) return null;
+    const jwk = (await googleKeys()).find(k => k.kid === header.kid);
+    if(!jwk) return null;
+    const key = await crypto.subtle.importKey("jwk", jwk, { name: "RSASSA-PKCS1-v1_5", hash: "SHA-256" }, false, ["verify"]);
+    const ok = await crypto.subtle.verify("RSASSA-PKCS1-v1_5", key, b64urlDecode(s), new TextEncoder().encode(h + "." + p));
+    if(!ok) return null;
+    return payload;   // { sub, email, name, picture, ... }
+  }catch(_){ return null; }
+}
+
+/* ------------------------------ unified identity -------------------------
+   Every player endpoint calls this instead of verifyInitData, so Telegram and web
+   players are indistinguishable downstream. Returns { pid, name, provider } or null. */
+async function identify(req, env, body){
+  // 1) Web session token (wallet / Google login)
+  const auth = req.headers.get("Authorization") || "";
+  if(auth.startsWith("Bearer ")){
+    const sess = await readSession(env, auth.slice(7).trim());
+    if(sess) return { pid: sess.pid, name: sess.name, provider: sess.pv };
+  }
+  // 2) Telegram Mini App initData (unchanged path for existing players)
+  if(body && body.initData){
+    const user = await verifyInitData(body.initData, env.BOT_TOKEN);
+    if(user){
+      const name = (user.username ? "@" + user.username : (user.first_name || "Player")).slice(0, 24);
+      const who = await resolvePid(env, "tg", user.id, name);
+      return { pid: who.pid, name: who.name, provider: "tg" };
+    }
+  }
+  return null;
+}
+
+/* ============================== anti-cheat ================================
+   Scores are client-reported. Until now the only thing making the board expensive
+   to farm was that posting required a real Telegram account. Opening login to the
+   web removes that barrier, so submissions are now bounded by what the run itself
+   could plausibly have produced. Limits are deliberately loose — roughly 3x the
+   best real run on the board — because wrongly rejecting a genuine record is far
+   worse than letting an inflated-but-not-absurd one through. */
+/* Limits are derived from the game's own worst-case maths, then doubled. A single
+   kill can legitimately be worth base 20 (RUGGER + RUG RADAR) x combo 100 x tier 2.0
+   x upgrades 1.78 (MIDAS + OVERCLOCK maxed) x PUMP 2 x SCORE-x2 2 = ~28,400 points.
+   An earlier draft capped this at 4,000 and would have rejected real records — the
+   asymmetry matters, since a wrongly-rejected genuine high score is far more damaging
+   than an inflated one slipping through. */
+const CHEAT = {
+  perSecond: 60000,   // max score per second of elapsed run time (~4x the best real run)
+  baseSlack: 50000,   // allowance for end-of-run bonuses
+  perKill:   60000,   // ~2x the worst-case legitimate value of one kill
+  perBoss:   120000,  // ~7x the worst-case legitimate boss kill
+  minSeconds: 5,      // a run shorter than this cannot post a meaningful score
+  noStatsMax: 2000000,// ceiling for legacy clients that send no telemetry (see implausible)
+};
+// Returns null if acceptable, or a short reason string if the run looks impossible.
+function implausible(score, stats){
+  const secs  = Number(stats && stats.secs)  || 0;
+  const kills = Number(stats && stats.kills) || 0;
+  const boss  = Number(stats && stats.boss)  || 0;
+  if(score <= 0) return null;
+  // ROLLOVER ALLOWANCE — clients cached before run telemetry shipped don't send `stats`,
+  // and rejecting them would silently drop real players' scores until their browser
+  // refetched game.js. So a statless submit is still accepted below this ceiling. It is
+  // deliberately well above the best genuine run on the board (1.21M) and well below
+  // MAX_SCORE, so it is already a large improvement on the previous 15M free-for-all.
+  // Lower this to CHEAT.baseSlack once traffic has rolled over to the new client.
+  if(secs <= 0) return score > CHEAT.noStatsMax ? "no_run_data" : null;
+  if(secs < CHEAT.minSeconds && score > CHEAT.baseSlack) return "too_fast";
+  if(score > CHEAT.perSecond * secs + CHEAT.baseSlack) return "rate";
+  if(score > kills * CHEAT.perKill + boss * CHEAT.perBoss + CHEAT.baseSlack) return "unearned";
+  return null;
+}
+
+// Cloudflare Turnstile — blocks scripted account creation. No-op until
+// TURNSTILE_SECRET is set, so login keeps working before the widget exists.
+async function turnstileOk(env, token, ip){
+  if(!env.TURNSTILE_SECRET) return true;
+  if(!token) return false;
+  try{
+    const form = new FormData();
+    form.append("secret", env.TURNSTILE_SECRET);
+    form.append("response", token);
+    if(ip) form.append("remoteip", ip);
+    const r = await fetch("https://challenges.cloudflare.com/turnstile/v0/siteverify", { method: "POST", body: form });
+    const d = await r.json();
+    return !!d.success;
+  }catch(_){ return false; }
+}
+
 /* ============================== daily run ==================================
    One shared seed per UTC day + its own board. utcDay() is the single source of
    truth for "which day is it" — the client derives the same string, and a submit
@@ -202,6 +438,62 @@ export default {
     const origin = req.headers.get("Origin") || "*";
     if(req.method === "OPTIONS") return new Response(null, { headers: cors(origin) });
     const url = new URL(req.url);
+
+    /* ===================== LOGIN — wallet (SIWS) + Google ===================
+       GET  /auth/nonce   -> { nonce }            single-use, 5 min
+       POST /auth/wallet  -> { ok, token, pid }   body { address, nonce, signature, turnstile? }
+       POST /auth/google  -> { ok, token, pid }   body { credential, turnstile? }
+       GET  /auth/me      -> { ok, pid, name }    Authorization: Bearer <token> */
+    if(req.method === "GET" && url.pathname === "/auth/nonce"){
+      if(!env.SESSION_SECRET) return json({ error: "login_unconfigured" }, 503, origin);
+      const raw = crypto.getRandomValues(new Uint8Array(18));
+      const nonce = [...raw].map(b => b.toString(16).padStart(2, "0")).join("");
+      await env.LB.put(NONCE_PREFIX + nonce, "1", { expirationTtl: NONCE_TTL });
+      return json({ nonce, message: loginMessage(nonce) }, 200, origin);
+    }
+
+    if(req.method === "POST" && url.pathname === "/auth/wallet"){
+      if(!env.SESSION_SECRET) return json({ error: "login_unconfigured" }, 503, origin);
+      let body; try{ body = await req.json(); }catch(_){ return json({ error: "bad json" }, 400, origin); }
+      const address = String(body.address || "").trim();
+      const nonce   = String(body.nonce || "").trim();
+      if(!B58_RE.test(address) || !/^[a-f0-9]{20,80}$/.test(nonce)) return json({ error: "bad_request" }, 400, origin);
+      if(!(await turnstileOk(env, body.turnstile, req.headers.get("CF-Connecting-IP")))) return json({ error: "captcha_failed" }, 403, origin);
+
+      // Burn the nonce FIRST so a captured signature can't be replayed, even if
+      // two requests race — KV delete is the single point that makes it single-use.
+      const nk = NONCE_PREFIX + nonce;
+      if(!(await env.LB.get(nk))) return json({ error: "nonce_expired" }, 401, origin);
+      await env.LB.delete(nk);
+
+      if(!(await verifySolanaSignature(address, loginMessage(nonce), String(body.signature || ""))))
+        return json({ error: "bad_signature" }, 401, origin);
+
+      const short = address.slice(0, 4) + "…" + address.slice(-4);
+      const who = await resolvePid(env, "wallet", address, short);
+      const token = await issueSession(env, who.pid, who.name, "wallet");
+      return json({ ok: true, token, pid: who.pid, name: who.name }, 200, origin);
+    }
+
+    if(req.method === "POST" && url.pathname === "/auth/google"){
+      if(!env.SESSION_SECRET) return json({ error: "login_unconfigured" }, 503, origin);
+      if(!env.GOOGLE_CLIENT_ID) return json({ error: "google_unconfigured" }, 503, origin);
+      let body; try{ body = await req.json(); }catch(_){ return json({ error: "bad json" }, 400, origin); }
+      if(!(await turnstileOk(env, body.turnstile, req.headers.get("CF-Connecting-IP")))) return json({ error: "captcha_failed" }, 403, origin);
+      const payload = await verifyGoogleToken(body.credential || "", env.GOOGLE_CLIENT_ID);
+      if(!payload) return json({ error: "bad_token" }, 401, origin);
+      // Display name: prefer the given name, never the raw email (it would land on a public board).
+      const nm = (payload.given_name || payload.name || (payload.email || "").split("@")[0] || "Player").slice(0, 24);
+      const who = await resolvePid(env, "google", payload.sub, nm);
+      const token = await issueSession(env, who.pid, who.name, "google");
+      return json({ ok: true, token, pid: who.pid, name: who.name }, 200, origin);
+    }
+
+    if(req.method === "GET" && url.pathname === "/auth/me"){
+      const me = await identify(req, env, null);
+      if(!me) return json({ ok: false }, 401, origin);
+      return json({ ok: true, pid: me.pid, name: me.name, provider: me.provider }, 200, origin);
+    }
 
     if(req.method === "GET" && url.pathname === "/top"){
       const list = JSON.parse((await env.LB.get(TOP_KEY)) || "[]");
@@ -280,10 +572,14 @@ export default {
     if(req.method === "POST" && url.pathname === "/daily-submit"){
       let body;
       try{ body = await req.json(); }catch(_){ return json({ error: "bad json" }, 400, origin); }
-      const user = await verifyInitData(body.initData || "", env.BOT_TOKEN);
-      if(!user) return json({ error: "unauthorized" }, 401, origin);
+      const me = await identify(req, env, body);
+      if(!me) return json({ error: "unauthorized" }, 401, origin);
       const score = Math.max(0, Math.round(Number(body.score) || 0));
       if(score > MAX_SCORE) return json({ error: "score_rejected" }, 400, origin);
+      // Everyone plays the SAME seed on a given day, so an impossible daily score is
+      // impossible for every player alike — the plausibility check bites hardest here.
+      const badDaily = implausible(score, body.stats);
+      if(badDaily) return json({ error: "score_rejected", reason: badDaily }, 400, origin);
       const today = utcDay();
       // Only today's board is writable — no back-filling yesterday once its seed is known.
       if(body.day && body.day !== today) return json({ error: "stale_day", day: today }, 409, origin);
@@ -328,13 +624,16 @@ export default {
       let body;
       try{ body = await req.json(); }catch(_){ return json({ error: "bad json" }, 400, origin); }
       const score = Math.max(0, Math.round(Number(body.score) || 0));
-      const user = await verifyInitData(body.initData || "", env.BOT_TOKEN);
-      if(!user) return json({ error: "unauthorized" }, 401, origin);
-      const id   = String(user.id);
-      const name = (user.username ? "@" + user.username : (user.first_name || "Player")).slice(0, 24);
+      const me = await identify(req, env, body);
+      if(!me) return json({ error: "unauthorized" }, 401, origin);
+      const id   = me.pid;
+      const name = me.name;
 
       // (1) SANITY CAP — reject impossible scores instead of recording them.
       if(score > MAX_SCORE) return json({ error: "score_rejected" }, 400, origin);
+      // (1b) PLAUSIBILITY — bound the score by what the run could have produced.
+      const bad = implausible(score, body.stats);
+      if(bad) return json({ error: "score_rejected", reason: bad }, 400, origin);
 
       const list = JSON.parse((await env.LB.get(TOP_KEY)) || "[]");
       const idx  = list.findIndex(e => e.id === id);
@@ -396,22 +695,22 @@ export default {
 
     if(req.method === "POST" && url.pathname === "/econ-load"){
       let body; try{ body = await req.json(); }catch(_){ return json({ error: "bad json" }, 400, origin); }
-      const user = await verifyInitData(body.initData || "", env.BOT_TOKEN);
-      if(!user) return json({ error: "unauthorized" }, 401, origin);
-      const v = await env.LB.get(ECON_PREFIX + user.id);
+      const me = await identify(req, env, body);
+      if(!me) return json({ error: "unauthorized" }, 401, origin);
+      const v = await env.LB.get(ECON_PREFIX + me.pid);
       let snap = null; try{ snap = v ? JSON.parse(v) : null; }catch(_){ snap = null; }
       return json({ ok: true, snap }, 200, origin);
     }
 
     if(req.method === "POST" && url.pathname === "/econ-save"){
       let body; try{ body = await req.json(); }catch(_){ return json({ error: "bad json" }, 400, origin); }
-      const user = await verifyInitData(body.initData || "", env.BOT_TOKEN);
-      if(!user) return json({ error: "unauthorized" }, 401, origin);
+      const me = await identify(req, env, body);
+      if(!me) return json({ error: "unauthorized" }, 401, origin);
       const snap = body.snap;
       if(!snap || typeof snap !== "object" || Array.isArray(snap)) return json({ error: "bad_snap" }, 400, origin);
       const s = JSON.stringify(snap);
       if(s.length > ECON_MAX_BYTES) return json({ error: "too_large" }, 413, origin);
-      await env.LB.put(ECON_PREFIX + String(user.id), s);
+      await env.LB.put(ECON_PREFIX + me.pid, s);
       return json({ ok: true }, 200, origin);
     }
 
@@ -430,9 +729,9 @@ export default {
 
     if(req.method === "POST" && url.pathname === "/refer"){
       let body; try{ body = await req.json(); }catch(_){ return json({ error: "bad json" }, 400, origin); }
-      const user = await verifyInitData(body.initData || "", env.BOT_TOKEN);
-      if(!user) return json({ error: "unauthorized" }, 401, origin);
-      const invitee = String(user.id);
+      const me = await identify(req, env, body);
+      if(!me) return json({ error: "unauthorized" }, 401, origin);
+      const invitee = me.pid;
       const ref = String(body.ref || "").trim();
       if(!ID_RE.test(ref) || ref === invitee) return json({ ok:true, welcome:0 }, 200, origin);   // bad/self ref → no-op
       if(await env.LB.get(REFERRED_PREFIX + invitee)) return json({ ok:true, welcome:0, already:true }, 200, origin);  // one-time
@@ -452,9 +751,9 @@ export default {
 
     if(req.method === "POST" && url.pathname === "/refer-claim"){
       let body; try{ body = await req.json(); }catch(_){ return json({ error: "bad json" }, 400, origin); }
-      const user = await verifyInitData(body.initData || "", env.BOT_TOKEN);
-      if(!user) return json({ error: "unauthorized" }, 401, origin);
-      const id = String(user.id);
+      const me = await identify(req, env, body);
+      if(!me) return json({ error: "unauthorized" }, 401, origin);
+      const id = me.pid;
       const reward = parseInt(await env.LB.get(REFPEND_PREFIX + id), 10) || 0;
       const count  = parseInt(await env.LB.get(REFCOUNT_PREFIX + id), 10) || 0;
       if(reward > 0) await env.LB.delete(REFPEND_PREFIX + id);   // one-time claim
