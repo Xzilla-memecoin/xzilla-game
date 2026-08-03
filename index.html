@@ -11,7 +11,7 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@500;700;900&family=Press+Start+2P&display=swap" rel="stylesheet">
 
-<link rel="stylesheet" href="styles.css?v=34">
+<link rel="stylesheet" href="styles.css?v=35">
 </head>
 <body>
   <div id="game"></div>
@@ -72,6 +72,10 @@
            once they have already rotated to landscape (see .orient-hint in styles.css). -->
       <p class="orient-hint">For the ultimate arcade experience, rotate to landscape and enable tilting.</p>
       <button id="startBtn" class="btn">▶ START GAME</button>
+      <!-- Live $XZILLA chart + the score modifier it currently grants (filled by game.js). -->
+      <div id="pumpBanner" class="pumpBanner" style="display:none"></div>
+      <!-- DAILY RUG RUN: one shared seed, one attempt per UTC day (filled by game.js). -->
+      <div id="dailyCard" class="dailyCard"></div>
       <button id="connectBtn" class="btn secondary small" style="margin-top:18px;">CONNECT YOUR XZILLA HODL WALLET FOR SCORE MULTIPLIERS</button>
       <div id="walletInfo" class="wallet">Wallet not connected</div>
       <div id="vipStatus" class="status-line"></div>
@@ -448,7 +452,18 @@ const FORCE_VIP_FOR_DEMO  = false;                // VIP is now gated by a real 
 // deployed Worker URL here, e.g. "https://xzilla-leaderboard.<you>.workers.dev". Leave ""
 // to disable (the game and the local RANKS board work fine without it).
 const LEADERBOARD_API     = "https://xzilla-leaderboard.kombainain.workers.dev";
-window.__LB_API = LEADERBOARD_API;
+// DEV ONLY: ?api=... repoints the backend at a local Worker (npx wrangler dev) so new
+// endpoints can be exercised before deploying. Deliberately gated to a localhost origin —
+// honouring it on the live site would let a crafted link forward a player's Telegram
+// initData (an auth token) to an attacker-controlled server.
+window.__LB_API = (function(){
+  try{
+    const isLocal = /^(localhost|127\.0\.0\.1|\[::1\])$/.test(location.hostname);
+    const override = new URLSearchParams(location.search).get("api");
+    if(isLocal && override) return override;
+  }catch(_){}
+  return LEADERBOARD_API;
+})();
 
 // Your bot's Mini App link, attached to shared scores/invites so friends can tap & play.
 // Use the direct Mini App link, e.g. "https://t.me/YourBot/play" or "https://t.me/YourBot?startapp".
@@ -632,8 +647,63 @@ function blip(freq,dur,type,vol,dest){
     o.connect(g); g.connect(dest||sfxGain); o.start(); o.stop(actx.currentTime+(dur||0.12));
   }catch(e){}
 }
+/* Filtered noise burst routed through sfxGain (mNoise goes to musicGain and can't be
+   reused here). The filter sweeps freq0 -> freq1 over the burst, which is what turns
+   flat static into a whoosh (sweep up) or an explosion tail (sweep down). */
+function noiseBurst(dur,vol,filterType,freq0,freq1,q){
+  if(!actx) return;
+  try{
+    const t=actx.currentTime, len=Math.max(1,(actx.sampleRate*dur)|0);
+    const b=actx.createBuffer(1,len,actx.sampleRate), d=b.getChannelData(0);
+    for(let i=0;i<len;i++) d[i]=Math.random()*2-1;
+    const s=actx.createBufferSource(); s.buffer=b;
+    const f=actx.createBiquadFilter(); f.type=filterType||"lowpass";
+    f.frequency.setValueAtTime(freq0,t);
+    f.frequency.exponentialRampToValueAtTime(Math.max(40,freq1),t+dur);
+    if(q) f.Q.value=q;
+    const g=actx.createGain();
+    g.gain.setValueAtTime(vol,t); g.gain.exponentialRampToValueAtTime(0.0001,t+dur);
+    s.connect(f); f.connect(g); g.connect(sfxGain||masterGain);
+    s.start(t); s.stop(t+dur);
+  }catch(e){}
+}
+// Pitch-swept oscillator — the tonal half of the launch/impact sounds.
+function sweep(f0,f1,dur,type,vol){
+  if(!actx) return;
+  try{
+    const t=actx.currentTime, o=actx.createOscillator(), g=actx.createGain();
+    o.type=type||"sawtooth";
+    o.frequency.setValueAtTime(f0,t); o.frequency.exponentialRampToValueAtTime(Math.max(20,f1),t+dur);
+    g.gain.setValueAtTime(vol||0.12,t); g.gain.exponentialRampToValueAtTime(0.0001,t+dur);
+    o.connect(g); g.connect(sfxGain||masterGain); o.start(t); o.stop(t+dur+0.02);
+  }catch(e){}
+}
 const sfx = {
   catch(c){ const base=520+Math.min(c,15)*30; blip(base,0.08,"square",0.12); blip(base*1.5,0.10,"square",0.08); },
+  /* ROCKET LAUNCH — ignition sweep + a bright whoosh.
+     Levels here were set by measuring output against the existing sfx rather than by ear:
+     the first version peaked at 0.088 vs hit()'s 0.202, i.e. less than half the loudest
+     sound in the game, and its band-passed noise (Q 1.2) threw away most of its energy.
+     Wider Q + higher gain now lands it at ~0.27 peak with more high-band presence than
+     catch(). Still short, because rockets fire every ~0.42s while the launcher is up. */
+  rocket(){
+    sweep(320,1150,0.17,"sawtooth",0.20);
+    noiseBurst(0.22,0.40,"bandpass",1200,3800,0.7);
+    blip(1400,0.05,"square",0.10);
+  },
+  /* ROCKET DETONATION — crack, body, thump.
+     The original was the LOUDEST sound in the game by peak (0.375) and still sounded
+     silent, because nearly all of it sat under ~150Hz (a 32Hz sine tail) — phone and
+     laptop speakers simply don't reproduce that. The fix is spectral, not volume: the
+     highpass "crack" layer is what actually carries on a small speaker, while the
+     low sweep (bottoming at 70Hz, not 32Hz) gives it weight on headphones. */
+  boom(big){
+    const v = big ? 1 : 0.62, d = big ? 1 : 0.72;
+    noiseBurst(0.08*d, 0.18*v, "highpass", 2200,  900, 0.7);   // crack — carries small speakers
+    noiseBurst(0.34*d, 0.18*v, "lowpass",  3000,  260, 0.9);   // body
+    sweep(230, 70, 0.30*d, "sine", 0.26*v);                    // thump
+    blip(320, 0.09*d, "square", 0.09*v);
+  },
   hit(){ blip(150,0.28,"sawtooth",0.2); blip(70,0.32,"sawtooth",0.14); },
   power(){ blip(660,0.08,"square",0.14); setTimeout(()=>blip(990,0.10,"square",0.12),70); setTimeout(()=>blip(1320,0.12,"square",0.1),150); },
   wave(){ blip(523,0.1,"square",0.13); setTimeout(()=>blip(784,0.14,"square",0.12),90); setTimeout(()=>blip(1046,0.18,"square",0.1),190); },
@@ -1159,7 +1229,9 @@ function loop(){ requestAnimationFrame(loop); const dt=Math.min(clock.getDelta()
       if(g>state.gear){ state.gear=g; showBanner("GEAR "+g); } }
     state.spawnGap=Math.max(CFG.minSpawnGap,CFG.baseSpawnGap-state.elapsed*0.012);
     player.position.x+=(state.playerTargetX-player.position.x)*CFG.playerSpeedLerp; player.position.x=THREE.MathUtils.clamp(player.position.x,-playHalfWidth,playHalfWidth);
-    state.spawnTimer-=dt; if(state.spawnTimer<=0){ spawn(); state.spawnTimer=state.spawnGap*(0.7+Math.random()*0.6); }
+    // Spawn cadence draws from the seeded stream (window.__RND, set up in game.js) so a
+    // DAILY RUG RUN paces identically for everyone; falls back to Math.random in normal play.
+    state.spawnTimer-=dt; if(state.spawnTimer<=0){ spawn(); state.spawnTimer=state.spawnGap*(0.7+(window.__RND?window.__RND():Math.random())*0.6); }
     const catchX=1.85, catchZ=1.6, nearX=catchX+1.05;   // nearX: outer band that still counts as a "by-a-hair" dodge
     for(let i=active.length-1;i>=0;i--){ const e=active[i]; if(e.dead) continue; e.prevZ=e.sprite.position.z; e.sprite.position.z+=state.speed*dt; const z=e.sprite.position.z;
       if(e.prevZ<PLAYER_Z+catchZ && z>=PLAYER_Z-catchZ){ const dx=Math.abs(e.sprite.position.x-player.position.x);
@@ -1378,6 +1450,6 @@ document.addEventListener("visibilitychange",()=>{ if(document.hidden&&state.run
 
 document.getElementById("bestScore").textContent=state.best;
 </script>
-<script src="game.js?v=106"></script>
+<script src="game.js?v=108"></script>
 </body>
 </html>

@@ -328,3 +328,51 @@
   .ro-title{ font-family:'Press Start 2P','Orbitron',sans-serif; font-size:15px; letter-spacing:1px; color:#fff;
     text-shadow:0 0 12px var(--cyan), 0 0 30px rgba(33,230,255,.5); }
   .ro-sub{ margin-top:12px; font-family:'Orbitron',sans-serif; font-size:11px; letter-spacing:1px; color:#9fb6c9; }
+
+  /* ================= GROWTH LAYER: pump banner, daily run, share card =========
+     Added alongside the SHARE CARD / DAILY RUG RUN / PUMP MODE features in game.js.
+     All three mount on the start screen inside .startCol, so they inherit its
+     centred column layout in both portrait and the landscape split. */
+
+  /* ---- PUMP MODE: live $XZILLA chart strip -------------------------------- */
+  .pumpBanner{ margin-top:14px; width:100%; max-width:300px; border:2px solid #1f1840; border-radius:10px;
+    padding:10px 12px; background:rgba(10,3,38,.55); text-align:center; }
+  .pumpMode{ font-family:'Press Start 2P'; font-size:10px; letter-spacing:1px; line-height:1.6; }
+  .pumpNote{ font-family:'Orbitron',sans-serif; font-size:9px; letter-spacing:.5px; color:#9fb6c9; margin-top:5px; line-height:1.5; }
+  .pumpRow{ display:flex; align-items:center; justify-content:center; gap:10px; margin-top:7px;
+    font-family:'Orbitron',sans-serif; font-size:10px; letter-spacing:1px; color:#9fb6c9; }
+  .pumpRow b{ font-size:12px; }
+  .pumpMc{ opacity:.75; }
+
+  /* ---- DAILY RUG RUN card ------------------------------------------------- */
+  .dailyCard{ margin-top:14px; width:100%; max-width:300px; border:2px solid var(--cyan); border-radius:10px;
+    padding:12px; background:rgba(33,230,255,.06); text-align:center;
+    display:flex; flex-direction:column; align-items:center; gap:8px; }
+  .dailyCard:empty{ display:none; }
+  .dailyHead{ font-family:'Press Start 2P'; font-size:10px; letter-spacing:1px; color:var(--cyan);
+    text-shadow:0 0 10px rgba(33,230,255,.6); line-height:1.6; }
+  .dailySub{ font-family:'Orbitron',sans-serif; font-size:9px; letter-spacing:.5px; color:#9fb6c9; line-height:1.5; }
+  .dailySub.dim{ opacity:.65; }
+  .dailyScore{ font-family:'Press Start 2P'; font-size:22px; color:var(--gold); text-shadow:0 0 14px rgba(255,210,63,.7); }
+  .dailyScore span{ font-size:9px; color:#9fb6c9; text-shadow:none; margin-left:5px; }
+  /* cyan variant of the primary CTA, so DAILY reads as distinct from the green START */
+  .btn.daily{ background:linear-gradient(135deg,#21e6ff,#2a7bff); color:#04131a; font-size:11px; padding:14px 20px;
+    box-shadow:0 0 22px rgba(33,230,255,.55), inset 0 -4px 0 rgba(0,0,0,.22); }
+
+  /* ---- verified holder badge on leaderboard rows -------------------------- */
+  /* Rendered ONLY from the Worker's server-side balance check — see holderBadge(). */
+  .hbadge{ display:inline-block; font-family:'Orbitron',sans-serif; font-size:8px; letter-spacing:.5px;
+    border:1px solid; border-radius:4px; padding:1px 4px; margin-left:5px; vertical-align:middle; white-space:nowrap; }
+
+  /* ---- share-card preview overlay ----------------------------------------- */
+  #cardPreview{ z-index:9500; background:rgba(4,2,14,.92); }
+  #cardPreview.hidden{ display:none; }
+  .cardWrap{ display:flex; flex-direction:column; align-items:center; gap:14px; padding:18px; max-width:min(94vw,760px); }
+  .cardWrap img{ width:100%; height:auto; border-radius:12px; border:2px solid var(--cyan);
+    box-shadow:0 0 30px rgba(33,230,255,.4); }
+  .cardBtns{ display:flex; flex-direction:column; align-items:center; gap:10px; }
+  /* Landscape phones: keep the whole card + its buttons on screen without scrolling. */
+  @media (orientation:landscape) and (max-height:520px){
+    .cardWrap{ flex-direction:row; max-width:96vw; gap:16px; }
+    .cardWrap img{ max-height:78vh; width:auto; }
+  }

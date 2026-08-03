@@ -139,6 +139,38 @@ window._adsPayload = "WwogIHsKICAgICJpZCI6ICJ4emlsbGEtaG9tZSIsCiAgICAidGV4dCI6IC
     get(k,d){ try{ const v=localStorage.getItem(k); return v==null?d:JSON.parse(v); }catch(e){ return d; } },
     set(k,v){ try{ localStorage.setItem(k,JSON.stringify(v)); }catch(e){} }
   };
+
+  /* --------------------------- seeded RNG (daily run) ----------------------
+   * Gameplay randomness routes through RND() instead of Math.random() so the DAILY
+   * RUG RUN can hand every player on Earth the exact same scam sequence. Outside a
+   * daily run window.__rng is null and RND() is just Math.random(), so normal play
+   * is byte-for-byte unchanged.
+   *
+   * IMPORTANT: only *gameplay* decisions (what spawns, where, when) use RND —
+   * particles, camera shake and city geometry deliberately stay on Math.random.
+   * If cosmetic effects drew from the same stream, a device that skipped one
+   * particle burst would desync the whole run and the seed would mean nothing.
+   *
+   * Note this makes the SEQUENCE deterministic, not a frame-perfect replay: a 30fps
+   * phone and a 120fps desktop see the same enemies in the same order, with slightly
+   * different sub-frame timing. That's the fairness bar we're aiming for. */
+  function mulberry32(a){
+    return function(){
+      a |= 0; a = (a + 0x6D2B79F5) | 0;
+      let t = Math.imul(a ^ (a >>> 15), 1 | a);
+      t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+      return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+    };
+  }
+  // 32-bit FNV-1a — turns a day string into a seed every client agrees on.
+  function hashSeed(str){
+    let h = 0x811c9dc5;
+    for(let i=0;i<str.length;i++){ h ^= str.charCodeAt(i); h = Math.imul(h, 0x01000193); }
+    return h >>> 0;
+  }
+  window.__rng = null;
+  const RND = () => (window.__rng ? window.__rng() : Math.random());
+  window.__RND = RND;   // index.html's spawn-timer jitter draws from the same stream
   const econ = {
     tokens:   store.get("xz_tokens", 2500),
     holdings: store.get("xz_holdings", 0),
@@ -341,6 +373,16 @@ window._adsPayload = "WwogIHsKICAgICJpZCI6ICJ4emlsbGEtaG9tZSIsCiAgICAidGV4dCI6IC
   function tierFor(h){ for(const t of TIERS){ if(h>=t.min) return t; } return TIERS[TIERS.length-1]; }
   window.__mult = () => tierFor(econ.holdings).m;
   window.__tierFor = tierFor;   // shared with the start-screen UI so it shows the REAL tiered multiplier
+  const tierByLabel = l => TIERS.find(t=>t.l===l) || null;
+
+  /* Public holder flex. `tier` on a leaderboard row is stamped by the WORKER after it
+   * re-reads the wallet on-chain, never by the client — so this badge can't be faked by
+   * editing a request. Rows with no verified wallet simply render nothing. */
+  function holderBadge(entry){
+    const t = entry && entry.tier && tierByLabel(entry.tier);
+    if(!t) return "";
+    return ' <span class="hbadge" style="color:'+t.c+';border-color:'+t.c+'">◆ '+t.l+' '+t.m+'×</span>';
+  }
 
   /* -------------------------------- skins --------------------------------- */
   const SKINS = [
@@ -913,10 +955,11 @@ window._adsPayload = "WwogIHsKICAgICJpZCI6ICJ4emlsbGEtaG9tZSIsCiAgICAidGV4dCI6IC
    *  OVERRIDES (these symbols are called internally by name -> reassign works) *
    * ======================================================================== */
   window.addScore = function(base, worldPos){
-    const m = (state.combo>1?state.combo:1) * window.__mult() * (window.__scoreMult||1);
+    // __pumpMult is the live-chart modifier (see PUMP MODE) — 1 unless $XZILLA is green.
+    const m = (state.combo>1?state.combo:1) * window.__mult() * (window.__scoreMult||1) * (window.__pumpMult||1);
     const gain = Math.round(base*m);
     state.score += gain; renderScore();
-    popup(worldPos, "+"+gain, window.__mult()>1 ? GOLD : TEAL);
+    popup(worldPos, "+"+gain, (window.__pumpMult||1)>1 ? MAG : (window.__mult()>1 ? GOLD : TEAL));
     const nw = 1 + Math.floor(state.score/150);
     if(nw>state.wave){ state.wave=nw; try{sfx.wave();}catch(_){}
       showBanner("WAVE "+state.wave);
@@ -992,6 +1035,8 @@ window._adsPayload = "WwogIHsKICAgICJpZCI6ICJ4emlsbGEtaG9tZSIsCiAgICAidGV4dCI6IC
   function escapeHtml(s){ return String(s).replace(/[&<>"']/g, c =>
     ({ "&":"&amp;", "<":"&lt;", ">":"&gt;", '"':"&quot;", "'":"&#39;" }[c])); }
   function lbApi(){ const u = window.__LB_API || ""; return u ? u.replace(/\/+$/,"") : ""; }
+  // Currently-linked Solana address, or "" when no wallet is connected.
+  function connectedWallet(){ try{ return (window.XZWallet && window.XZWallet.address) || ""; }catch(_){ return ""; } }
   function submitLeaderboard(){
     const api = lbApi(); if(!api) return;
     if(!(tg && tg.initData)) return;                 // need verifiable Telegram identity to post
@@ -1005,7 +1050,9 @@ window._adsPayload = "WwogIHsKICAgICJpZCI6ICJ4emlsbGEtaG9tZSIsCiAgICAidGV4dCI6IC
     if(score<=0) return;
     try{
       fetch(api + "/submit", { method:"POST", headers:{ "content-type":"application/json" },
-        body: JSON.stringify({ initData: tg.initData, score }) })
+        // wallet is a CLAIM, not proof — the Worker re-reads the balance on-chain before
+        // it stamps a tier, so sending someone else's address just badges them, not you.
+        body: JSON.stringify({ initData: tg.initData, score, wallet: connectedWallet() }) })
         .then(r=>r.json()).then(d=>{
           const el=document.getElementById("goWorldRank"); if(!el) return;
           if(d && d.rank){ el.textContent="🌍 GLOBAL RANK #"+d.rank; el.style.color=GOLD; }
@@ -1632,25 +1679,26 @@ window._adsPayload = "WwogIHsKICAgICJpZCI6ICJ4emlsbGEtaG9tZSIsCiAgICAidGV4dCI6IC
         if(nowS() >= rugWarnUntil){ rugPending=false; window.__rugWarn=false; window.__rugBossAt=0; spawnRug(); return; }
         // still inside the warning window — fall through and spawn a normal enemy this tick
       }
-      const e=getEntity(), wp=waveProfile(), r=Math.random();
+      // RND() (not Math.random) so a DAILY RUG RUN deals every player the same hand.
+      const e=getEntity(), wp=waveProfile(), r=RND();
       let cum=0;
       const place=(scale)=>{ e.hp=1; e.bhits=0;   // bhits: tracer rounds taken (3 => effect)
-        e.sprite.position.set((Math.random()*2-1)*playHalfWidth,0.9,SPAWN_Z);
+        e.sprite.position.set((RND()*2-1)*playHalfWidth,0.9,SPAWN_Z);
         e.prevZ=SPAWN_Z; e.sprite.scale.set(scale,scale,1); active.push(e); };
 
       // TRI-CANNON pickup — boss-fight ONLY, at most once per fight. Checked before the normal
       // weighted table so its rare roll isn't diluted by the other buckets. (place() resets
       // e.bhits so the shootable-entity bookkeeping stays consistent even though you catch it.)
-      if(!_triThisFight && bossOnField() && Math.random()<TRI_SPAWN_CHANCE){
+      if(!_triThisFight && bossOnField() && RND()<TRI_SPAWN_CHANCE){
         _triThisFight=true; e.type=TYPE.PWR_TRI; e.sprite.material=matTri; place(2.4); return;
       }
       // ROCKET LAUNCHER pickup — once per fight during a boss (like the tri-cannon), OR rarely
       // during normal play (time-gated) since rockets now home on scammers too.
       if(bossOnField()){
-        if(!_rocketThisFight && Math.random()<ROCKET_SPAWN_CHANCE){
+        if(!_rocketThisFight && RND()<ROCKET_SPAWN_CHANCE){
           _rocketThisFight=true; e.type=TYPE.PWR_ROCKET; e.sprite.material=matRocket; place(2.4); return;
         }
-      } else if(nowS()>=_rocketNormAt && Math.random()<ROCKET_SPAWN_CHANCE_NORM){
+      } else if(nowS()>=_rocketNormAt && RND()<ROCKET_SPAWN_CHANCE_NORM){
         _rocketNormAt=nowS()+ROCKET_NORM_GAP; e.type=TYPE.PWR_ROCKET; e.sprite.material=matRocket; place(2.4); return;
       }
       // TEST: heart-shaped extra-life token — 2% of spawns
@@ -1659,7 +1707,7 @@ window._adsPayload = "WwogIHsKICAgICJpZCI6ICJ4emlsbGEtaG9tZSIsCiAgICAidGV4dCI6IC
       // power-up bucket
       cum += wp.powerChance;
       if(r<cum){
-        const roll=Math.random();
+        const roll=RND();
         if(roll<0.45){ e.type=TYPE.SHIELD; e.sprite.material=myShieldMat; }
         else if(roll<0.62){ e.type=TYPE.BOMB; e.sprite.material=myBombMat; }
         else if(roll<0.75){ e.type=TYPE.PWR_SLOW; e.sprite.material=matSlow; }
@@ -1680,8 +1728,8 @@ window._adsPayload = "WwogIHsKICAgICJpZCI6ICJ4emlsbGEtaG9tZSIsCiAgICAidGV4dCI6IC
       if(r<cum && !bossOnField()){ e.type=TYPE.HOLDER; e.sprite.material=myHolderMat; place(2.7); return; }
       // default scammer — RUG RADAR biases the mix toward the high-value RUGGER (index 1)
       e.type=TYPE.SCAMMER;
-      let _mi=(Math.random()*myScammerMats.length)|0;
-      if(Math.random() < (window.__rugChance||0)) _mi=1;
+      let _mi=(RND()*myScammerMats.length)|0;
+      if(RND() < (window.__rugChance||0)) _mi=1;
       e.sprite.material=myScammerMats[_mi];
       place(2.8);
       e._rugger=(_mi===1); e._threw=false;   // ruggers can lob "empty promises" (see updateThrows)
@@ -1838,6 +1886,7 @@ window._adsPayload = "WwogIHsKICAgICJpZCI6ICJ4emlsbGEtaG9tZSIsCiAgICAidGV4dCI6IC
     const ROCKET_TURN  = 3.2;    // homing steer rate, rad/sec
     const ROCKET_HITR  = 2.4;    // detonation half-extent around the boss
     let   _rocketThisFight = false;  // one rocket launcher per fight; reset in spawnRug + run reset
+    let   _lastBoomAt = -9;          // detonation-sfx throttle (see updateRockets)
     // Normal-run rocket drop: rockets now home on scammers too, so the launcher can appear
     // outside boss fights — but rarely, and time-gated so it stays a treat, not a crutch.
     const ROCKET_SPAWN_CHANCE_NORM = 0.02;  // per spawn tick during normal play
@@ -1956,7 +2005,7 @@ window._adsPayload = "WwogIHsKICAgICJpZCI6ICJ4emlsbGEtaG9tZSIsCiAgICAidGV4dCI6IC
       burst(p.x,p.y,p.z,MAG,46); burst(p.x,p.y,p.z,RED,40); burst(p.x,p.y,p.z,GOLD,24);
       shake(1.8); flashColor("rgba(255,59,92,.5)",0.85);
       const bb=window.__bossBonus||1;   // BOSS HUNTER
-      const gain=Math.round(900*tierScoreMult()*(window.__scoreMult||1)*bb); state.score+=gain; renderScore();
+      const gain=Math.round(900*tierScoreMult()*(window.__scoreMult||1)*(window.__pumpMult||1)*bb); state.score+=gain; renderScore();
       const tok=Math.round(800*dropMult*bb); econ.tokens+=tok; run.earned+=tok; run.boss++;
       run.score=Math.max(run.score,state.score);
       popup(p,"+"+gain,GOLD); bigBanner("RUG SHREDDED");
@@ -2052,7 +2101,9 @@ window._adsPayload = "WwogIHsKICAgICJpZCI6ICJ4emlsbGEtaG9tZSIsCiAgICAidGV4dCI6IC
       const dl=Math.hypot(dx,dz)||1;
       r._vx=(dx/dl)*ROCKET_SPEED; r._vz=(dz/dl)*ROCKET_SPEED;
       burst(r.position.x,r.position.y,r.position.z,ROCKET_COL,6);
-      try{ blip(120,0.16,"sawtooth",0.14); }catch(_){}
+      // Launch whoosh. Was a single 120Hz sawtooth blip, which sat under the engine loop
+      // and the music and was effectively inaudible.
+      try{ (window.__sfx&&window.__sfx.rocket)?window.__sfx.rocket():blip(120,0.16,"sawtooth",0.14); }catch(_){}
     }
     // A rocket detonation shreds a scammer in one shot, scoring exactly like a caught/gunned one.
     function rocketKill(a){
@@ -2095,6 +2146,10 @@ window._adsPayload = "WwogIHsKICAgICJpZCI6ICJ4emlsbGEtaG9tZSIsCiAgICAidGV4dCI6IC
         const hitr=isBoss?ROCKET_HITR:1.5;
         if(Math.abs(r.position.x-bx)<hitr && Math.abs(r.position.z-bz)<hitr){
           burst(bx,by,bz,ROCKET_COL,isBoss?26:16); burst(bx,by,bz,GOLD,isBoss?14:8); shake(isBoss?0.7:0.4);
+          // Detonation boom — bigger on the boss. Throttled: several rockets can land in the
+          // same frame, and stacking full-volume booms clips the master bus into a nasty crunch.
+          if(nowS()>=_lastBoomAt+0.07){ _lastBoomAt=nowS();
+            try{ window.__sfx && window.__sfx.boom && window.__sfx.boom(isBoss); }catch(_){} }
           freeRocket(r);
           if(isBoss){
             let killed=false;
@@ -2708,7 +2763,8 @@ window._adsPayload = "WwogIHsKICAgICJpZCI6ICJ4emlsbGEtaG9tZSIsCiAgICAidGV4dCI6IC
             const t  = titleForScore(e.score);   // each player's rank milestone, derived from their score
             return '<div class="lrow'+(me?' you':'')+'">'+
               '<span class="lrank">#'+(i+1)+'</span>'+
-              '<span class="lname">'+escapeHtml(e.name)+(t?' · <span style="color:'+GOLD+'">'+t.name+'</span>':'')+'</span>'+
+              '<span class="lname">'+escapeHtml(e.name)+holderBadge(e)+
+                (t?' · <span style="color:'+GOLD+'">'+t.name+'</span>':'')+'</span>'+
               '<b>'+fmt(e.score)+'</b></div>';
           }).join("");
         }).catch(()=>{ const el=$("lbTopList"); if(el) el.textContent="Global rankings unavailable — retry later."; });
@@ -3656,6 +3712,523 @@ window._adsPayload = "WwogIHsKICAgICJpZCI6ICJ4emlsbGEtaG9tZSIsCiAgICAidGV4dCI6IC
   // (Removed the rear-tire overlay: a vertical squash on a billboarded sprite read as
   //  jittering feet, not rotation. A real spinning illusion needs an animated tire
   //  sprite-sheet or a small procedural spinner — to revisit later.)
+
+  /* === ANCHOR: GROWTH === */
+  /* ========================================================================== *
+   *  GROWTH LAYER                                                               *
+   *  Three features whose job is to push the game OUTWARD instead of deeper:    *
+   *    1. SHARE CARD  — every run renders a PNG you can post. The game's only   *
+   *                     previous output was a text string, which nobody posts.  *
+   *    2. DAILY RUG RUN — one shared seed, one attempt, one board per UTC day.  *
+   *                     Scarcity + a common reference point is what makes a     *
+   *                     score worth comparing (and therefore worth posting).    *
+   *    3. PUMP MODE  — the live $XZILLA chart drives a global score modifier,   *
+   *                     so the token and the game reinforce each other drun.   *
+   *  Defined last so it wraps every earlier override.                           *
+   * ========================================================================== */
+  (function(){
+    if (typeof THREE === "undefined") return;
+
+    /* ---------------------------------------------------------------- utils */
+    function utcDay(ts){
+      const d = new Date(typeof ts==="number" ? ts : Date.now());
+      return d.getUTCFullYear()+"-"+String(d.getUTCMonth()+1).padStart(2,"0")+"-"+String(d.getUTCDate()).padStart(2,"0");
+    }
+    // ms until the next 00:00 UTC — drives the "next run in" countdown.
+    function msToNextUtcDay(){
+      const n=new Date();
+      return Date.UTC(n.getUTCFullYear(), n.getUTCMonth(), n.getUTCDate()+1) - n.getTime();
+    }
+    function hms(ms){
+      const s=Math.max(0,Math.floor(ms/1000));
+      return String(Math.floor(s/3600)).padStart(2,"0")+":"+String(Math.floor(s/60)%60).padStart(2,"0")+":"+String(s%60).padStart(2,"0");
+    }
+
+    /* ====================================================================== *
+     *  1. SHARE CARD                                                          *
+     *  Renders the run to a 1200×675 PNG (16:9 — the ratio X shows uncropped) *
+     *  and hands it to the native share sheet, falling back to a download.    *
+     *  Everything is drawn procedurally: pulling the hero art onto the canvas *
+     *  would taint it cross-origin and make toBlob() throw, so the card uses  *
+     *  type + an emoji glyph instead of the bitmap logo.                      *
+     * ====================================================================== */
+    const CARD_W=1200, CARD_H=675;
+
+    function roundRect(x,rx,ry,w,h,r){
+      x.beginPath();
+      x.moveTo(rx+r,ry); x.arcTo(rx+w,ry,rx+w,ry+h,r); x.arcTo(rx+w,ry+h,rx,ry+h,r);
+      x.arcTo(rx,ry+h,rx,ry,r); x.arcTo(rx,ry,rx+w,ry,r); x.closePath();
+    }
+
+    function drawCard(data){
+      const c=document.createElement("canvas"); c.width=CARD_W; c.height=CARD_H;
+      const x=c.getContext("2d");
+
+      // backdrop: deep violet vertical fade + a perspective neon grid, mirroring the game
+      const bg=x.createLinearGradient(0,0,0,CARD_H);
+      bg.addColorStop(0,"#0a0326"); bg.addColorStop(0.55,"#12073d"); bg.addColorStop(1,"#07021a");
+      x.fillStyle=bg; x.fillRect(0,0,CARD_W,CARD_H);
+
+      const hz=CARD_H*0.70;                     // horizon line the grid converges to
+      const glow=x.createRadialGradient(CARD_W/2,hz,20, CARD_W/2,hz,CARD_W*0.65);
+      glow.addColorStop(0,"rgba(255,43,214,0.30)"); glow.addColorStop(1,"rgba(255,43,214,0)");
+      x.fillStyle=glow; x.fillRect(0,0,CARD_W,CARD_H);
+
+      x.save(); x.beginPath(); x.rect(0,hz,CARD_W,CARD_H-hz); x.clip();
+      x.strokeStyle="rgba(33,230,255,0.34)"; x.lineWidth=2;
+      for(let i=-14;i<=14;i++){                 // verticals fanning out from the vanishing point
+        x.beginPath(); x.moveTo(CARD_W/2, hz); x.lineTo(CARD_W/2 + i*180, CARD_H); x.stroke();
+      }
+      for(let i=1;i<=9;i++){                    // horizontals, spaced non-linearly for depth
+        const t=i/9, y=hz + Math.pow(t,2.1)*(CARD_H-hz);
+        x.beginPath(); x.moveTo(0,y); x.lineTo(CARD_W,y); x.stroke();
+      }
+      x.restore();
+
+      // Scrim behind the centre block. Without it the grid lines run straight through the
+      // score and rank text, which is exactly the region that has to stay readable when
+      // the image is thumbnailed in a timeline.
+      const scrim=x.createLinearGradient(0,140,0,600);
+      scrim.addColorStop(0,"rgba(6,2,20,0)");
+      scrim.addColorStop(0.22,"rgba(6,2,20,0.62)");
+      scrim.addColorStop(0.80,"rgba(6,2,20,0.62)");
+      scrim.addColorStop(1,"rgba(6,2,20,0)");
+      x.fillStyle=scrim; x.fillRect(0,140,CARD_W,460);
+
+      // ---- header ---------------------------------------------------------
+      x.textBaseline="alphabetic";
+      x.font="700 30px Impact, 'Arial Black', sans-serif";
+      x.fillStyle="#39ff7a"; x.fillText("🦖 XZILLA", 56, 74);
+      x.fillStyle="#21e6ff"; x.fillText("RUG SMASHER", 56+x.measureText("🦖 XZILLA ").width, 74);
+
+      // mode chip, top-right — DAILY / PUMP / BLOOD get their own colour
+      if(data.chip){
+        x.font="700 22px 'Arial Black', sans-serif";
+        const cw=x.measureText(data.chip).width+38;
+        x.fillStyle="rgba(0,0,0,0.42)"; roundRect(x, CARD_W-56-cw, 46, cw, 42, 21); x.fill();
+        x.strokeStyle=data.chipColor; x.lineWidth=2.5; x.stroke();
+        x.fillStyle=data.chipColor; x.textAlign="center";
+        x.fillText(data.chip, CARD_W-56-cw/2, 75); x.textAlign="left";
+      }
+
+      // ---- the number (the whole reason the card exists) ------------------
+      x.textAlign="center";
+      x.font="600 26px 'Trebuchet MS', sans-serif"; x.fillStyle="rgba(255,255,255,0.62)";
+      x.fillText(data.scoreLabel || "SCORE", CARD_W/2, 196);
+
+      // Auto-shrink to fit: a 7-figure score at the base size runs off both edges.
+      let scoreSize=168;
+      do{ x.font="700 "+scoreSize+"px Impact, 'Arial Black', sans-serif"; scoreSize-=6; }
+      while(x.measureText(data.score).width > CARD_W-140 && scoreSize > 70);
+      x.shadowColor="rgba(255,210,63,0.85)"; x.shadowBlur=44;
+      x.fillStyle="#ffd23f"; x.fillText(data.score, CARD_W/2, 336);
+      x.shadowBlur=0;
+
+      // rank title
+      x.font="700 46px Impact, 'Arial Black', sans-serif";
+      x.shadowColor="rgba(255,43,214,0.7)"; x.shadowBlur=26;
+      x.fillStyle="#ff2bd6"; x.fillText(data.title, CARD_W/2, 400);
+      x.shadowBlur=0;
+
+      // player handle
+      if(data.name){
+        x.font="600 27px 'Trebuchet MS', sans-serif"; x.fillStyle="rgba(255,255,255,0.80)";
+        x.fillText(data.name, CARD_W/2, 442);
+      }
+
+      // ---- stat strip ------------------------------------------------------
+      const stats=data.stats.slice(0,4);
+      const boxW=232, gap=18, totalW=stats.length*boxW+(stats.length-1)*gap;
+      let sx=(CARD_W-totalW)/2;
+      stats.forEach(s=>{
+        x.fillStyle="rgba(8,3,26,0.72)"; roundRect(x, sx, 476, boxW, 92, 14); x.fill();
+        x.strokeStyle="rgba(33,230,255,0.45)"; x.lineWidth=2; x.stroke();
+        x.textAlign="center";
+        x.font="600 18px 'Trebuchet MS', sans-serif"; x.fillStyle="rgba(255,255,255,0.55)";
+        x.fillText(s.k, sx+boxW/2, 508);
+        x.font="700 36px 'Arial Black', sans-serif"; x.fillStyle=s.c||"#39ff7a";
+        x.fillText(s.v, sx+boxW/2, 550);
+        sx+=boxW+gap;
+      });
+
+      // ---- footer ----------------------------------------------------------
+      x.textAlign="left";
+      x.font="600 24px 'Trebuchet MS', sans-serif"; x.fillStyle="rgba(255,255,255,0.55)";
+      x.fillText("xzilla.io", 56, 626);
+      x.textAlign="right";
+      x.fillStyle="#39ff7a"; x.font="700 24px 'Arial Black', sans-serif";
+      x.fillText("$XZILLA", CARD_W-56, 626);
+      x.textAlign="left";
+      return c;
+    }
+
+    // Assemble the card payload for the run that just ended.
+    function cardData(){
+      const sc     = Math.round(state.score||0);
+      const best   = Math.max(Math.round(state.best||0), (myBest&&myBest.score)||0, sc);
+      const t      = titleForScore(sc) || titleForScore(best);
+      const tier   = window.__holderVerified ? tierFor(econ.holdings) : null;
+      const d      = {
+        score: fmt(sc),
+        title: t ? t.name : "ROOKIE",
+        name:  (typeof tgName==="function" ? tgName() : ""),
+        stats: [
+          {k:"SCAMS SMASHED", v:fmt(run.kills), c:"#39ff7a"},
+          {k:"BEST COMBO",    v:"×"+fmt(run.combo||0), c:"#21e6ff"},
+          {k:"RUG BOSSES",    v:fmt(run.boss||0), c:"#ff2bd6"},
+        ],
+      };
+      if(drun.active){
+        d.chip="DAILY RUG RUN"; d.chipColor="#21e6ff"; d.scoreLabel="TODAY'S SCORE";
+        if(drun.rank) d.stats.push({k:"WORLD RANK", v:"#"+drun.rank, c:"#ffd23f"});
+      } else if(pump.mult>1){
+        d.chip=pump.label||"PUMP MODE"; d.chipColor="#ff2bd6";
+      } else if(tier && tier.m>1){
+        d.chip="◆ "+tier.l+" "+tier.m+"×"; d.chipColor=tier.c;
+      }
+      if(d.stats.length<4 && tier && tier.m>1) d.stats.push({k:"HOLDER TIER", v:tier.l, c:tier.c});
+      return d;
+    }
+
+    function shareText(){
+      const sc=Math.round(state.score||0);
+      const t=titleForScore(sc); const title=t?t.name:"ROOKIE";
+      if(drun.active){
+        return "🦖 XZILLA DAILY RUG RUN — "+drun.day+"\n"+fmt(sc)+" pts"+(drun.rank?(" · world #"+drun.rank):"")+
+               "\nSame seed, same scams, one shot each. Beat me 👇";
+      }
+      return "🦖 I smashed "+fmt(sc)+" pts as "+title+" in XZILLA: RUG SMASHER!\nThink you can beat my rank? 👇";
+    }
+
+    // A "snapshot" freezes both the drawing and the caption at the moment it's taken, so
+    // the image the player previews is byte-identical to the one they share — the live run
+    // state it was derived from may already have been reset by then.
+    function snapshot(){ return { data:cardData(), text:shareText(), day:drun.active?drun.day:null }; }
+
+    let _sharingCard=false;
+    async function shareCard(snap){
+      if(_sharingCard) return;
+      _sharingCard=true;
+      try{
+        const s=snap || snapshot();
+        const canvas=drawCard(s.data);
+        const blob=await new Promise(res=>canvas.toBlob(res,"image/png"));
+        if(!blob) throw new Error("no blob");
+        const file=new File([blob],"xzilla-score.png",{type:"image/png"});
+        const link=refLink();
+        const text=s.text+(link?("\n"+link):"");
+
+        // Preferred path: the OS share sheet WITH the image attached. canShare({files})
+        // must be checked first — Safari/Chrome throw on share() with unsupported files.
+        if(navigator.canShare && navigator.canShare({files:[file]}) && navigator.share){
+          try{ await navigator.share({files:[file], text}); return; }
+          catch(err){ if(err && err.name==="AbortError") return; /* else fall through */ }
+        }
+        // Fallback: save the PNG and put the caption on the clipboard, so posting it
+        // is still two taps rather than impossible.
+        const url=URL.createObjectURL(blob);
+        const a=document.createElement("a");
+        a.href=url; a.download="xzilla-"+(s.day?("daily-"+s.day):"score")+".png";
+        document.body.appendChild(a); a.click(); a.remove();
+        setTimeout(()=>URL.revokeObjectURL(url), 10000);
+        try{ await navigator.clipboard.writeText(text); toast("Card saved · caption copied — post it! 📣", CYAN); }
+        catch(_){ toast("Score card saved to your downloads 📸", CYAN); }
+      }catch(e){
+        toast("Couldn't build the card — sharing text instead", GOLD);
+        try{ shareScore(); }catch(_){}
+      }finally{ _sharingCard=false; }
+    }
+    window.__shareCard = shareCard;
+
+    // Preview the card full-screen before sharing — people share far more when they can
+    // see what they're about to post.
+    function previewCard(){
+      let ov=$("cardPreview");
+      if(!ov){
+        ov=document.createElement("div"); ov.id="cardPreview"; ov.className="overlay hidden";
+        ov.innerHTML='<div class="cardWrap"><img id="cardImg" alt="Your XZILLA score card"/>'+
+          '<div class="cardBtns">'+
+            '<button class="btn" id="cardShare">📣 SHARE THIS CARD</button>'+
+            '<button class="btn secondary small" id="cardClose">CLOSE</button>'+
+          '</div></div>';
+        document.body.appendChild(ov);
+        ov.addEventListener("click", ev=>{ if(ev.target===ov) ov.classList.add("hidden"); });
+      }
+      const snap=snapshot();   // freeze now — the caller may restore run state the moment we return
+      try{ $("cardImg").src = drawCard(snap.data).toDataURL("image/png"); }catch(_){}
+      ov.classList.remove("hidden");
+      $("cardShare").onclick = ()=> shareCard(snap);
+      $("cardClose").onclick = ()=> ov.classList.add("hidden");
+    }
+
+    /* ====================================================================== *
+     *  2. DAILY RUG RUN                                                       *
+     *  One seed per UTC day, one attempt, one board. The seed is derived from *
+     *  the date string alone, so every client computes it independently — no  *
+     *  server round-trip needed to start, and no way to peek at tomorrow's.   *
+     * ====================================================================== */
+    const DRUN_KEY="xz_dailyrun_v1";
+    // Named `drun`, not `daily`, because an unrelated `daily` (the daily CHALLENGE) already
+    // lives in the enclosing scope — shadowing it here would be a live trap for later edits.
+    const drun = {
+      active:false,          // is the current/just-finished run a daily attempt?
+      day:utcDay(),
+      rank:0,
+      rec:store.get(DRUN_KEY, null),   // {day, score, rank, ts} for the last day played
+    };
+    function dailyPlayedToday(){ return !!(drun.rec && drun.rec.day===utcDay()); }
+    function dailySeed(day){ return hashSeed("xzilla-daily-"+day); }
+
+    // Four separate pre-run hooks are registered on startBtn across this file (resetRun,
+    // the SET-2 reset, the ad refresh, and ours). Calling startGame() directly would skip
+    // all of them and leave last run's state in place, so a daily run goes through the
+    // real button and rides the normal ordering. _startingDaily tells our own listener to
+    // stand down so it doesn't immediately clear the flag it's about to need.
+    let _startingDaily=false;
+    function startDailyRun(){
+      if(dailyPlayedToday()){ toast("Daily run already used — back at 00:00 UTC", GOLD); return; }
+      drun.day  = utcDay();
+      drun.rank = 0;
+      const btn=$("startBtn"); if(!btn) return;
+      _startingDaily=true;
+      try{ btn.click(); } finally { _startingDaily=false; }
+      drun.active = true;
+      window.__pumpMult = pump.mult;                     // the chart bonus applies to dailies too
+      window.__rng = mulberry32(dailySeed(drun.day));   // every gameplay draw now comes from here
+      showBanner("DAILY RUG RUN · "+drun.day);
+      toast("Same scams for everyone today — one shot 🦖", CYAN);
+    }
+
+    /* GRACE WINDOW — a run that ends almost immediately does NOT burn the daily attempt.
+     * One shot per day is what makes the score worth comparing, but a lane-dodger can end
+     * in three seconds to one mistimed swipe, and "locked out for 24h" after three seconds
+     * reads as a bug rather than a rule. Below the threshold the attempt is silently
+     * returned; above it the result stands however bad it was.
+     * Deliberately NOT posted to the server either — a graced run never existed. */
+    const GRACE_SECS = 15;
+
+    // Record + post the finished daily attempt. Local record is written FIRST so the
+    // one-attempt lock holds even if the network call fails.
+    function finishDailyRun(){
+      const lasted = state.elapsed || 0;
+      if(lasted < GRACE_SECS){
+        toast("Run too short — daily attempt not used 🦖", TEAL);
+        showBanner("ATTEMPT REFUNDED");
+        drun.active = false;   // the card must render as a normal run, not a daily entry
+        return false;          // no local record, no submit → the button stays live
+      }
+      const score=Math.round(state.score||0);
+      // Stats are stored alongside the score so re-sharing the card tomorrow morning
+      // still shows the real run, not a zeroed-out one.
+      drun.rec={ day:drun.day, score, rank:0, ts:Date.now(),
+                  kills:run.kills|0, combo:run.combo|0, boss:run.boss|0 };
+      store.set(DRUN_KEY, drun.rec);
+      const api=lbApi();
+      if(!api || !(tg && tg.initData)) return true;   // web players still get a local daily; posting needs a verified identity
+      fetch(api+"/daily-submit",{ method:"POST", headers:{"content-type":"application/json"},
+        body:JSON.stringify({ initData:tg.initData, score, day:drun.day, wallet:connectedWallet() }) })
+        .then(r=>r.json()).then(d=>{
+          if(d && d.rank){
+            drun.rank=d.rank;
+            drun.rec.rank=d.rank; store.set(DRUN_KEY, drun.rec);
+            const el=$("goDailyRank");
+            if(el){ el.textContent="🗓 DAILY RANK #"+d.rank+(d.players?(" of "+d.players):""); el.style.color=CYAN; }
+            renderDailyCard();   // the menu card can now show the world rank too
+          }
+        }).catch(()=>{});
+      return true;
+    }
+
+    // Start-screen card: the button, or today's result plus a countdown.
+    function renderDailyCard(){
+      const host=$("dailyCard"); if(!host) return;
+      const played=dailyPlayedToday();
+      if(!played){
+        host.innerHTML=
+          '<div class="dailyHead">🗓 DAILY RUG RUN</div>'+
+          '<div class="dailySub">One seed. One shot. Everyone gets the exact same scams today.</div>'+
+          '<div class="dailySub dim">Die in the first '+GRACE_SECS+'s and your attempt is refunded.</div>'+
+          '<button class="btn daily" id="dailyBtn">▶ PLAY TODAY’S RUN</button>'+
+          '<div class="dailySub dim" id="dailyClock"></div>';
+        $("dailyBtn").onclick=startDailyRun;
+      } else {
+        host.innerHTML=
+          '<div class="dailyHead">🗓 DAILY RUG RUN · DONE</div>'+
+          '<div class="dailyScore">'+fmt(drun.rec.score)+'<span> pts</span></div>'+
+          (drun.rec.rank ? '<div class="dailySub" style="color:'+GOLD+'">World rank #'+drun.rec.rank+'</div>' : '')+
+          '<button class="btn secondary small" id="dailyShare">📸 SHARE TODAY’S CARD</button>'+
+          '<div class="dailySub dim" id="dailyClock"></div>';
+        // Rebuild the card from the stored result — the live run state is long gone, so
+        // score/stats are temporarily swapped in for the draw and restored right after.
+        $("dailyShare").onclick=()=>{
+          const sv={score:state.score, k:run.kills, c:run.combo, b:run.boss, a:drun.active, r:drun.rank};
+          state.score=drun.rec.score; run.kills=drun.rec.kills|0; run.combo=drun.rec.combo|0; run.boss=drun.rec.boss|0;
+          drun.active=true; drun.rank=drun.rec.rank||0; drun.day=drun.rec.day;
+          try{ previewCard(); }
+          finally { state.score=sv.score; run.kills=sv.k; run.combo=sv.c; run.boss=sv.b; drun.active=sv.a; drun.rank=sv.r; }
+        };
+      }
+      tickDailyClock();
+    }
+    let _clockT=null;
+    function tickDailyClock(){
+      clearInterval(_clockT);
+      const paint=()=>{
+        const el=$("dailyClock"); if(!el){ clearInterval(_clockT); return; }
+        const ms=msToNextUtcDay();
+        // Rolled past midnight UTC while the menu sat open → new seed, new attempt.
+        if(drun.rec && drun.rec.day!==utcDay()){ renderDailyCard(); return; }
+        el.textContent=(dailyPlayedToday()?"Next run in ":"Resets in ")+hms(ms);
+      };
+      paint(); _clockT=setInterval(paint,1000);
+    }
+
+    /* ====================================================================== *
+     *  3. PUMP MODE                                                           *
+     *  The live $XZILLA chart sets a global score/XP modifier. Thresholds and  *
+     *  multipliers are decided by the Worker, not here, so they can be retuned *
+     *  without busting every player's game.js cache.                           *
+     * ====================================================================== */
+    const pump = { mode:"NORMAL", mult:1, xpMult:1, label:"", note:"", price:0, change:null, mcap:0, ok:false };
+    window.__pumpMult = 1;
+
+    function applyPump(d){
+      if(!d || !d.ok) return;
+      pump.mode=d.mode||"NORMAL";
+      pump.mult=Number(d.mult)||1; pump.xpMult=Number(d.xpMult)||1;
+      pump.label=d.label||""; pump.note=d.note||"";
+      pump.price=Number(d.priceUsd)||0; pump.change=(typeof d.change24==="number")?d.change24:null;
+      pump.mcap=Number(d.mcap)||0; pump.ok=true;
+      // Never re-multiply a run that's already scoring — a mid-run swing would make the
+      // leaderboard incomparable. The new modifier lands on the NEXT run.
+      if(!state.running) window.__pumpMult=pump.mult;
+      renderPumpBanner();
+    }
+    function fetchPump(){
+      const api=lbApi(); if(!api) return;
+      fetch(api+"/pump",{cache:"no-store"}).then(r=>r.json()).then(applyPump).catch(()=>{});
+    }
+
+    function renderPumpBanner(){
+      const host=$("pumpBanner"); if(!host) return;
+      if(!pump.ok){ host.style.display="none"; return; }
+      host.style.display="block";
+      // Dexscreener omits priceChange entirely on pairs with no recent trades, so
+      // "no data" must render as a neutral dash — colouring it red would tell every
+      // visitor the token is down when it simply hasn't traded.
+      const hasChg = pump.change!=null;
+      const up  = hasChg && pump.change>=0;
+      const chg = hasChg ? ((up?"+":"")+pump.change.toFixed(1)+"% 24h") : "no 24h trades yet";
+      const chgCol = hasChg ? (up?TEAL:RED) : "#9fb6c9";
+      const col = pump.mode==="PUMP" ? MAG : pump.mode==="GREEN" ? TEAL : pump.mode==="BLOOD" ? RED : "#1f1840";
+      host.style.borderColor=col;
+      host.innerHTML=
+        (pump.label ? '<div class="pumpMode" style="color:'+col+'">'+pump.label+'</div>' : '')+
+        (pump.note  ? '<div class="pumpNote">'+escapeHtml(pump.note)+'</div>' : '')+
+        '<div class="pumpRow">'+
+          '<span>$XZILLA</span>'+
+          '<b style="color:'+chgCol+'">'+chg+'</b>'+
+        '</div>'+
+        '<div class="pumpRow">'+
+          (pump.price ? '<span class="pumpMc">$'+pump.price.toPrecision(3)+'</span>' : '')+
+          (pump.mcap  ? '<span class="pumpMc">MC $'+abbr(pump.mcap)+'</span>' : '')+
+        '</div>';
+    }
+
+    /* ====================================================================== *
+     *  WIRING                                                                 *
+     * ====================================================================== */
+
+    // ---- game over: daily bookkeeping, BLOOD-mode XP, and the card CTA ------
+    const _prevGameOver = window.gameOver;
+    window.gameOver = function(){
+      const wasDaily = drun.active;
+      _prevGameOver();
+      drun.active = wasDaily;   // keep the flag alive for cardData() below
+
+      // BLOOD MODE pays its XP bonus on everything the run earned, so it covers kill XP,
+      // boss XP and the score bonus in one grant rather than being threaded through each.
+      if(pump.xpMult>1 && run.earned>0){
+        const bonus=Math.round(run.earned*(pump.xpMult-1));
+        if(bonus>0){ econ.tokens+=bonus; run.earned+=bonus; saveEcon(); updateHUDtokens();
+          toast((pump.label||"Red day")+" +"+fmt(bonus)+" XP", RED); }
+      }
+
+      // Consumed === the attempt actually counted. A run inside the grace window returns
+      // false, leaving the card in its playable state so the player can go again.
+      const consumed = wasDaily ? finishDailyRun() : false;
+      if(wasDaily) renderDailyCard();
+
+      const go=$("gameOverScreen"); if(!go) return;
+
+      // daily rank line
+      let dr=$("goDailyRank");
+      if(!dr){ dr=document.createElement("div"); dr.id="goDailyRank"; dr.style.cssText="text-align:center;font-size:13px;margin:4px 0;letter-spacing:1px";
+        const rk=$("goRank"); if(rk && rk.parentNode) rk.parentNode.insertBefore(dr, rk.nextSibling); }
+      if(consumed){ dr.textContent="🗓 posting your daily rank…"; dr.style.color=CYAN; dr.style.display="block"; }
+      else if(wasDaily){ dr.textContent="🗓 Too short to count — your daily run is still available"; dr.style.color=TEAL; dr.style.display="block"; }
+      else { dr.textContent=""; dr.style.display="none"; }
+
+      // the card CTA — the primary share action now, sitting with PLAY AGAIN
+      const gb=go.querySelector(".go-buttons");
+      if(gb && !$("goCardBtn")){
+        const b=document.createElement("button");
+        b.id="goCardBtn"; b.className="btn"; b.textContent="📸 SHARE SCORE CARD";
+        gb.insertBefore(b, gb.firstChild.nextSibling || null);
+        b.onclick=previewCard;
+      }
+      // The old text-only "SHARE YOUR RECORD" button on a new best now opens the card too.
+      const nbBtn=$("goShareBest"); if(nbBtn){ nbBtn.textContent="📸 SHARE YOUR RECORD CARD"; nbBtn.onclick=previewCard; }
+
+      // drun.active deliberately STAYS set here: the player shares the card after the run
+      // ends, and cardData() needs to know it was a drun. The start/retry listener clears
+      // it when the next run actually begins.
+      window.__rng=null;         // release the seeded stream
+    };
+
+    // ---- a normal run must never inherit the daily seed ---------------------
+    ["startBtn","retryBtn"].forEach(id=>{
+      const b=$(id);
+      if(b) b.addEventListener("click", ()=>{
+        if(_startingDaily) return;              // this click IS the daily run — leave its state alone
+        drun.active=false; window.__rng=null;
+        window.__pumpMult=pump.mult;            // pick up any modifier that landed mid-session
+      });
+    });
+
+    // ---- DAILY board inside the LEADERBOARD panel ---------------------------
+    const _rl = renderLeaderboard;
+    renderLeaderboard = function(){
+      _rl();
+      const host=$("leaderboardInner"); if(!host || !lbApi() || host.querySelector("#lbDaily")) return;
+      const box=document.createElement("div"); box.id="lbDaily";
+      box.innerHTML='<h2 class="pnl-title" style="border-color:'+CYAN+';margin-top:4px;">🗓 DAILY RUG RUN · '+utcDay()+'</h2>'+
+        '<div class="sub" id="lbDailyList">Loading today’s board…</div>';
+      host.insertBefore(box, host.firstChild);
+      fetch(lbApi()+"/daily-top?day="+encodeURIComponent(utcDay()),{cache:"no-store"})
+        .then(r=>r.json()).then(d=>{
+          const list=(d&&d.top)||[]; const el=$("lbDailyList"); if(!el) return;
+          if(!list.length){ el.textContent="Nobody has run today yet — be first on the board!"; return; }
+          const mine=myBest&&myBest.name;
+          el.className=""; el.innerHTML=list.slice(0,10).map((e,i)=>{
+            const me=mine&&e.name===mine;
+            return '<div class="lrow'+(me?' you':'')+'">'+
+              '<span class="lrank">#'+(i+1)+'</span>'+
+              '<span class="lname">'+escapeHtml(e.name)+holderBadge(e)+'</span>'+
+              '<b>'+fmt(e.score)+'</b></div>';
+          }).join("")+
+          '<div class="sub dim" style="margin-top:6px">'+(d.players||list.length)+' degen'+((d.players||list.length)===1?"":"s")+' ran today · resets 00:00 UTC</div>';
+        }).catch(()=>{ const el=$("lbDailyList"); if(el) el.textContent="Daily board unavailable — retry later."; });
+    };
+
+    /* -------------------------------- boot ---------------------------------- */
+    renderDailyCard();
+    fetchPump();
+    // Re-poll every 5 min, and again whenever the player returns to the tab, so a
+    // pump that starts mid-session is picked up without a reload.
+    setInterval(fetchPump, 300000);
+    document.addEventListener("visibilitychange", ()=>{ if(!document.hidden) fetchPump(); });
+  })();
 
   /* -------------------------------- boot ---------------------------------- */
   // One-time cleanup: early builds granted a demo $XZILLA "bag" (e.g. 250000) that

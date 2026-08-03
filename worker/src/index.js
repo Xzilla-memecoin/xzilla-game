@@ -2,8 +2,11 @@
    XZILLA — cross-player leaderboard (Cloudflare Worker + KV)
 
    Endpoints
-     GET  /top      -> { top: [{ name, score }, ...] }   (top 10, public)
-     POST /submit   -> { ok, rank, top }                 body: { initData, score }
+     GET  /top          -> { top: [{ name, score, tier, hold }, ...] }   (top 10, public)
+     POST /submit       -> { ok, rank, tier, top }   body: { initData, score, wallet? }
+     GET  /pump         -> { ok, priceUsd, change24, mcap, mode, mult, xpMult, label }
+     GET  /daily-top    -> { day, top: [...], players }        ?day=YYYY-MM-DD (default today)
+     POST /daily-submit -> { ok, rank, top }   body: { initData, score, day, wallet? }
 
    Security
      /submit verifies the Telegram WebApp `initData` HMAC with your BOT_TOKEN, so the
@@ -76,6 +79,124 @@ async function verifyInitData(initData, botToken){
   }catch(_){ return null; }
 }
 
+/* ===================== holder tiers (server-authoritative) ==================
+   The client shows a tier badge from its own balance read, but the LEADERBOARD
+   badge must not be spoofable — otherwise every entry claims WHALE and the flex
+   is worthless. So /submit re-reads the balance here and stamps the tier itself.
+   Mirrors the TIERS table in game.js; keep the two in sync. */
+const TIERS = [
+  { min: 10e6, m: 2.0, l: "XZILLA"  },
+  { min: 9e6,  m: 1.9, l: "KRAKEN"  },
+  { min: 8e6,  m: 1.8, l: "WHALE"   },
+  { min: 7e6,  m: 1.7, l: "SHARK"   },
+  { min: 6e6,  m: 1.6, l: "DOLPHIN" },
+  { min: 5e6,  m: 1.5, l: "BULL"    },
+  { min: 4e6,  m: 1.4, l: "APE"     },
+  { min: 3e6,  m: 1.3, l: "FISH"    },
+  { min: 2e6,  m: 1.2, l: "CRAB"    },
+  { min: 1e6,  m: 1.1, l: "SHRIMP"  },
+];
+function tierFor(bal){ for(const t of TIERS){ if(bal >= t.min) return t; } return null; }
+
+// Raw on-chain $XZILLA balance for an owner. Returns a number, or null when the
+// read fails — null means "unknown", which callers must NOT treat as zero.
+async function heliusBalance(address, env){
+  if(!env.HELIUS_KEY || !B58_RE.test(address)) return null;
+  const mint = env.XZILLA_MINT || XZILLA_MINT;
+  try{
+    const rpcRes = await fetch("https://mainnet.helius-rpc.com/?api-key=" + env.HELIUS_KEY, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        jsonrpc: "2.0", id: 1, method: "getTokenAccountsByOwner",
+        params: [ address, { mint }, { encoding: "jsonParsed" } ],
+      }),
+    });
+    const data = await rpcRes.json();
+    if(data.error) return null;
+    let balance = 0;
+    for(const acc of (data.result && data.result.value) || []){
+      const info = acc && acc.account && acc.account.data && acc.account.data.parsed && acc.account.data.parsed.info;
+      const amt = info && info.tokenAmount && info.tokenAmount.uiAmount;
+      if(typeof amt === "number") balance += amt;
+    }
+    return balance;
+  }catch(_){ return null; }
+}
+
+// Balance behind a short KV cache so a burst of submits can't burn the Helius quota.
+const HOLD_PREFIX = "hold:";
+const HOLD_TTL    = 600;   // seconds a verified balance is trusted before re-reading
+async function cachedBalance(address, env){
+  const key = HOLD_PREFIX + address;
+  const hit = await env.LB.get(key);
+  if(hit !== null){ const n = Number(hit); return Number.isFinite(n) ? n : null; }
+  const bal = await heliusBalance(address, env);
+  if(bal === null) return null;                                   // don't cache failures
+  await env.LB.put(key, String(bal), { expirationTtl: HOLD_TTL });
+  return bal;
+}
+
+/* ============================== daily run ==================================
+   One shared seed per UTC day + its own board. utcDay() is the single source of
+   truth for "which day is it" — the client derives the same string, and a submit
+   for any day other than today is rejected so yesterday's board can't be edited. */
+function utcDay(ts){
+  const d = new Date(typeof ts === "number" ? ts : Date.now());
+  return d.getUTCFullYear() + "-" + String(d.getUTCMonth() + 1).padStart(2, "0") + "-" + String(d.getUTCDate()).padStart(2, "0");
+}
+const DAY_RE     = /^\d{4}-\d{2}-\d{2}$/;
+const DAILY_KEY  = day => "dlb:" + day;
+const DAILY_KEEP = 200;
+const DAILY_TTL  = 60 * 60 * 24 * 10;   // keep each day's board ~10 days, then let it expire
+
+/* ============================== pump mode ==================================
+   Live $XZILLA price drives a global game modifier, so the chart and the game
+   feed each other. Thresholds live HERE (not in the client) so they can be
+   retuned without shipping a new game.js / busting anyone's cache. */
+const DEX_PAIR      = "8sfcazkfua9btfzccpa9nkjzgye8b5q89darghrezsew";   // solana pair (dexscreener)
+const PUMP_TTL      = 60;     // seconds a FRESH price response is cached at the edge
+const PUMP_FAIL_TTL = 20;     // shorter cache after a failed/stale read, so recovery is quick
+const PUMP_LAST_KEY = "pump:last";
+const PUMP_LAST_TTL = 3600;   // last-known-good survives an hour of upstream flakiness
+
+/* Dexscreener is inconsistent: the same pair returns full data one minute and
+   {"schemaVersion":"1.0.0","pairs":null} the next (undocumented rate limiting).
+   Try the pair endpoint, then fall back to the token endpoint and pick the
+   deepest-liquidity Solana pair. Returns a pair object or null. */
+async function fetchDexPair(env){
+  const headers = { "accept": "application/json", "user-agent": "xzilla-game/1.0 (+https://xzilla.io)" };
+  const pairId  = env.DEX_PAIR || DEX_PAIR;
+  const mint    = env.XZILLA_MINT || XZILLA_MINT;
+
+  try{
+    const r = await fetch("https://api.dexscreener.com/latest/dex/pairs/solana/" + pairId, { headers });
+    const d = await r.json().catch(() => null);
+    // The endpoint returns `pairs` (array); some responses use `pair` (single object).
+    const p = d ? (Array.isArray(d.pairs) && d.pairs[0]) || d.pair || null : null;
+    if(p) return p;
+  }catch(_){}
+
+  try{
+    const r = await fetch("https://api.dexscreener.com/latest/dex/tokens/" + mint, { headers });
+    const d = await r.json().catch(() => null);
+    const list = (d && Array.isArray(d.pairs)) ? d.pairs.filter(p => p && p.chainId === "solana") : [];
+    if(list.length){
+      list.sort((a, b) => ((b.liquidity && b.liquidity.usd) || 0) - ((a.liquidity && a.liquidity.usd) || 0));
+      return list[0];
+    }
+  }catch(_){}
+
+  return null;
+}
+function pumpModeFor(change24){
+  if(!Number.isFinite(change24))  return { mode: "NORMAL", mult: 1,   xpMult: 1,   label: "",                 note: "" };
+  if(change24 >= 15)              return { mode: "PUMP",   mult: 2,   xpMult: 1,   label: "🚀 PUMP MODE",     note: "$XZILLA is flying — DOUBLE score for everyone" };
+  if(change24 >= 5)               return { mode: "GREEN",  mult: 1.5, xpMult: 1,   label: "🟢 GREEN CANDLE",  note: "$XZILLA is up — 1.5× score for everyone" };
+  if(change24 <= -10)             return { mode: "BLOOD",  mult: 1,   xpMult: 1.5, label: "🩸 BLOOD MODE",    note: "Red day — scams hit harder, but XP pays 1.5×" };
+  return { mode: "NORMAL", mult: 1, xpMult: 1, label: "", note: "" };
+}
+
 export default {
   async fetch(req, env){
     const origin = req.headers.get("Origin") || "*";
@@ -84,7 +205,123 @@ export default {
 
     if(req.method === "GET" && url.pathname === "/top"){
       const list = JSON.parse((await env.LB.get(TOP_KEY)) || "[]");
-      return json({ top: list.slice(0, 10).map(e => ({ name: e.name, score: e.score })) }, 200, origin);
+      // tier/hold ride along so the board can show WHO ACTUALLY HOLDS — the whole point
+      // of the multiplier is that other players can see it.
+      return json({ top: list.slice(0, 10).map(e => ({ name: e.name, score: e.score, tier: e.tier || null, hold: e.hold || 0 })) }, 200, origin);
+    }
+
+    /* ===================== PUMP MODE — live $XZILLA price ===================
+       Public, cached, no auth. Returns both the raw market data (so the start
+       screen can show the chart) and the derived game modifier. */
+    if(req.method === "GET" && url.pathname === "/pump"){
+      const cacheKey = new Request(new URL("/pump", req.url).toString());
+      const cached = await caches.default.match(cacheKey);
+      if(cached) return cached;
+      let payload = { ok: false, mode: "NORMAL", mult: 1, xpMult: 1, label: "", note: "" };
+      try{
+        const p = await fetchDexPair(env);
+        if(p){
+          const change24 = Number(p.priceChange && p.priceChange.h24);
+          payload = {
+            ok: true,
+            priceUsd: Number(p.priceUsd) || 0,
+            change24: Number.isFinite(change24) ? change24 : null,
+            mcap: Number(p.marketCap || p.fdv) || 0,
+            vol24: Number(p.volume && p.volume.h24) || 0,
+            liq: Number(p.liquidity && p.liquidity.usd) || 0,
+            ...pumpModeFor(change24),
+          };
+        } else { payload.err = "no_pair"; }
+      }catch(_){ payload.err = "fetch_failed"; }
+
+      if(payload.ok){
+        // Remember the last good reading. Dexscreener is heavily rate-limited and
+        // frequently answers {"pairs":null} even for a live pair, so without this the
+        // game would flicker in and out of PUMP MODE all day.
+        await env.LB.put(PUMP_LAST_KEY, JSON.stringify(payload), { expirationTtl: PUMP_LAST_TTL });
+      } else {
+        const last = await env.LB.get(PUMP_LAST_KEY);
+        if(last){
+          try{ payload = { ...JSON.parse(last), stale: true }; }catch(_){}
+        }
+      }
+
+      const res = new Response(JSON.stringify(payload), {
+        status: 200,
+        headers: { "content-type": "application/json", "Cache-Control": "public, max-age=" + PUMP_TTL, ...cors(origin) },
+      });
+      // Cache fresh readings for the full window; cache a stale/failed one only briefly, so
+      // the next real reading isn't held back — but still bound how often we call upstream.
+      const ttl = payload.ok && !payload.stale ? PUMP_TTL : PUMP_FAIL_TTL;
+      await caches.default.put(cacheKey, new Response(JSON.stringify(payload), {
+        status: 200,
+        headers: { "content-type": "application/json", "Cache-Control": "public, max-age=" + ttl, ...cors(origin) },
+      }));
+      return res;
+    }
+
+    /* ===================== DAILY RUG RUN — one seed, one shot ===============
+       GET /daily-top?day=YYYY-MM-DD  -> { day, seed, top: [...] }
+       POST /daily-submit             -> { ok, rank, top }  body { initData, score, day }
+       The server keeps each user's FIRST submitted score for the day: the mode is
+       one-attempt-only, so a second post is a retry attempt and is ignored rather
+       than allowed to overwrite. (The client also locks the button locally; this is
+       the half that actually enforces it.) */
+    if(req.method === "GET" && url.pathname === "/daily-top"){
+      const day = DAY_RE.test(url.searchParams.get("day") || "") ? url.searchParams.get("day") : utcDay();
+      const list = JSON.parse((await env.LB.get(DAILY_KEY(day))) || "[]");
+      return json({
+        day,
+        top: list.slice(0, 20).map(e => ({ name: e.name, score: e.score, tier: e.tier || null })),
+        players: list.length,
+      }, 200, origin);
+    }
+
+    if(req.method === "POST" && url.pathname === "/daily-submit"){
+      let body;
+      try{ body = await req.json(); }catch(_){ return json({ error: "bad json" }, 400, origin); }
+      const user = await verifyInitData(body.initData || "", env.BOT_TOKEN);
+      if(!user) return json({ error: "unauthorized" }, 401, origin);
+      const score = Math.max(0, Math.round(Number(body.score) || 0));
+      if(score > MAX_SCORE) return json({ error: "score_rejected" }, 400, origin);
+      const today = utcDay();
+      // Only today's board is writable — no back-filling yesterday once its seed is known.
+      if(body.day && body.day !== today) return json({ error: "stale_day", day: today }, 409, origin);
+
+      const id   = String(user.id);
+      const name = (user.username ? "@" + user.username : (user.first_name || "Player")).slice(0, 24);
+      const key  = DAILY_KEY(today);
+      const list = JSON.parse((await env.LB.get(key)) || "[]");
+      const idx  = list.findIndex(e => e.id === id);
+
+      if(idx >= 0){
+        // Already ran today — report their standing, write nothing.
+        const sorted = list.slice().sort((a, b) => b.score - a.score);
+        return json({
+          ok: true, already: true,
+          rank: sorted.findIndex(e => e.id === id) + 1,
+          score: list[idx].score,
+          top: sorted.slice(0, 20).map(e => ({ name: e.name, score: e.score, tier: e.tier || null })),
+        }, 200, origin);
+      }
+
+      let tier = null;
+      const wallet = String(body.wallet || "").trim();
+      if(B58_RE.test(wallet)){
+        const bal = await cachedBalance(wallet, env);
+        if(bal !== null){ const t = tierFor(bal); if(t) tier = t.l; }
+      }
+
+      list.push({ id, name, score, tier });
+      list.sort((a, b) => b.score - a.score);
+      const trimmed = list.slice(0, DAILY_KEEP);
+      await env.LB.put(key, JSON.stringify(trimmed), { expirationTtl: DAILY_TTL });
+      return json({
+        ok: true,
+        rank: trimmed.findIndex(e => e.id === id) + 1,
+        players: trimmed.length,
+        top: trimmed.slice(0, 20).map(e => ({ name: e.name, score: e.score, tier: e.tier || null })),
+      }, 200, origin);
     }
 
     if(req.method === "POST" && url.pathname === "/submit"){
@@ -103,6 +340,21 @@ export default {
       const idx  = list.findIndex(e => e.id === id);
       const prev = idx >= 0 ? list[idx].score : -1;
 
+      // HOLDER TIER — re-read the balance server-side so the badge on the public board
+      // is earned, not claimed. A failed/absent read leaves the PREVIOUS tier in place
+      // rather than clearing it, so an RPC blip doesn't visibly demote a real holder.
+      let tier = idx >= 0 ? (list[idx].tier || null) : null;
+      let hold = idx >= 0 ? (list[idx].hold  || 0)    : 0;
+      const wallet = String(body.wallet || "").trim();
+      if(B58_RE.test(wallet)){
+        const bal = await cachedBalance(wallet, env);
+        if(bal !== null){
+          const t = tierFor(bal);
+          tier = t ? t.l : null;      // a real read that comes back under 1M DOES clear the badge
+          hold = Math.round(bal);
+        }
+      }
+
       // A genuine NEW PERSONAL BEST is ALWAYS recorded — it must never be dropped just
       // because it landed soon after the previous run (the client re-posts your best on
       // every game-over, and short runs/quick retries used to trip the old blanket rate
@@ -110,22 +362,29 @@ export default {
       // they're handled below WITHOUT a write, so no rate limiter is needed for correctness.
       if(score <= prev){
         // Not an improvement — throttle churn but still report the player's standing.
+        // Exception: a freshly verified tier change IS persisted, so a player who just
+        // bought in sees their badge appear without having to beat their own record.
+        const tierChanged = idx >= 0 && (list[idx].tier !== tier || (list[idx].hold || 0) !== hold);
+        if(tierChanged){
+          list[idx].tier = tier; list[idx].hold = hold;
+          await env.LB.put(TOP_KEY, JSON.stringify(list));
+        }
         const tsKey = "ts:" + id, now = Date.now();
         const last = parseInt((await env.LB.get(tsKey)) || "0", 10);
         if(!(last && (now - last) < RATE_MS)) await env.LB.put(tsKey, String(now));
         const sorted = list.slice().sort((a, b) => b.score - a.score);
         const rank = sorted.findIndex(e => e.id === id) + 1;
-        return json({ ok: true, rank, top: sorted.slice(0, 10).map(e => ({ name: e.name, score: e.score })) }, 200, origin);
+        return json({ ok: true, rank, tier, top: sorted.slice(0, 10).map(e => ({ name: e.name, score: e.score, tier: e.tier || null, hold: e.hold || 0 })) }, 200, origin);
       }
 
       // record the new best
-      if(idx >= 0){ list[idx].score = score; list[idx].name = name; }
-      else { list.push({ id, name, score }); }
+      if(idx >= 0){ list[idx].score = score; list[idx].name = name; list[idx].tier = tier; list[idx].hold = hold; }
+      else { list.push({ id, name, score, tier, hold }); }
       list.sort((a, b) => b.score - a.score);
       const trimmed = list.slice(0, MAX_KEEP);
       await env.LB.put(TOP_KEY, JSON.stringify(trimmed));
       const rank = trimmed.findIndex(e => e.id === id) + 1;
-      return json({ ok: true, rank, top: trimmed.slice(0, 10).map(e => ({ name: e.name, score: e.score })) }, 200, origin);
+      return json({ ok: true, rank, tier, top: trimmed.slice(0, 10).map(e => ({ name: e.name, score: e.score, tier: e.tier || null, hold: e.hold || 0 })) }, 200, origin);
     }
 
     // ===================== Per-user economy (cross-device XP/upgrades) ===========
