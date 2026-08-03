@@ -1154,13 +1154,20 @@ window._adsPayload = "WwogIHsKICAgICJpZCI6ICJ4emlsbGEtaG9tZSIsCiAgICAidGV4dCI6IC
 
   /* Google Identity Services renders its own button; it must be re-rendered every time
    * the card is rebuilt, and the library may still be loading on first paint. */
+  let _gsiInited = false;
   function mountGoogleButton(){
     const el = $("gsiButton");
     if(!el || !window.__GOOGLE_CLIENT_ID) return;
     const g = window.google && window.google.accounts && window.google.accounts.id;
     if(!g){ setTimeout(mountGoogleButton, 600); return; }   // library still loading
     try{
-      g.initialize({ client_id: window.__GOOGLE_CLIENT_ID, callback: window.__xzGoogleCredential });
+      // initialize() is global and must run ONCE — calling it again on every re-mount
+      // makes GIS warn that only the last instance survives. renderButton is the part
+      // that genuinely needs repeating whenever the card is rebuilt.
+      if(!_gsiInited){
+        g.initialize({ client_id: window.__GOOGLE_CLIENT_ID, callback: window.__xzGoogleCredential });
+        _gsiInited = true;
+      }
       g.renderButton(el, { theme:"filled_black", size:"large", shape:"pill", text:"signin_with", width:240 });
     }catch(_){}
   }

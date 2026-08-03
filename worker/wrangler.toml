@@ -9,6 +9,20 @@ kv_namespaces = [
   { binding = "LB", id = "71fa6f557b9240958c909b8b4bf5d3a8" }
 ]
 
+# Google Sign-In. NOT a secret — the client id ships in the page source by design, and
+# the Worker only uses it to check the `aud` claim of an ID token it has already verified
+# against Google's public keys. Must match GOOGLE_CLIENT_ID in index.html.
+[vars]
+GOOGLE_CLIENT_ID = "812393204247-o0cgfueu8qa2dei79m78mv9hd85op41d.apps.googleusercontent.com"
+
+# SESSION_SECRET is a SECRET — signs web session tokens. Set it with:
+#   npx wrangler secret put SESSION_SECRET
+# (any long random string; rotating it signs everyone out, which is safe)
+#
+# TURNSTILE_SECRET is a SECRET (optional) — gates account creation against bots.
+# Turnstile checks are skipped entirely until this is set:
+#   npx wrangler secret put TURNSTILE_SECRET
+#
 # BOT_TOKEN is a SECRET — do NOT put it in this file. Set it with:
 #   npx wrangler secret put BOT_TOKEN
 # (paste your @BotFather token when prompted)
