@@ -1124,6 +1124,7 @@ window._adsPayload = "WwogIHsKICAgICJpZCI6ICJ4emlsbGEtaG9tZSIsCiAgICAidGV4dCI6IC
   async function loginWithWallet(){
     const api = lbApi(); if(!api){ toast("Backend not connected", RED); return false; }
     try{
+      if(!(await ensureTurnstile())) return false;   // check the captcha BEFORE asking for a signature
       if(!window.XZWallet){ toast("Wallet connector loading — try again", GOLD); return false; }
       if(!connectedWallet()){
         const ok = await window.XZWallet.connect();
@@ -1150,6 +1151,7 @@ window._adsPayload = "WwogIHsKICAgICJpZCI6ICJ4emlsbGEtaG9tZSIsCiAgICAidGV4dCI6IC
   async function loginWithGoogle(credential){
     const api = lbApi(); if(!api) return false;
     try{
+      if(!(await ensureTurnstile())) return false;
       const res = await fetch(api+"/auth/google",{ method:"POST", headers:{"content-type":"application/json"},
         body: JSON.stringify({ credential, turnstile: window.__turnstileToken||"" }) }).then(r=>r.json());
       if(!res || !res.ok){ toast("Google sign-in failed: "+((res&&res.error)||"unknown"), RED); return false; }
@@ -1231,6 +1233,19 @@ window._adsPayload = "WwogIHsKICAgICJpZCI6ICJ4emlsbGEtaG9tZSIsCiAgICAidGV4dCI6IC
       });
     }catch(_){}
   }
+  /* Make sure a captcha token exists BEFORE doing any login work.
+   * Managed mode usually self-completes in a second or two, but it can present an
+   * interactive check. Without this the player would connect their wallet and sign a
+   * message, and only then be rejected with a bare "captcha_failed" — burning the most
+   * annoying step of the flow for nothing. Waits briefly, then explains what to do. */
+  async function ensureTurnstile(){
+    if(!turnstileEnabled()) return true;
+    for(let i=0; i<16 && !window.__turnstileToken; i++) await new Promise(r=>setTimeout(r,250));
+    if(window.__turnstileToken) return true;
+    toast("Tick “Verify you are human” first, then sign in", GOLD);
+    return false;
+  }
+
   // Burn the used token and request a fresh one. Called after every login attempt.
   function resetTurnstile(){
     window.__turnstileToken = "";
