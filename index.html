@@ -6,6 +6,9 @@
 <script src="https://telegram.org/js/telegram-web-app.js"></script>
 <!-- Google Identity Services — only used when GOOGLE_CLIENT_ID is set below; harmless otherwise. -->
 <script src="https://accounts.google.com/gsi/client" async defer></script>
+<!-- Cloudflare Turnstile — explicit render mode so the widget is only created on the
+     sign-in card, and only when TURNSTILE_SITEKEY is configured. -->
+<script src="https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit" async defer></script>
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
 <title>XZILLA: 3D Scam Destroyer</title>
 
@@ -13,7 +16,7 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@500;700;900&family=Press+Start+2P&display=swap" rel="stylesheet">
 
-<link rel="stylesheet" href="styles.css?v=37">
+<link rel="stylesheet" href="styles.css?v=38">
 </head>
 <body>
   <div id="game"></div>
@@ -519,6 +522,20 @@ window.__LB_API = (function(){
 // Google button entirely — wallet sign-in works without it.
 const GOOGLE_CLIENT_ID = "812393204247-o0cgfueu8qa2dei79m78mv9hd85op41d.apps.googleusercontent.com";
 window.__GOOGLE_CLIENT_ID = GOOGLE_CLIENT_ID;
+
+// Cloudflare Turnstile — blocks scripted account creation on the web sign-in paths.
+// The SITE key is public (it ships in page source by design); the matching secret lives
+// only on the Worker as TURNSTILE_SECRET. Leave "" to render no widget.
+//
+// ROLL OUT IN THIS ORDER — the two halves are NOT symmetric:
+//   1. set this sitekey and ship it, THEN
+//   2. set TURNSTILE_SECRET on the Worker.
+// Doing it the other way round locks every web player out of signing in: once the
+// Worker has a secret it rejects any login carrying no token (403 captcha_failed),
+// and a client without a sitekey never produces one. Verified by test.
+// Removing Turnstile again means reversing the order: unset the Worker secret first.
+const TURNSTILE_SITEKEY = "";
+window.__TURNSTILE_SITEKEY = TURNSTILE_SITEKEY;
 
 // Your bot's Mini App link, attached to shared scores/invites so friends can tap & play.
 // Use the direct Mini App link, e.g. "https://t.me/YourBot/play" or "https://t.me/YourBot?startapp".
@@ -1505,6 +1522,6 @@ document.addEventListener("visibilitychange",()=>{ if(document.hidden&&state.run
 
 document.getElementById("bestScore").textContent=state.best;
 </script>
-<script src="game.js?v=111"></script>
+<script src="game.js?v=112"></script>
 </body>
 </html>

@@ -1129,6 +1129,7 @@ window._adsPayload = "WwogIHsKICAgICJpZCI6ICJ4emlsbGEtaG9tZSIsCiAgICAidGV4dCI6IC
       onAuthChanged();
       return true;
     }catch(e){ toast("Sign-in failed", RED); return false; }
+    finally{ resetTurnstile(); }   // tokens are single-use — never resend a spent one
   }
 
   /* Google — the ID token is verified server-side against Google's keys. */
@@ -1143,6 +1144,7 @@ window._adsPayload = "WwogIHsKICAgICJpZCI6ICJ4emlsbGEtaG9tZSIsCiAgICAidGV4dCI6IC
       onAuthChanged();
       return true;
     }catch(e){ toast("Google sign-in failed", RED); return false; }
+    finally{ resetTurnstile(); }
   }
   // Google Identity Services calls this from its own callback.
   window.__xzGoogleCredential = c => loginWithGoogle(c && c.credential);
@@ -1169,16 +1171,59 @@ window._adsPayload = "WwogIHsKICAgICJpZCI6ICJ4emlsbGEtaG9tZSIsCiAgICAidGV4dCI6IC
       '<div class="loginSub">Play as a guest any time — sign in only to post scores to the global leaderboard.</div>'+
       '<button class="btn wallet-login" id="loginWallet">◆ SIGN IN WITH WALLET</button>'+
       '<div class="loginSub dim">Free signature · no transaction · sets your holder tier</div>'+
-      (window.__GOOGLE_CLIENT_ID ? '<div class="loginOr">or</div><div id="gsiButton"></div>' : '');
+      (window.__GOOGLE_CLIENT_ID ? '<div class="loginOr">or</div><div id="gsiButton"></div>' : '')+
+      (turnstileEnabled() ? '<div id="tsWidget" class="tsWidget"></div>' : '');
     $("loginWallet").onclick = async (ev) => {
       const b = ev.currentTarget; b.disabled = true; b.textContent = "OPENING WALLET…";
       try{ await loginWithWallet(); } finally { if(b.isConnected){ b.disabled=false; b.textContent="◆ SIGN IN WITH WALLET"; } }
     };
     mountGoogleButton();
+    mountTurnstile();
   }
 
   /* Google Identity Services renders its own button; it must be re-rendered every time
    * the card is rebuilt, and the library may still be loading on first paint. */
+  /* ------------------------------- Turnstile -------------------------------
+   * Bot gate on the sign-in paths. Two properties drive the design:
+   *   - a token is SINGLE USE, and
+   *   - it expires ~300s after issue.
+   * So the token cannot simply be captured once and reused: it is reset after every
+   * login attempt (success or failure) and re-issued when it expires, otherwise a
+   * player who leaves the menu open and then signs in gets a confusing rejection.
+   *
+   * Both halves are independently switchable: no sitekey here means no widget, and
+   * no TURNSTILE_SECRET on the Worker means verification is skipped. Neither state
+   * is broken, which is what makes it safe to roll out in two steps. */
+  let _tsWidgetId = null;
+  window.__turnstileToken = "";
+  function turnstileEnabled(){ return !!window.__TURNSTILE_SITEKEY; }
+
+  function mountTurnstile(){
+    if(!turnstileEnabled()) return;
+    const el = $("tsWidget"); if(!el) return;
+    const ts = window.turnstile;
+    if(!ts){ setTimeout(mountTurnstile, 600); return; }        // library still loading
+    // The card is rebuilt on every auth change, so the previous widget id is stale.
+    if(_tsWidgetId !== null){ try{ ts.remove(_tsWidgetId); }catch(_){} _tsWidgetId = null; }
+    try{
+      _tsWidgetId = ts.render(el, {
+        sitekey: window.__TURNSTILE_SITEKEY,
+        action: "turnstile-spin-v1",
+        theme: "dark",
+        size: "flexible",
+        callback: t => { window.__turnstileToken = t || ""; },
+        "expired-callback": () => { window.__turnstileToken = ""; resetTurnstile(); },
+        "error-callback": () => { window.__turnstileToken = ""; },
+      });
+    }catch(_){}
+  }
+  // Burn the used token and request a fresh one. Called after every login attempt.
+  function resetTurnstile(){
+    window.__turnstileToken = "";
+    if(_tsWidgetId === null || !window.turnstile) return;
+    try{ window.turnstile.reset(_tsWidgetId); }catch(_){}
+  }
+
   let _gsiInited = false;
   function mountGoogleButton(){
     const el = $("gsiButton");

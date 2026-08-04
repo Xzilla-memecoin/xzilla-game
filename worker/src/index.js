@@ -393,6 +393,10 @@ function implausible(score, stats){
 
 // Cloudflare Turnstile — blocks scripted account creation. No-op until
 // TURNSTILE_SECRET is set, so login keeps working before the widget exists.
+//
+// ORDER MATTERS: once the secret IS set, a login carrying no token is rejected. Ship the
+// sitekey to the client BEFORE setting this, or every web player is locked out of signing
+// in. (Telegram players are unaffected — they authenticate via initData, not this path.)
 async function turnstileOk(env, token, ip){
   if(!env.TURNSTILE_SECRET) return true;
   if(!token) return false;

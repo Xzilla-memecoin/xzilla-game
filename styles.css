@@ -396,3 +396,5 @@
   /* Discriminator shown after a board name only when that name is duplicated in the
      visible list — Google logins provide a first name, not a unique handle. */
   .ltag{ font-family:'Orbitron',sans-serif; font-size:9px; color:#9fb6c9; opacity:.7; margin-left:3px; }
+  /* Turnstile widget inside the sign-in card. Only rendered when a sitekey is set. */
+  .tsWidget{ margin-top:4px; min-height:0; display:flex; justify-content:center; max-width:100%; overflow:hidden; }
