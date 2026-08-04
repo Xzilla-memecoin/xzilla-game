@@ -850,12 +850,31 @@ renderer.outputEncoding=THREE.sRGBEncoding;
 container.appendChild(renderer.domElement);
 
 const scene=new THREE.Scene();
-scene.fog=new THREE.Fog(0x2a0b40, 22, 60);
+// scene.fog is configured just below, once CAM/SPAWN_Z exist — its range has to be
+// derived from where enemies actually spawn (see the FOG_NEAR note).
 // BASE_FOV is the landscape framing; PORTRAIT_FOV_MAX caps how far the vertical
 // FOV is widened on tall/narrow screens (see resize()) so it never fish-eyes.
 const BASE_FOV=62, PORTRAIT_FOV_MAX=105;   // 105 lets tall phones widen to ~landscape-parity horizontal view (un-zooms portrait)
 const camera=new THREE.PerspectiveCamera(BASE_FOV,1,0.1,140);
 const CAM={x:0,y:5,z:16}; const PLAYER_Z=8, SPAWN_Z=-30;
+
+/* FOG — distances are measured FROM THE CAMERA, not from world origin, which is what
+ * made the old values wrong. Spawn sits (CAM.z - SPAWN_Z) = 46 units away, so a near
+ * plane of 22 left every enemy roughly half-fogged the instant it appeared and only
+ * cleared once it was nearly on top of the player. That is the haze that sat across the
+ * middle of the screen, and it cost enemy readability as well as looking murky.
+ * Starting the fog just BEYOND the spawn point keeps the entire play lane crisp while
+ * the distant skyline still fades out, which is the only place the atmosphere was
+ * actually wanted. Derived from the layout constants so it tracks any change to them. */
+const FOG_NEAR = (CAM.z - SPAWN_Z) + 6;    // 52 — clear of the furthest gameplay object
+/* FOG_FAR is pinned to where the skyline recycles, and must not be raised casually.
+ * game.js respawns a tower at z = CAM.z+5 - SKY_SPAN (77), i.e. 72 units from the camera.
+ * The old near/far hid that behind full fog; pushing far out to 115 made a recycled tower
+ * ~68% visible at the moment it jumped, so buildings popped into existence at the horizon.
+ * Keeping far at the recycle distance means a tower is still fully fogged when it wraps,
+ * and the distant skyline keeps its haze — which is the one place the atmosphere helped. */
+const FOG_FAR  = 72;
+scene.fog = new THREE.Fog(0x2a0b40, FOG_NEAR, FOG_FAR);
 let playHalfWidth=3, camAimY=2.4;
 function placeCamera(dx,dy){ camera.position.set(CAM.x+(dx||0),CAM.y+(dy||0),CAM.z); camera.lookAt(0,camAimY,-12); }
 
