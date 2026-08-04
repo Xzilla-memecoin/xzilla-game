@@ -1259,6 +1259,9 @@ window._adsPayload = "WwogIHsKICAgICJpZCI6ICJ4emlsbGEtaG9tZSIsCiAgICAidGV4dCI6IC
   function logout(){ clearAuth(); toast("Signed out", CYAN); onAuthChanged(); }
   function onAuthChanged(){
     try{ renderLoginCard(); }catch(_){}
+    // The daily attempt belongs to the account, so a change of identity re-opens or
+    // re-locks today's run. Without this, switching accounts kept the previous lock.
+    try{ if(window.__refreshDailyStatus) window.__refreshDailyStatus(); }catch(_){}
     try{ if(!$("leaderboardPanel").classList.contains("hidden")) renderLeaderboard(); }catch(_){}
   }
   window.__xzAuth = { get token(){ return auth.token; }, get name(){ return auth.name; },
@@ -4203,9 +4206,53 @@ window._adsPayload = "WwogIHsKICAgICJpZCI6ICJ4emlsbGEtaG9tZSIsCiAgICAidGV4dCI6IC
       active:false,          // is the current/just-finished run a daily attempt?
       day:utcDay(),
       rank:0,
-      rec:store.get(DRUN_KEY, null),   // {day, score, rank, ts} for the last day played
+      rec:store.get(DRUN_KEY, null),   // {day, score, rank, ts, tag} for the last day played
+      serverPlayed:null,               // server's answer: true/false, or null = not asked yet
     };
-    function dailyPlayedToday(){ return !!(drun.rec && drun.rec.day===utcDay()); }
+    /* Whose attempt is the stored local record?
+     * The lock belongs to the ACCOUNT, not the browser. Without this, signing in with a
+     * second account on the same device stayed locked out (the local record was blindly
+     * trusted), and the same account on a second device wasn't locked at all. The server
+     * is authoritative for signed-in players — drun.serverPlayed carries its answer —
+     * while the local record still covers guests, who have no server-side identity.
+     *
+     * `tag` is the identity marker rather than pid because it is the one identifier BOTH
+     * Telegram and web players reliably learn (see setMyTag). */
+    function localLock(){
+      const r = drun.rec;
+      if(!r || r.day !== utcDay()) return false;
+      // A record left by a DIFFERENT account must not lock the current one.
+      if(myTag && r.tag && r.tag !== myTag) return false;
+      // A signed-in player must not inherit a guest's attempt from this device.
+      if(myTag && !r.tag) return false;
+      return true;
+    }
+    function dailyPlayedToday(){
+      if(drun.serverPlayed === true)  return true;    // server is authoritative when signed in
+      if(drun.serverPlayed === false) return false;
+      return localLock();                             // guest, or server not consulted yet
+    }
+
+    /* Ask the server whether this account has already run today, then repaint the card.
+     * Runs on boot and on every auth change, so switching accounts re-evaluates. */
+    function refreshDailyStatus(){
+      const api = lbApi();
+      if(!api || !signedIn()){ drun.serverPlayed = null; renderDailyCard(); return; }
+      fetch(api+"/daily-status", { method:"POST", headers:authHeaders(),
+        body: JSON.stringify({ initData: tgInitData() }) })
+        .then(r=>r.ok?r.json():null).then(d=>{
+          if(!d || d.anon) return;
+          setMyTag(d.you);
+          drun.serverPlayed = !!d.played;
+          if(d.played){
+            // Adopt the server's record so the card can show the real score/rank even on
+            // a device where this account has never played.
+            drun.rec = Object.assign({}, drun.rec, { day:d.day, score:d.score, rank:d.rank, tag:d.you });
+            store.set(DRUN_KEY, drun.rec);
+          }
+          renderDailyCard();
+        }).catch(()=>{});   // offline: fall back to the local record
+    }
     function dailySeed(day){ return hashSeed("xzilla-daily-"+day); }
 
     // Four separate pre-run hooks are registered on startBtn across this file (resetRun,
@@ -4249,8 +4296,9 @@ window._adsPayload = "WwogIHsKICAgICJpZCI6ICJ4emlsbGEtaG9tZSIsCiAgICAidGV4dCI6IC
       const score=Math.round(state.score||0);
       // Stats are stored alongside the score so re-sharing the card tomorrow morning
       // still shows the real run, not a zeroed-out one.
-      drun.rec={ day:drun.day, score, rank:0, ts:Date.now(),
+      drun.rec={ day:drun.day, score, rank:0, ts:Date.now(), tag:myTag||null,
                   kills:run.kills|0, combo:run.combo|0, boss:run.boss|0 };
+      drun.serverPlayed = signedIn() ? true : null;
       store.set(DRUN_KEY, drun.rec);
       const api=lbApi();
       if(!api || !signedIn()) return true;   // guests still get a local daily; posting needs an identity
@@ -4461,11 +4509,13 @@ window._adsPayload = "WwogIHsKICAgICJpZCI6ICJ4emlsbGEtaG9tZSIsCiAgICAidGV4dCI6IC
     };
 
     /* -------------------------------- boot ---------------------------------- */
+    window.__refreshDailyStatus = refreshDailyStatus;
     renderDailyCard();
     renderLoginCard();
+    refreshDailyStatus();
     // Validate any stored session token, then repaint (a dead token must not sit there
     // looking signed-in while every submit silently 401s).
-    refreshAuth(()=>renderLoginCard());
+    refreshAuth(()=>{ renderLoginCard(); refreshDailyStatus(); });
     fetchPump();
     // Re-poll every 5 min, and again whenever the player returns to the tab, so a
     // pump that starts mid-session is picked up without a reload.

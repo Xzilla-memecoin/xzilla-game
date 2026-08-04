@@ -621,6 +621,30 @@ export default {
       }, 200, origin);
     }
 
+    /* Has THIS PLAYER already used today's daily run?
+       The client also keeps a local record, but that is per-device: it wrongly locks a
+       player who signs in with a different account on the same browser, and fails to
+       lock the same account on a second device. The account is the thing the attempt
+       belongs to, so the server is the authority and the local copy is only a fallback
+       for guests. POST (not GET) so Telegram clients can pass initData in the body. */
+    if(req.method === "POST" && url.pathname === "/daily-status"){
+      let body; try{ body = await req.json(); }catch(_){ body = {}; }
+      const me = await identify(req, env, body);
+      const today = utcDay();
+      if(!me) return json({ day: today, played: false, anon: true }, 200, origin);
+      const list = JSON.parse((await env.LB.get(DAILY_KEY(today))) || "[]");
+      const sorted = list.slice().sort((a, b) => b.score - a.score);
+      const i = sorted.findIndex(e => e.id === me.pid);
+      return json({
+        day: today,
+        played: i >= 0,
+        score: i >= 0 ? sorted[i].score : 0,
+        rank:  i >= 0 ? i + 1 : 0,
+        players: list.length,
+        you: await shortTag(me.pid),
+      }, 200, origin);
+    }
+
     if(req.method === "POST" && url.pathname === "/daily-submit"){
       let body;
       try{ body = await req.json(); }catch(_){ return json({ error: "bad json" }, 400, origin); }
