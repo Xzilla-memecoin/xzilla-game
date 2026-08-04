@@ -534,7 +534,7 @@ window.__GOOGLE_CLIENT_ID = GOOGLE_CLIENT_ID;
 // Worker has a secret it rejects any login carrying no token (403 captcha_failed),
 // and a client without a sitekey never produces one. Verified by test.
 // Removing Turnstile again means reversing the order: unset the Worker secret first.
-const TURNSTILE_SITEKEY = "";
+const TURNSTILE_SITEKEY = "0x4AAAAAAEGbN_nGG9A-vzth";
 window.__TURNSTILE_SITEKEY = TURNSTILE_SITEKEY;
 
 // Your bot's Mini App link, attached to shared scores/invites so friends can tap & play.
@@ -1549,6 +1549,6 @@ document.addEventListener("visibilitychange",()=>{ if(document.hidden&&state.run
 
 document.getElementById("bestScore").textContent=state.best;
 </script>
-<script src="game.js?v=115"></script>
+<script src="game.js?v=116"></script>
 </body>
 </html>
