@@ -1274,9 +1274,17 @@ function resolve(e){ const p=e.sprite.position.clone();
 const clock=new THREE.Clock(); let gridOffset=0; let _lastCombo=0; let _tireAcc=0;
 function loop(){ requestAnimationFrame(loop); const dt=Math.min(clock.getDelta(),0.05); const now=performance.now()*0.001;
   const scroll=dt*(state.running?state.speed:3.5); gridOffset=(gridOffset+scroll)%2; grid.position.z=-6+gridOffset; grid2.position.z=-6+gridOffset;
-  const since=actx?(actx.currentTime-beatT):9, pulse=Math.max(0,1-since*6);
+  // beatT is the SCHEDULED time of the next kick, which the music sequencer sets ahead of
+  // actx.currentTime — so `since` goes negative between scheduling and the beat landing,
+  // and the old Math.max(0, ...) only clamped the bottom. pulse ran up to ~1.6, inflating
+  // everything downstream by 60%: the sun glow reached 82 units wide at opacity 1.14, and
+  // the grid opacity exceeded 1.0. Clamp both ends so a "pulse" stays a 0..1 pulse.
+  const since=actx?(actx.currentTime-beatT):9, pulse=Math.min(1,Math.max(0,1-since*6));
   grid.material.opacity=0.5+0.32*pulse; grid2.material.opacity=0.16+0.18*pulse;
-  sunGlow.material.opacity=0.5+0.4*pulse; sunGlow.scale.setScalar(66+10*pulse);
+  // Sun glow is additive and fog:false, so it is NOT held back by scene fog — at its old
+  // size its lower half spilled well past the horizon and washed out the mid-distance
+  // city. Sized to stay a halo around the 30-unit sun instead of a screen-wide haze.
+  sunGlow.material.opacity=0.34+0.26*pulse; sunGlow.scale.setScalar(44+8*pulse);
   // VIP glow only on the menu/pause screens (state.running===false) — no bubble during play.
   if(state.vip && !state.running){ vipGlow.material.opacity=0.42+0.26*Math.sin(now*4.4); vipGlow.scale.setScalar(4.4+0.3*Math.sin(now*4.4)); }
   else vipGlow.material.opacity=0;
