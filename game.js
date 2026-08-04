@@ -1044,7 +1044,18 @@ window._adsPayload = "WwogIHsKICAgICJpZCI6ICJ4emlsbGEtaG9tZSIsCiAgICAidGV4dCI6IC
    * Authorization header. Both resolve to the same server-side player id, so both
    * land on the SAME leaderboard. */
   const AUTH_TOKEN_KEY = "xz_auth_v1";
-  const auth = { token: store.get(AUTH_TOKEN_KEY, null), pid: null, name: null, provider: null };
+  /* Persist the WHOLE identity, not just the token. Storing only the token meant name
+   * and provider were null on every page load, and renderLoginCard needs both — so a
+   * signed-in player saw the "sign in" card until /auth/me returned, and kept seeing it
+   * if that request was slow or failed. The session was valid the entire time; only the
+   * UI disagreed. Handles the legacy bare-string format written by earlier builds. */
+  function loadAuth(){
+    const v = store.get(AUTH_TOKEN_KEY, null);
+    if(!v) return { token:null, pid:null, name:null, provider:null };
+    if(typeof v === "string") return { token:v, pid:null, name:null, provider:null };
+    return { token:v.token||null, pid:v.pid||null, name:v.name||null, provider:v.provider||null };
+  }
+  const auth = loadAuth();
 
   function tgInitData(){ try{ return (tg && tg.initData) || ""; }catch(_){ return ""; } }
   function signedIn(){ return !!(tgInitData() || auth.token); }
@@ -1062,8 +1073,11 @@ window._adsPayload = "WwogIHsKICAgICJpZCI6ICJ4emlsbGEtaG9tZSIsCiAgICAidGV4dCI6IC
   }
   function setAuth(d, provider){
     auth.token = d.token; auth.pid = d.pid; auth.name = d.name; auth.provider = provider;
-    if(d.tag) myTag = d.tag;
-    store.set(AUTH_TOKEN_KEY, d.token);
+    if(d.tag) setMyTag(d.tag);
+    saveAuth();
+  }
+  function saveAuth(){
+    store.set(AUTH_TOKEN_KEY, { token:auth.token, pid:auth.pid, name:auth.name, provider:auth.provider });
   }
 
   /* Which leaderboard row is MINE.
@@ -1100,7 +1114,7 @@ window._adsPayload = "WwogIHsKICAgICJpZCI6ICJ4emlsbGEtaG9tZSIsCiAgICAidGV4dCI6IC
     if(!api || !auth.token){ if(cb) cb(false); return; }
     fetch(api+"/auth/me", { headers:{ "Authorization":"Bearer "+auth.token } })
       .then(r=>r.ok?r.json():null).then(d=>{
-        if(d && d.ok){ auth.pid=d.pid; auth.name=d.name; auth.provider=d.provider; setMyTag(d.tag); if(cb) cb(true); }
+        if(d && d.ok){ auth.pid=d.pid; auth.name=d.name; auth.provider=d.provider; setMyTag(d.tag); saveAuth(); if(cb) cb(true); }
         else { clearAuth(); if(cb) cb(false); }
       }).catch(()=>{ if(cb) cb(false); });   // network blip: keep the token, try again later
   }
@@ -4417,11 +4431,20 @@ window._adsPayload = "WwogIHsKICAgICJpZCI6ICJ4emlsbGEtaG9tZSIsCiAgICAidGV4dCI6IC
     const _rl = renderLeaderboard;
     renderLeaderboard = function(){
       _rl();
-      const host=$("leaderboardInner"); if(!host || !lbApi() || host.querySelector("#lbDaily")) return;
-      const box=document.createElement("div"); box.id="lbDaily";
+      const host=$("leaderboardInner"); if(!host || !lbApi()) return;
+      // ALWAYS re-fetch rather than bailing out when #lbDaily already exists. Today the
+      // base renderLeaderboard() reassigns leaderboardInner.innerHTML first, which wipes
+      // this block, so the old guard was never actually reached — this is defensive, not
+      // a fix for a live bug. It matters if that wipe ever stops happening: the daily
+      // board is live data and must reload every time the panel opens, or a player who
+      // posts a score sees a stale "nobody has run today".
+      let box=host.querySelector("#lbDaily");
+      if(!box){
+        box=document.createElement("div"); box.id="lbDaily";
+        host.insertBefore(box, host.firstChild);
+      }
       box.innerHTML='<h2 class="pnl-title" style="border-color:'+CYAN+';margin-top:4px;">🗓 DAILY RUG RUN · '+utcDay()+'</h2>'+
         '<div class="sub" id="lbDailyList">Loading today’s board…</div>';
-      host.insertBefore(box, host.firstChild);
       fetch(lbApi()+"/daily-top?day="+encodeURIComponent(utcDay()),{cache:"no-store"})
         .then(r=>r.json()).then(d=>{
           const list=(d&&d.top)||[]; const el=$("lbDailyList"); if(!el) return;

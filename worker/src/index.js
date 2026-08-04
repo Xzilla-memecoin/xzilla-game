@@ -636,8 +636,8 @@ export default {
       // Only today's board is writable — no back-filling yesterday once its seed is known.
       if(body.day && body.day !== today) return json({ error: "stale_day", day: today }, 409, origin);
 
-      const id   = String(user.id);
-      const name = (user.username ? "@" + user.username : (user.first_name || "Player")).slice(0, 24);
+      const id   = me.pid;
+      const name = me.name;
       const key  = DAILY_KEY(today);
       const list = JSON.parse((await env.LB.get(key)) || "[]");
       const idx  = list.findIndex(e => e.id === id);
@@ -813,7 +813,7 @@ export default {
       if(reward > 0) await env.LB.delete(REFPEND_PREFIX + id);   // one-time claim
       // stamp the inviter's real name onto the board now that they've authenticated
       if(count > 0){
-        const name = (user.username ? "@" + user.username : (user.first_name || "Player")).slice(0, 24);
+        const name = me.name;
         const board = JSON.parse((await env.LB.get(REFLB_KEY)) || "[]");
         const e = board.find(x => x.id === id);
         if(e && e.name !== name){ e.name = name; await env.LB.put(REFLB_KEY, JSON.stringify(board)); }
