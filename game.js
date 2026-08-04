@@ -1975,10 +1975,16 @@ window._adsPayload = "WwogIHsKICAgICJpZCI6ICJ4emlsbGEtaG9tZSIsCiAgICAidGV4dCI6IC
       if(_bossGlow) return _bossGlow;
       const S=256, c=document.createElement("canvas"); c.width=c.height=S;
       const x=c.getContext("2d");
+      // RIM, not a filled disc. This sprite is ADDITIVE and sits behind the truck, so a
+      // bright core (it was 0.95 alpha at the centre) added light straight through the
+      // body and washed it into fog — the head read fine only because it sits above the
+      // hottest part of the gradient. Keeping the core clear preserves what the halo is
+      // for (separating a dark silhouette from the neon skyline) without veiling the art.
       const g=x.createRadialGradient(S/2,S/2,8, S/2,S/2,S/2);
-      g.addColorStop(0,"rgba(255,70,110,0.95)");
-      g.addColorStop(0.38,"rgba(255,40,120,0.5)");
-      g.addColorStop(1,"rgba(255,40,120,0)");
+      g.addColorStop(0.00,"rgba(255,70,110,0)");
+      g.addColorStop(0.44,"rgba(255,70,110,0.08)");
+      g.addColorStop(0.66,"rgba(255,50,120,0.50)");
+      g.addColorStop(1.00,"rgba(255,40,120,0)");
       x.fillStyle=g; x.fillRect(0,0,S,S);
       const m=new THREE.SpriteMaterial({ map:new THREE.CanvasTexture(c), transparent:true,
         blending:THREE.AdditiveBlending, depthWrite:false });
@@ -2811,9 +2817,11 @@ window._adsPayload = "WwogIHsKICAgICJpZCI6ICJ4emlsbGEtaG9tZSIsCiAgICAidGV4dCI6IC
       if(_boss){
         const bp=_boss.sprite.position;
         _glow.visible=true;
-        _glow.position.set(bp.x, bp.y-0.4, bp.z-0.15);
-        _glow.material.opacity = 0.55 + 0.22*Math.sin(t*4.0);
-        _glow.scale.set(_boss.sprite.scale.x*1.75, _boss.sprite.scale.y*1.18, 1);
+        // Centred on the boss (was -0.4, which pushed the hot part of the halo down onto
+        // the truck body) and a touch wider, so the rim reads around the silhouette.
+        _glow.position.set(bp.x, bp.y-0.1, bp.z-0.15);
+        _glow.material.opacity = 0.42 + 0.16*Math.sin(t*4.0);
+        _glow.scale.set(_boss.sprite.scale.x*1.9, _boss.sprite.scale.y*1.32, 1);
       } else if(_glow.visible){ _glow.visible=false; }
       // self-heal: if the boss left the screen un-defeated (dodged), its health bar must
       // not linger — hide it whenever there is no boss on the field.
