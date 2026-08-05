@@ -4227,6 +4227,28 @@ window._adsPayload = "WwogIHsKICAgICJpZCI6ICJ4emlsbGEtaG9tZSIsCiAgICAidGV4dCI6IC
     // state it was derived from may already have been reset by then.
     function snapshot(){ return { data:cardData(), text:shareText(), day:drun.active?drun.day:null }; }
 
+    // Download the PNG and put the caption on the clipboard. Shared by the share-sheet
+    // fallback and by the explicit SAVE PNG button, so both behave identically.
+    async function saveCardBlob(blob, s, text){
+      const url=URL.createObjectURL(blob);
+      const a=document.createElement("a");
+      a.href=url; a.download="xzilla-"+(s.day?("daily-"+s.day):"score")+".png";
+      document.body.appendChild(a); a.click(); a.remove();
+      setTimeout(()=>URL.revokeObjectURL(url), 10000);
+      try{ await navigator.clipboard.writeText(text); toast("Card saved · caption copied — post it! 📣", CYAN); }
+      catch(_){ toast("Score card saved to your downloads 📸", CYAN); }
+    }
+    async function saveCard(snap){
+      const s=snap || snapshot();
+      const link=refLink();
+      try{
+        const canvas=drawCard(s.data);
+        const blob=await new Promise(res=>canvas.toBlob(res,"image/png"));
+        if(!blob) throw new Error("no blob");
+        await saveCardBlob(blob, s, s.text+(link?("\n"+link):""));
+      }catch(e){ toast("Couldn't build the card", RED); }
+    }
+
     let _sharingCard=false;
     async function shareCard(snap){
       if(_sharingCard) return;
@@ -4248,13 +4270,7 @@ window._adsPayload = "WwogIHsKICAgICJpZCI6ICJ4emlsbGEtaG9tZSIsCiAgICAidGV4dCI6IC
         }
         // Fallback: save the PNG and put the caption on the clipboard, so posting it
         // is still two taps rather than impossible.
-        const url=URL.createObjectURL(blob);
-        const a=document.createElement("a");
-        a.href=url; a.download="xzilla-"+(s.day?("daily-"+s.day):"score")+".png";
-        document.body.appendChild(a); a.click(); a.remove();
-        setTimeout(()=>URL.revokeObjectURL(url), 10000);
-        try{ await navigator.clipboard.writeText(text); toast("Card saved · caption copied — post it! 📣", CYAN); }
-        catch(_){ toast("Score card saved to your downloads 📸", CYAN); }
+        await saveCardBlob(blob, s, text);
       }catch(e){
         toast("Couldn't build the card — sharing text instead", GOLD);
         try{ shareScore(); }catch(_){}
@@ -4321,25 +4337,26 @@ window._adsPayload = "WwogIHsKICAgICJpZCI6ICJ4emlsbGEtaG9tZSIsCiAgICAidGV4dCI6IC
       let ov=$("cardPreview");
       if(!ov){
         ov=document.createElement("div"); ov.id="cardPreview"; ov.className="overlay hidden";
-        // Which action leads depends on what the device can actually do. Where the OS share
-        // sheet accepts files (phones), that IS the one-tap route to X with the image
-        // attached, so it stays primary. On desktop it usually does not, and the sheet
-        // degrades to a download — there the copy-and-paste route to X is the easier one.
+        // ONE share button, not two. Both routes end at "this card, posted", so offering
+        // them side by side just asks the player to guess which one works on their device.
+        // Pick the better route here and label the button with what it will actually do:
+        // where the OS share sheet takes files (phones) that is one tap to X with the image
+        // already attached; where it does not (desktop) it degrades to a download, so the
+        // copy-and-paste route wins. SAVE PNG stays as the quiet "just give me the file".
         const canSheet = !!(navigator.canShare && navigator.canShare({files:[new File([new Blob()],"x.png",{type:"image/png"})]}) && navigator.share);
         ov.innerHTML='<div class="cardWrap"><img id="cardImg" alt="Your XZILLA score card"/>'+
           '<div class="cardBtns">'+
-            // The hint rides ON the button: by the time the composer opens, the player is
-            // looking at X, not at this screen, and a card sitting unpasted on the
-            // clipboard is invisible. Say what to press before they leave.
             (canSheet
-              ? '<button class="btn" id="cardShare">📣 SHARE THIS CARD</button>'+
-                '<button class="btn secondary small" id="cardX">𝕏 POST ON X'+
-                  '<span class="btnHint">copies the card — press '+PASTE_KEY+' in the post</span></button>'
-              : '<button class="btn" id="cardX">𝕏 POST ON X'+
-                  '<span class="btnHint">copies the card — press '+PASTE_KEY+' in the post</span></button>'+
-                '<button class="btn secondary small" id="cardShare">💾 SAVE PNG</button>')+
+              ? '<button class="btn" id="cardShare">📣 SHARE CARD</button>'
+              // The hint rides ON the button: by the time the composer opens the player is
+              // looking at X, not at this screen, and a card sitting unpasted on the
+              // clipboard is invisible. Say what to press before they leave.
+              : '<button class="btn" id="cardShare">𝕏 POST ON X'+
+                  '<span class="btnHint">copies the card — press '+PASTE_KEY+' in the post</span></button>')+
+            '<button class="btn secondary small" id="cardSave">💾 SAVE PNG</button>'+
             '<button class="btn secondary small" id="cardClose">CLOSE</button>'+
           '</div></div>';
+        ov._canSheet = canSheet;
         document.body.appendChild(ov);
         ov.addEventListener("click", ev=>{ if(ev.target===ov) ov.classList.add("hidden"); });
       }
@@ -4347,8 +4364,8 @@ window._adsPayload = "WwogIHsKICAgICJpZCI6ICJ4emlsbGEtaG9tZSIsCiAgICAidGV4dCI6IC
       try{ $("cardImg").src = drawCard(snap.data).toDataURL("image/png"); }catch(_){}
       ov.classList.remove("hidden");
       { const a=$("cardXOpen"); if(a) a.remove(); }   // clear any leftover popup-blocked link
-      $("cardShare").onclick = ()=> shareCard(snap);
-      { const bx=$("cardX"); if(bx) bx.onclick = ()=> postCardToX(snap); }
+      $("cardShare").onclick = ()=> ov._canSheet ? shareCard(snap) : postCardToX(snap);
+      $("cardSave").onclick  = ()=> saveCard(snap);
       $("cardClose").onclick = ()=> ov.classList.add("hidden");
     }
 
