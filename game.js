@@ -891,20 +891,14 @@ window._adsPayload = "WwogIHsKICAgICJpZCI6ICJ4emlsbGEtaG9tZSIsCiAgICAidGV4dCI6IC
   floor.renderOrder = -10;
   scene.add(floor);
 
-  // Sun reflection streak on the floor
-  const sunStreak = new THREE.Sprite(new THREE.SpriteMaterial({
-    map: makeTex((x,S)=>{ const g=x.createLinearGradient(0,0,0,S);
-      g.addColorStop(0,"rgba(255,122,208,0)"); g.addColorStop(.5,"rgba(255,122,208,0.55)"); g.addColorStop(1,"rgba(255,210,63,0)");
-      x.fillStyle=g; x.fillRect(S*0.36,0,S*0.28,S); },128),
-    transparent:true, blending:THREE.AdditiveBlending, depthWrite:false, fog:false, opacity:0.6 }));
-  sunStreak.scale.set(14,40,1); sunStreak.position.set(0,-1.2,-50);
-  /* Sits BEHIND the floor (renderOrder -10), which is where it has always effectively been:
-   * at z=-50 it sorted farther than the floor's centre, so the floor repainted over it every
-   * frame and almost none of it survived. Pinning it here keeps that look. Without this it
-   * inherits default order, draws after the floor now, and reads as a hard vertical stripe
-   * straight up the middle of the lane. */
-  sunStreak.renderOrder = -11;
-  scene.add(sunStreak);
+  /* SUN REFLECTION STREAK — REMOVED.
+   * It was meant to be the sun's reflection lying on the road, but it was built as a
+   * THREE.Sprite, and sprites always billboard to face the camera — so instead of lying
+   * flat it stood bolt upright: a 14x40 quad at z=-50 whose gradient occupies the middle
+   * 28% of the texture, i.e. a ~4-unit-wide vertical bar rising 40 units into the sky.
+   * The floor hid the half below the horizon, leaving a stick planted under the sun.
+   * A real reflection needs a floor-aligned PlaneGeometry (rotation.x = -PI/2) laid on
+   * the road, not a billboard; until someone builds that, no streak beats a popsicle. */
 
   // Skyline + roadside are (re)built by environmentOverhaulV2 below: 3D crypto
   // towers fill skyline[], and the lane is left empty (pylons[] stays cleared).
@@ -2844,16 +2838,15 @@ window._adsPayload = "WwogIHsKICAgICJpZCI6ICJ4emlsbGEtaG9tZSIsCiAgICAidGV4dCI6IC
         }
       } else { _jetCd = 0; }
       // BOSS AURA — pin the halo on the truck and pulse it; hide when no boss.
+      /* BOSS AURA — OFF. It was meant to separate the truck's dark silhouette from the neon
+       * skyline, but at scale.x*1.9 it is nearly twice the truck's width, ADDITIVE, and
+       * pulsing at 0.42-0.58 opacity, so it adds light straight over the body and edges and
+       * reads as a bubble sitting on the boss rather than a rim behind it. Twice tuned
+       * already (bright core removed, then re-centred) and it still veiled the art, so the
+       * halo is disabled rather than tuned a third time. To bring it back, restore the
+       * block below and start well under scale*1.4 with opacity < 0.25. */
       const _glow=bossGlowSprite();
-      if(_boss){
-        const bp=_boss.sprite.position;
-        _glow.visible=true;
-        // Centred on the boss (was -0.4, which pushed the hot part of the halo down onto
-        // the truck body) and a touch wider, so the rim reads around the silhouette.
-        _glow.position.set(bp.x, bp.y-0.1, bp.z-0.15);
-        _glow.material.opacity = 0.42 + 0.16*Math.sin(t*4.0);
-        _glow.scale.set(_boss.sprite.scale.x*1.9, _boss.sprite.scale.y*1.32, 1);
-      } else if(_glow.visible){ _glow.visible=false; }
+      if(_glow.visible) _glow.visible=false;
       // self-heal: if the boss left the screen un-defeated (dodged), its health bar must
       // not linger — hide it whenever there is no boss on the field.
       { const bar=$("rugBar");
