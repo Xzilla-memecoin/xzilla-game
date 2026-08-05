@@ -4259,15 +4259,74 @@ window._adsPayload = "WwogIHsKICAgICJpZCI6ICJ4emlsbGEtaG9tZSIsCiAgICAidGV4dCI6IC
     }
     window.__shareCard = shareCard;
 
+    /* ---- POST ON X -------------------------------------------------------
+     * X's tweet intent takes TEXT ONLY — a link can never attach an image, and
+     * posting media needs the API with the user's OAuth token. So the easiest
+     * honest route is: copy the PNG to the clipboard, open the composer with the
+     * caption already written, and let them paste. Two keystrokes instead of
+     * download → find the file → attach.
+     *
+     * Two ordering rules make this actually work:
+     *   - ClipboardItem is handed a PROMISE for the blob, so the write begins
+     *     inside the click gesture rather than after an await (Safari rejects a
+     *     write that starts later, and Chrome requires the document to be focused).
+     *   - the composer is opened AFTER the copy resolves, because the new tab
+     *     takes focus and would abort a still-pending clipboard write.
+     * If the popup is blocked we hand back a real button instead of dead-ending. */
+    // x.com/intent/post is the current canonical composer; twitter.com/intent/tweet still
+    // works but takes an extra redirect, which is one more thing to fail on a phone.
+    function xIntentUrl(text){ return "https://x.com/intent/post?text="+encodeURIComponent(text); }
+
+    function offerXLink(text){
+      const wrap=document.querySelector("#cardPreview .cardBtns"); if(!wrap) return;
+      let a=$("cardXOpen");
+      if(!a){ a=document.createElement("a"); a.id="cardXOpen"; a.className="btn"; a.target="_blank"; a.rel="noopener"; wrap.prepend(a); }
+      a.href=xIntentUrl(text); a.textContent="𝕏 OPEN X — THEN PASTE";
+      toast("Card copied — open X and press Ctrl+V", CYAN);
+    }
+
+    let _postingX=false;
+    async function postCardToX(snap){
+      if(_postingX) return;
+      _postingX=true;
+      const s=snap||snapshot();
+      const link=refLink();
+      const text=s.text+(link?("\n"+link):"");
+      try{
+        if(!(navigator.clipboard && window.ClipboardItem)) throw new Error("no image clipboard");
+        const canvas=drawCard(s.data);
+        const blobP=new Promise((res,rej)=>canvas.toBlob(b=>b?res(b):rej(new Error("no blob")),"image/png"));
+        await navigator.clipboard.write([new ClipboardItem({"image/png":blobP})]);
+        const w=window.open(xIntentUrl(text),"_blank","noopener");
+        if(w) toast("Card copied — press Ctrl+V in the post ✅", TEAL);
+        else offerXLink(text);
+      }catch(e){
+        // no clipboard-image support (older Firefox), denied permission, or an
+        // unfocused document — fall back to the save-and-caption path.
+        toast("Couldn't copy the image — saving it instead", GOLD);
+        try{ await shareCard(s); }catch(_){}
+      }finally{ _postingX=false; }
+    }
+    window.__postCardToX = postCardToX;
+
     // Preview the card full-screen before sharing — people share far more when they can
     // see what they're about to post.
     function previewCard(){
       let ov=$("cardPreview");
       if(!ov){
         ov=document.createElement("div"); ov.id="cardPreview"; ov.className="overlay hidden";
+        // Which action leads depends on what the device can actually do. Where the OS share
+        // sheet accepts files (phones), that IS the one-tap route to X with the image
+        // attached, so it stays primary. On desktop it usually does not, and the sheet
+        // degrades to a download — there the copy-and-paste route to X is the easier one.
+        const canSheet = !!(navigator.canShare && navigator.canShare({files:[new File([new Blob()],"x.png",{type:"image/png"})]}) && navigator.share);
         ov.innerHTML='<div class="cardWrap"><img id="cardImg" alt="Your XZILLA score card"/>'+
           '<div class="cardBtns">'+
-            '<button class="btn" id="cardShare">📣 SHARE THIS CARD</button>'+
+            (canSheet
+              ? '<button class="btn" id="cardShare">📣 SHARE THIS CARD</button>'+
+                '<button class="btn secondary small" id="cardX">𝕏 POST ON X</button>'
+              : '<button class="btn" id="cardX">𝕏 POST ON X</button>'+
+                '<button class="btn secondary small" id="cardShare">💾 SAVE PNG</button>')+
             '<button class="btn secondary small" id="cardClose">CLOSE</button>'+
           '</div></div>';
         document.body.appendChild(ov);
@@ -4276,7 +4335,9 @@ window._adsPayload = "WwogIHsKICAgICJpZCI6ICJ4emlsbGEtaG9tZSIsCiAgICAidGV4dCI6IC
       const snap=snapshot();   // freeze now — the caller may restore run state the moment we return
       try{ $("cardImg").src = drawCard(snap.data).toDataURL("image/png"); }catch(_){}
       ov.classList.remove("hidden");
+      { const a=$("cardXOpen"); if(a) a.remove(); }   // clear any leftover popup-blocked link
       $("cardShare").onclick = ()=> shareCard(snap);
+      { const bx=$("cardX"); if(bx) bx.onclick = ()=> postCardToX(snap); }
       $("cardClose").onclick = ()=> ov.classList.add("hidden");
     }
 
