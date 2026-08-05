@@ -1388,6 +1388,28 @@ function resolve(e){ const p=e.sprite.position.clone();
   e.dead=true; freeEntity(e); }
 
 /* ============================================================ MAIN LOOP */
+/* DEATH SNAPSHOT — the real frame the player died on, kept for the share card so it
+ * shows THEIR run rather than a generic backdrop. Copied into an offscreen 2D canvas
+ * (not a data URL) so the read is synchronous and the card can draw it without waiting
+ * on an image decode. Cover-fit to the card's 16:9 at capture time, so nothing has to
+ * be re-scaled later. Any failure — a context loss, or a canvas tainted by a texture
+ * that came back without CORS headers — leaves __deathShot null and the card falls
+ * back to its procedural backdrop. */
+let _grabShot=false;
+window.__deathShot=null;
+function captureDeathShot(){
+  try{
+    const src=renderer.domElement, sw=src.width, sh=src.height;
+    if(!sw||!sh) return;
+    const W=1200, H=675;                                   // matches CARD_W/CARD_H in game.js
+    const cv=window.__deathShot || document.createElement("canvas");
+    cv.width=W; cv.height=H;
+    const g=cv.getContext("2d");
+    const s=Math.max(W/sw, H/sh), dw=sw*s, dh=sh*s;        // cover: fill and crop, never letterbox
+    g.drawImage(src, (W-dw)/2, (H-dh)/2, dw, dh);
+    window.__deathShot=cv;
+  }catch(e){ window.__deathShot=null; }
+}
 const clock=new THREE.Clock(); let gridOffset=0; let _lastCombo=0; let _tireAcc=0;
 function loop(){ requestAnimationFrame(loop); const dt=Math.min(clock.getDelta(),0.05); const now=performance.now()*0.001;
   const scroll=dt*(state.running?state.speed:3.5); gridOffset=(gridOffset+scroll)%2; grid.position.z=-6+gridOffset; grid2.position.z=-6+gridOffset;
@@ -1469,7 +1491,12 @@ function loop(){ requestAnimationFrame(loop); const dt=Math.min(clock.getDelta()
   updateParticles(dt);
   const bob=pulse*0.10; if(state.shake>0.001){ const s=state.shake; placeCamera((Math.random()-0.5)*s,(Math.random()-0.5)*s*0.6+bob); state.shake*=0.86; } else placeCamera(0,bob);
   if(window.__frame) window.__frame(dt);
-  if(window.__composer) window.__composer.render(); else renderer.render(scene,camera); }
+  if(window.__composer) window.__composer.render(); else renderer.render(scene,camera);
+  // Grab the death frame HERE, immediately after the render that drew it. The renderer is
+  // created without preserveDrawingBuffer (index.html top) for performance, so the drawing
+  // buffer is valid only until the frame is composited — reading it from gameOver(), or on
+  // any later tick, returns an empty image. Flag now, copy on this exact line.
+  if(_grabShot){ _grabShot=false; captureDeathShot(); } }
 loop();
 
 /* ============================================================ GAME FLOW */
@@ -1496,6 +1523,10 @@ function maybeShowTutorial(){
   tut._t=setTimeout(close,3200);
 }
 function gameOver(){ state.running=false; unlockPointer(); stopEngine(); sfx.over();
+  // Arm the snapshot: gameOver() runs inside the update half of the frame, so the render
+  // at the bottom of THIS loop tick still draws the death moment — that is the frame the
+  // share card gets, taken before any overlay covers the canvas.
+  _grabShot=true;
   if(state.score>state.best){ state.best=Math.floor(state.score); try{ localStorage.setItem("xzilla_best",String(state.best)); }catch(e){}
     // back the new record up to Telegram CloudStorage so it follows the user across devices
     try{ if(typeof Telegram!=="undefined" && Telegram.WebApp && Telegram.WebApp.CloudStorage){ Telegram.WebApp.CloudStorage.setItem("xzilla_best", String(state.best)); } }catch(e){} }
@@ -1671,6 +1702,6 @@ document.addEventListener("visibilitychange",()=>{ if(document.hidden&&state.run
 
 document.getElementById("bestScore").textContent=state.best;
 </script>
-<script src="game.js?v=126"></script>
+<script src="game.js?v=127"></script>
 </body>
 </html>

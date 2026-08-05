@@ -4058,34 +4058,55 @@ window._adsPayload = "WwogIHsKICAgICJpZCI6ICJ4emlsbGEtaG9tZSIsCiAgICAidGV4dCI6IC
       const c=document.createElement("canvas"); c.width=CARD_W; c.height=CARD_H;
       const x=c.getContext("2d");
 
-      // backdrop: deep violet vertical fade + a perspective neon grid, mirroring the game
-      const bg=x.createLinearGradient(0,0,0,CARD_H);
-      bg.addColorStop(0,"#0a0326"); bg.addColorStop(0.55,"#12073d"); bg.addColorStop(1,"#07021a");
-      x.fillStyle=bg; x.fillRect(0,0,CARD_W,CARD_H);
+      // BACKDROP — the player's actual last frame when we have one (captured in index.html
+      // the instant death was rendered), otherwise the procedural city below. A real
+      // snapshot is the whole point of the card: it shows the run that happened, with the
+      // scam that got them still on screen.
+      const shot = data.shot;
+      if(shot){
+        x.drawImage(shot, 0, 0, CARD_W, CARD_H);   // already cover-fit to 16:9 at capture
+        // Darken it. The frame is busy neon and the score/rank sit on top of it — without
+        // this the number is unreadable at timeline thumbnail size, which is the only size
+        // most people will ever see. Heavier at the edges, lighter through the middle so
+        // the bike and the city still read.
+        const v=x.createLinearGradient(0,0,0,CARD_H);
+        v.addColorStop(0,"rgba(6,2,20,0.80)"); v.addColorStop(0.42,"rgba(6,2,20,0.34)");
+        v.addColorStop(1,"rgba(6,2,20,0.86)");
+        x.fillStyle=v; x.fillRect(0,0,CARD_W,CARD_H);
+      } else {
+        // backdrop: deep violet vertical fade + a perspective neon grid, mirroring the game
+        const bg=x.createLinearGradient(0,0,0,CARD_H);
+        bg.addColorStop(0,"#0a0326"); bg.addColorStop(0.55,"#12073d"); bg.addColorStop(1,"#07021a");
+        x.fillStyle=bg; x.fillRect(0,0,CARD_W,CARD_H);
 
-      const hz=CARD_H*0.70;                     // horizon line the grid converges to
-      const glow=x.createRadialGradient(CARD_W/2,hz,20, CARD_W/2,hz,CARD_W*0.65);
-      glow.addColorStop(0,"rgba(255,43,214,0.30)"); glow.addColorStop(1,"rgba(255,43,214,0)");
-      x.fillStyle=glow; x.fillRect(0,0,CARD_W,CARD_H);
+        const hz=CARD_H*0.70;                     // horizon line the grid converges to
+        const glow=x.createRadialGradient(CARD_W/2,hz,20, CARD_W/2,hz,CARD_W*0.65);
+        glow.addColorStop(0,"rgba(255,43,214,0.30)"); glow.addColorStop(1,"rgba(255,43,214,0)");
+        x.fillStyle=glow; x.fillRect(0,0,CARD_W,CARD_H);
 
-      x.save(); x.beginPath(); x.rect(0,hz,CARD_W,CARD_H-hz); x.clip();
-      x.strokeStyle="rgba(33,230,255,0.34)"; x.lineWidth=2;
-      for(let i=-14;i<=14;i++){                 // verticals fanning out from the vanishing point
-        x.beginPath(); x.moveTo(CARD_W/2, hz); x.lineTo(CARD_W/2 + i*180, CARD_H); x.stroke();
+        x.save(); x.beginPath(); x.rect(0,hz,CARD_W,CARD_H-hz); x.clip();
+        x.strokeStyle="rgba(33,230,255,0.34)"; x.lineWidth=2;
+        for(let i=-14;i<=14;i++){                 // verticals fanning out from the vanishing point
+          x.beginPath(); x.moveTo(CARD_W/2, hz); x.lineTo(CARD_W/2 + i*180, CARD_H); x.stroke();
+        }
+        for(let i=1;i<=9;i++){                    // horizontals, spaced non-linearly for depth
+          const t=i/9, y=hz + Math.pow(t,2.1)*(CARD_H-hz);
+          x.beginPath(); x.moveTo(0,y); x.lineTo(CARD_W,y); x.stroke();
+        }
+        x.restore();
       }
-      for(let i=1;i<=9;i++){                    // horizontals, spaced non-linearly for depth
-        const t=i/9, y=hz + Math.pow(t,2.1)*(CARD_H-hz);
-        x.beginPath(); x.moveTo(0,y); x.lineTo(CARD_W,y); x.stroke();
-      }
-      x.restore();
 
       // Scrim behind the centre block. Without it the grid lines run straight through the
       // score and rank text, which is exactly the region that has to stay readable when
       // the image is thumbnailed in a timeline.
+      // Lighter over a photo: the snapshot backdrop already carries its own darkening pass,
+      // and stacking both flattens the frame into mud — which throws away the reason for
+      // using a real screenshot in the first place.
+      const sa = shot ? 0.34 : 0.62;
       const scrim=x.createLinearGradient(0,140,0,600);
       scrim.addColorStop(0,"rgba(6,2,20,0)");
-      scrim.addColorStop(0.22,"rgba(6,2,20,0.62)");
-      scrim.addColorStop(0.80,"rgba(6,2,20,0.62)");
+      scrim.addColorStop(0.22,"rgba(6,2,20,"+sa+")");
+      scrim.addColorStop(0.80,"rgba(6,2,20,"+sa+")");
       scrim.addColorStop(1,"rgba(6,2,20,0)");
       x.fillStyle=scrim; x.fillRect(0,140,CARD_W,460);
 
@@ -4166,6 +4187,10 @@ window._adsPayload = "WwogIHsKICAgICJpZCI6ICJ4emlsbGEtaG9tZSIsCiAgICAidGV4dCI6IC
         score: fmt(sc),
         title: t ? t.name : "ROOKIE",
         name:  (typeof tgName==="function" ? tgName() : ""),
+        // The frame the player died on, captured in index.html. Null on the very first
+        // card of a session (nobody has died yet) or if the read failed — drawCard() then
+        // falls back to the procedural city, so a missing shot is never a broken card.
+        shot:  window.__deathShot || null,
         stats: [
           {k:"SCAMS SMASHED", v:fmt(run.kills), c:"#39ff7a"},
           {k:"BEST COMBO",    v:"×"+fmt(run.combo||0), c:"#21e6ff"},
