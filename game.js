@@ -880,7 +880,16 @@ window._adsPayload = "WwogIHsKICAgICJpZCI6ICJ4emlsbGEtaG9tZSIsCiAgICAidGV4dCI6IC
     new THREE.PlaneGeometry(120,260),
     new THREE.MeshBasicMaterial({ map:floorTex, transparent:true, opacity:0.96, depthWrite:false, fog:true })
   );
-  floor.rotation.x=-Math.PI/2; floor.position.set(0,-1.45,-46); scene.add(floor);
+  floor.rotation.x=-Math.PI/2; floor.position.set(0,-1.45,-46);
+  /* The floor is 260 deep, so it reaches z=-176 — 120 units BEHIND the parallax skyline
+   * silhouettes at z=-50/-57. It is transparent with depthWrite:false, and so are they, so
+   * depth testing cannot separate them and paint order decides. Three sorts transparent
+   * objects farthest-first: the silhouettes (66 and 73 units out) draw BEFORE the floor
+   * (62), and the floor then repaints that whole region at 0.96 opacity — chopping the
+   * bottom half off the distant buildings behind a hard horizontal edge. Pin the floor to
+   * draw first, as a background surface should, so the skyline sits on top of it. */
+  floor.renderOrder = -10;
+  scene.add(floor);
 
   // Sun reflection streak on the floor
   const sunStreak = new THREE.Sprite(new THREE.SpriteMaterial({
@@ -888,7 +897,14 @@ window._adsPayload = "WwogIHsKICAgICJpZCI6ICJ4emlsbGEtaG9tZSIsCiAgICAidGV4dCI6IC
       g.addColorStop(0,"rgba(255,122,208,0)"); g.addColorStop(.5,"rgba(255,122,208,0.55)"); g.addColorStop(1,"rgba(255,210,63,0)");
       x.fillStyle=g; x.fillRect(S*0.36,0,S*0.28,S); },128),
     transparent:true, blending:THREE.AdditiveBlending, depthWrite:false, fog:false, opacity:0.6 }));
-  sunStreak.scale.set(14,40,1); sunStreak.position.set(0,-1.2,-50); scene.add(sunStreak);
+  sunStreak.scale.set(14,40,1); sunStreak.position.set(0,-1.2,-50);
+  /* Sits BEHIND the floor (renderOrder -10), which is where it has always effectively been:
+   * at z=-50 it sorted farther than the floor's centre, so the floor repainted over it every
+   * frame and almost none of it survived. Pinning it here keeps that look. Without this it
+   * inherits default order, draws after the floor now, and reads as a hard vertical stripe
+   * straight up the middle of the lane. */
+  sunStreak.renderOrder = -11;
+  scene.add(sunStreak);
 
   // Skyline + roadside are (re)built by environmentOverhaulV2 below: 3D crypto
   // towers fill skyline[], and the lane is left empty (pylons[] stays cleared).
