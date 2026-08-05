@@ -112,6 +112,9 @@
   .mbtn:active{ transform:translateY(2px) scale(.98); }
   .mbtn-ic{ font-size:17px; line-height:1; }
   .mbtn-lb{ opacity:.92; }
+  /* Payoff badge — says what the button GIVES you, not just what it does. */
+  .mbtn-tag{ font-size:6px; letter-spacing:.3px; line-height:1.4; color:#1a1030; background:var(--gold);
+    border-radius:999px; padding:3px 5px; margin-top:1px; white-space:nowrap; max-width:100%; }
   .mbtn.gold{ color:var(--gold); } .mbtn.gold:hover{ border-color:var(--gold); box-shadow:0 0 14px rgba(255,210,63,.35); }
   .mbtn.tg{ color:#5ec6f5; } .mbtn.tg:hover{ border-color:#2aabee; box-shadow:0 0 14px rgba(42,171,238,.35); }
 
@@ -397,6 +400,15 @@
   .dailySub.dim{ opacity:.65; }
   .dailyScore{ font-family:'Press Start 2P'; font-size:22px; color:var(--gold); text-shadow:0 0 14px rgba(255,210,63,.7); }
   .dailyScore span{ font-size:9px; color:#9fb6c9; text-shadow:none; margin-left:5px; }
+  /* Shared header row for the daily + sign-in cards: title left, status right, one line
+     instead of two. Used by renderDailyCard() and renderLoginCard(). */
+  .cardTop{ width:100%; display:flex; align-items:baseline; justify-content:space-between; gap:8px; }
+  .cardTop .dailySub, .cardTop .loginSub{ white-space:nowrap; flex:0 0 auto; }
+  /* Titles must not wrap — at 300px wide the countdown otherwise pushes them to two lines. */
+  .cardTop .dailyHead, .cardTop .loginHead{ white-space:nowrap; font-size:9px; }
+  .dailyDone{ display:flex; align-items:baseline; gap:10px; }
+  .dailyScore{ line-height:1.1; }
+  .dailyRank{ font-family:'Press Start 2P'; font-size:8px; color:var(--gold); white-space:nowrap; }
   /* cyan variant of the primary CTA, so DAILY reads as distinct from the green START */
   .btn.daily{ background:linear-gradient(135deg,#21e6ff,#2a7bff); color:#04131a; font-size:11px; padding:14px 20px;
     box-shadow:0 0 22px rgba(33,230,255,.55), inset 0 -4px 0 rgba(0,0,0,.22); }

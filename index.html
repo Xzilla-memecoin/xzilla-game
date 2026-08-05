@@ -16,7 +16,7 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@500;700;900&family=Press+Start+2P&display=swap" rel="stylesheet">
 
-<link rel="stylesheet" href="styles.css?v=40">
+<link rel="stylesheet" href="styles.css?v=43">
 </head>
 <body>
   <div id="game"></div>
@@ -90,7 +90,10 @@
            index.html/game.js still binds. #connectBtn is still shown/hidden by class. -->
       <div class="menuRow">
         <button id="howToBtn" class="mbtn"><span class="mbtn-ic">❓</span><span class="mbtn-lb">HOW TO<br>PLAY</span></button>
-        <button id="connectBtn" class="mbtn"><span class="mbtn-ic">👛</span><span class="mbtn-lb">HODL<br>WALLET</span></button>
+        <!-- The payoff has to be on the button: connecting is not housekeeping, it reads
+             your $XZILLA balance and applies a tiered score multiplier (TIERS in game.js,
+             top tier x2.0). Without saying so the button looks like a chore. -->
+        <button id="connectBtn" class="mbtn" title="Connect your wallet to read your $XZILLA balance — bigger holdings give a bigger score multiplier, up to ×2"><span class="mbtn-ic">👛</span><span class="mbtn-lb">HODL<br>WALLET</span><span class="mbtn-tag">UP TO ×2</span></button>
         <button id="mainInvite" class="mbtn gold"><span class="mbtn-ic">🦖</span><span class="mbtn-lb">INVITE<br>+3000 XP</span></button>
         <button id="joinTgBtn" class="mbtn tg"><span class="mbtn-ic">💬</span><span class="mbtn-lb">TELE<br>GRAM</span></button>
       </div>
@@ -1662,6 +1665,6 @@ document.addEventListener("visibilitychange",()=>{ if(document.hidden&&state.run
 
 document.getElementById("bestScore").textContent=state.best;
 </script>
-<script src="game.js?v=122"></script>
+<script src="game.js?v=124"></script>
 </body>
 </html>

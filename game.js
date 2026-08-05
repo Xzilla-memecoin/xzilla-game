@@ -1192,9 +1192,13 @@ window._adsPayload = "WwogIHsKICAgICJpZCI6ICJ4emlsbGEtaG9tZSIsCiAgICAidGV4dCI6IC
       $("loginOut").onclick = logout;
       return;
     }
+    // Compact: the two-line "play as a guest" explainer folds into the heading row, and
+    // the wallet reassurance drops to the essentials. Keeping "free signature · no
+    // transaction" is not optional — it is what makes players willing to sign at all.
     host.innerHTML =
-      '<div class="loginHead">🔐 SIGN IN TO RANK</div>'+
-      '<div class="loginSub">Play as a guest any time — sign in only to post scores to the global leaderboard.</div>'+
+      '<div class="cardTop"><span class="loginHead">🔐 SIGN IN TO RANK</span>'+
+        '<span class="loginSub dim">optional</span></div>'+
+      '<div class="loginSub">Guests can always play — sign in to post scores to the global board.</div>'+
       '<button class="btn wallet-login" id="loginWallet">◆ SIGN IN WITH WALLET</button>'+
       '<div class="loginSub dim">Free signature · no transaction · sets your holder tier</div>'+
       (window.__GOOGLE_CLIENT_ID ? '<div class="loginOr">or</div><div id="gsiButton"></div>' : '')+
@@ -4354,21 +4358,23 @@ window._adsPayload = "WwogIHsKICAgICJpZCI6ICJ4emlsbGEtaG9tZSIsCiAgICAidGV4dCI6IC
     function renderDailyCard(){
       const host=$("dailyCard"); if(!host) return;
       const played=dailyPlayedToday();
+      // Compact layout: the title and the countdown share one row instead of bookending
+      // the card, and the three explainer lines collapse to one. Same information, and
+      // the start screen no longer needs scrolling to reach the buttons below it.
       if(!played){
         host.innerHTML=
-          '<div class="dailyHead">🗓 DAILY RUG RUN</div>'+
-          '<div class="dailySub">One seed. One shot. Everyone gets the exact same scams today.</div>'+
-          '<div class="dailySub dim">Die in the first '+GRACE_SECS+'s and your attempt is refunded.</div>'+
+          '<div class="cardTop"><span class="dailyHead">🗓 DAILY RUG RUN</span>'+
+            '<span class="dailySub dim" id="dailyClock"></span></div>'+
           '<button class="btn daily" id="dailyBtn">▶ PLAY TODAY’S RUN</button>'+
-          '<div class="dailySub dim" id="dailyClock"></div>';
+          '<div class="dailySub dim">Same seed for everyone · first '+GRACE_SECS+'s are free</div>';
         $("dailyBtn").onclick=startDailyRun;
       } else {
         host.innerHTML=
-          '<div class="dailyHead">🗓 DAILY RUG RUN · DONE</div>'+
-          '<div class="dailyScore">'+fmt(drun.rec.score)+'<span> pts</span></div>'+
-          (drun.rec.rank ? '<div class="dailySub" style="color:'+GOLD+'">World rank #'+drun.rec.rank+'</div>' : '')+
-          '<button class="btn secondary small" id="dailyShare">📸 SHARE TODAY’S CARD</button>'+
-          '<div class="dailySub dim" id="dailyClock"></div>';
+          '<div class="cardTop"><span class="dailyHead">🗓 DAILY · DONE</span>'+
+            '<span class="dailySub dim" id="dailyClock"></span></div>'+
+          '<div class="dailyDone"><span class="dailyScore">'+fmt(drun.rec.score)+'<span> pts</span></span>'+
+            (drun.rec.rank ? '<span class="dailyRank">#'+drun.rec.rank+' world</span>' : '')+'</div>'+
+          '<button class="btn secondary small" id="dailyShare">📸 SHARE TODAY’S CARD</button>';
         // Rebuild the card from the stored result — the live run state is long gone, so
         // score/stats are temporarily swapped in for the draw and restored right after.
         $("dailyShare").onclick=()=>{
@@ -4389,7 +4395,9 @@ window._adsPayload = "WwogIHsKICAgICJpZCI6ICJ4emlsbGEtaG9tZSIsCiAgICAidGV4dCI6IC
         const ms=msToNextUtcDay();
         // Rolled past midnight UTC while the menu sat open → new seed, new attempt.
         if(drun.rec && drun.rec.day!==utcDay()){ renderDailyCard(); return; }
-        el.textContent=(dailyPlayedToday()?"Next run in ":"Resets in ")+hms(ms);
+        // Short form: the countdown shares a row with the card title now, and "Resets in"
+        // wrapped the title onto two lines at 300px. The clock glyph carries the meaning.
+        el.textContent="⏱ "+hms(ms);
       };
       paint(); _clockT=setInterval(paint,1000);
     }
