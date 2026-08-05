@@ -1081,6 +1081,46 @@ const MOUSE_SENSITIVITY = 0.022;
 window.addEventListener("mousemove",e=>{ if(!state.running) return;
   state.playerTargetX = THREE.MathUtils.clamp(state.playerTargetX + (e.movementX||0)*MOUSE_SENSITIVITY, -playHalfWidth, playHalfWidth); });
 
+// PC only: while a run is live the pointer is CAPTURED by the canvas (Pointer Lock), so the
+// cursor disappears and the mouse is effectively glued to the Xrider — every movement feeds
+// steering and nothing can be hovered/clicked by accident mid-run. The lock is released the
+// instant the run stops (death / pause / quit) so the menus stay usable. Escape drops the lock
+// itself; we treat that as a pause request rather than leaving the player steering blind.
+// The request must ride a user gesture (the Play/Resume click) — a rejected lock is harmless.
+function canLockPointer(){ return !isTouchDevice && !!renderer.domElement.requestPointerLock; }
+function lockPointer(){
+  if(!canLockPointer() || document.pointerLockElement===renderer.domElement) return;
+  renderer.domElement.style.cursor="none";                 // fallback if the lock itself is refused
+  try{ const p=renderer.domElement.requestPointerLock(); if(p&&p.catch) p.catch(()=>{}); }catch(e){}
+}
+function unlockPointer(){
+  clearTimeout(_relockTimer); _relockTries = 0;
+  renderer.domElement.style.cursor="";
+  try{ if(document.pointerLockElement) document.exitPointerLock(); }catch(e){}
+}
+// Chrome refuses a re-lock for about a second after the player pressed Escape, which is exactly
+// when Resume asks for it — so a refusal schedules one retry, and any click on the canvas during
+// a live run grabs the pointer back too. Without this, resuming after Esc left the run running
+// with a free cursor that could wander off the window.
+let _relockTimer = 0, _relockTries = 0;
+document.addEventListener("pointerlockerror",()=>{
+  clearTimeout(_relockTimer);
+  if(++_relockTries > 3) return;   // bounded: a browser that keeps refusing is left alone
+  _relockTimer = setTimeout(()=>{ if(state.running && !isPaused) lockPointer(); }, 1400);
+});
+renderer.domElement.addEventListener("mousedown",()=>{ if(state.running && !isPaused){ _relockTries = 0; lockPointer(); } });
+// Esc fires TWICE effectively: the browser drops the lock (pointerlockchange -> pause below)
+// AND the page still gets the keydown, which the Esc/Space handler read as "already paused ->
+// resume", instantly un-pausing into a state with no cursor grab and no overlay. Stamp the exit
+// and let the keydown handler swallow the Escape that caused it.
+let pointerLockExitAt = -1e9;
+document.addEventListener("pointerlockchange",()=>{
+  if(document.pointerLockElement) return;
+  renderer.domElement.style.cursor="";
+  pointerLockExitAt = performance.now();
+  if(state.running && !isPaused) pauseGame();              // player hit Esc mid-run
+});
+
 /* ============================================================ TILT CONTROLS (phone gyro) */
 const tiltBtn = document.getElementById("tiltBtn");
 const isTouchDevice = ("ontouchstart" in window) || navigator.maxTouchPoints > 0;
@@ -1365,6 +1405,7 @@ function startGame(){ audioInit(); startMusic(); startEngine(); resetGame();
   el.hud.classList.remove("hidden"); /* sound toggle is always visible now */ el.vipBadge.style.display=state.vip?"inline-block":"none"; vipGlow.material.opacity=0; state.running=true;
   document.getElementById("pauseBtn").classList.remove("hidden");
   if(tiltEnabled) resetTiltCal();   // re-neutralize tilt to however the phone is held at run start
+  lockPointer();                    // desktop: hide + capture the cursor for the whole run
   maybeShowTutorial(); }
 /* First-run only: a brief controls hint over the live run. Stored so it never nags again. */
 function maybeShowTutorial(){
@@ -1377,7 +1418,7 @@ function maybeShowTutorial(){
   tut.addEventListener("pointerdown",close);
   tut._t=setTimeout(close,3200);
 }
-function gameOver(){ state.running=false; stopEngine(); sfx.over();
+function gameOver(){ state.running=false; unlockPointer(); stopEngine(); sfx.over();
   if(state.score>state.best){ state.best=Math.floor(state.score); try{ localStorage.setItem("xzilla_best",String(state.best)); }catch(e){}
     // back the new record up to Telegram CloudStorage so it follows the user across devices
     try{ if(typeof Telegram!=="undefined" && Telegram.WebApp && Telegram.WebApp.CloudStorage){ Telegram.WebApp.CloudStorage.setItem("xzilla_best", String(state.best)); } }catch(e){} }
@@ -1389,20 +1430,20 @@ function gameOver(){ state.running=false; stopEngine(); sfx.over();
 let isPaused = false;
 function pauseGame(){
   if(!state.running || isPaused) return;
-  isPaused = true; state.running = false;
+  isPaused = true; state.running = false; unlockPointer();   // cursor back so the pause menu is clickable
   try{ if(actx && actx.state==="running") actx.suspend(); }catch(e){}   // freezes music + engine + sfx in place
   document.getElementById("pauseScreen").classList.remove("hidden");
   document.getElementById("tabbar").classList.remove("hidden");   // show the upper menu while paused
 }
 function resumeGame(){
   if(!isPaused) return;
-  isPaused = false; state.running = true;
+  isPaused = false; state.running = true; lockPointer();
   try{ if(actx && actx.state==="suspended") actx.resume(); }catch(e){}
   document.getElementById("pauseScreen").classList.add("hidden");
   document.getElementById("tabbar").classList.add("hidden");   // hide menu again during play
 }
 function quitToMenu(){
-  isPaused = false; state.running = false;
+  isPaused = false; state.running = false; unlockPointer();
   try{ if(actx && actx.state==="suspended") actx.resume(); }catch(e){}
   stopEngine();
   document.getElementById("pauseScreen").classList.add("hidden");
@@ -1415,6 +1456,8 @@ document.getElementById("pauseBtn").addEventListener("click",pauseGame);
 document.getElementById("resumeBtn").addEventListener("click",resumeGame);
 document.getElementById("quitBtn").addEventListener("click",quitToMenu);
 window.addEventListener("keydown",e=>{ if(e.key==="Escape"||e.key===" "){
+  // this Escape is the one that just broke the pointer lock — that already paused us
+  if(e.key==="Escape" && performance.now()-pointerLockExitAt < 400) return;
   if(isPaused) resumeGame(); else if(state.running) pauseGame(); } });
 
 /* ============================================================ WALLET + TOKEN CHECK */
