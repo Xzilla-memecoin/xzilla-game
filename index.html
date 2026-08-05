@@ -16,7 +16,7 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@500;700;900&family=Press+Start+2P&display=swap" rel="stylesheet">
 
-<link rel="stylesheet" href="styles.css?v=44">
+<link rel="stylesheet" href="styles.css?v=45">
 </head>
 <body>
   <div id="game"></div>
@@ -85,15 +85,14 @@
            identifies them) and while already signed in. Guests can always play. -->
       <div id="loginCard" class="loginCard" style="display:none"></div>
       <!-- Compact utility row. These were three stacked full-width buttons with long
-           sentence labels (plus two hint lines) that made the menu tall and busy; the
-           actions are identical and the IDs are unchanged, so every existing handler in
-           index.html/game.js still binds. #connectBtn is still shown/hidden by class. -->
+           sentence labels (plus two hint lines) that made the menu tall and busy.
+           There is deliberately NO wallet button here: connecting a wallet and signing
+           in with one are the same act — loginWithWallet() calls XZWallet.connect(), and
+           XZWallet.onChange(applyWalletToEcon) reads the balance and sets the holder tier
+           either way — so the wallet lives on the sign-in sheet as ONE route that works
+           with an empty wallet and pays a multiplier if you hold $XZILLA. -->
       <div class="menuRow">
         <button id="howToBtn" class="mbtn"><span class="mbtn-ic">❓</span><span class="mbtn-lb">HOW TO<br>PLAY</span></button>
-        <!-- The payoff has to be on the button: connecting is not housekeeping, it reads
-             your $XZILLA balance and applies a tiered score multiplier (TIERS in game.js,
-             top tier x2.0). Without saying so the button looks like a chore. -->
-        <button id="connectBtn" class="mbtn" title="Connect your wallet to read your $XZILLA balance — bigger holdings give a bigger score multiplier, up to ×2"><span class="mbtn-ic">👛</span><span class="mbtn-lb">HODL<br>WALLET</span><span class="mbtn-tag">UP TO ×2</span></button>
         <button id="mainInvite" class="mbtn gold"><span class="mbtn-ic">🦖</span><span class="mbtn-lb">INVITE<br>+3000 XP</span></button>
         <button id="joinTgBtn" class="mbtn tg"><span class="mbtn-ic">💬</span><span class="mbtn-lb">TELE<br>GRAM</span></button>
       </div>
@@ -1550,11 +1549,13 @@ async function checkTokenBalance(connection,ownerPubkeyStr,mint){ try{
 // converge on one code path. balance===null means "connected but balance unread".
 function applyWalletToStartUI(address, balance){
   const info=document.getElementById("walletInfo"), vipEl=document.getElementById("vipStatus"),
+    // The start screen no longer carries its own connect button — the wallet is a sign-in
+    // route now. Kept null-safe so this still works if one is ever put back.
     connectBtn=document.getElementById("connectBtn");
   info.classList.remove("blink");
   if(!address){
     state.walletConnected=false;
-    connectBtn.classList.remove("hidden");
+    if(connectBtn) connectBtn.classList.remove("hidden");
     // Wallet unlinked, but a verified tier may still be saved (we keep it on disconnect).
     const savedMult = (window.__mult ? window.__mult() : 1);
     if(savedMult > 1){
@@ -1585,7 +1586,7 @@ function applyWalletToStartUI(address, balance){
     const tname = tier ? tier.l : "HOLDER";
     info.style.color="#ffd23f"; info.textContent="Xzilla Holder: "+shortKey(address)+" 🔥";
     vipEl.style.color="#ffd23f"; vipEl.textContent="★ "+tname+" — "+balance.toLocaleString()+" $XZILLA · "+mult+"x score";
-    connectBtn.classList.add("hidden");
+    if(connectBtn) connectBtn.classList.add("hidden");
     if(window.__buzz) window.__buzz([40,30,80],"success");
   } else {
     state.vip=false; state.walletConnected=false; window.__holderVerified=false;
@@ -1615,7 +1616,7 @@ async function connectWallet(){ audioInit();
 })();
 
 /* ============================================================ WIRING */
-document.getElementById("connectBtn").addEventListener("click",connectWallet);
+{ const cb=document.getElementById("connectBtn"); if(cb) cb.addEventListener("click",connectWallet); }
 document.getElementById("startBtn").addEventListener("click",startGame);
 document.getElementById("retryBtn").addEventListener("click",startGame);
 // Join the XZILLA Telegram group — opens inside Telegram when running as a Mini App,
@@ -1670,6 +1671,6 @@ document.addEventListener("visibilitychange",()=>{ if(document.hidden&&state.run
 
 document.getElementById("bestScore").textContent=state.best;
 </script>
-<script src="game.js?v=125"></script>
+<script src="game.js?v=126"></script>
 </body>
 </html>

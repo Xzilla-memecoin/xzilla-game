@@ -1200,7 +1200,9 @@ window._adsPayload = "WwogIHsKICAgICJpZCI6ICJ4emlsbGEtaG9tZSIsCiAgICAidGV4dCI6IC
       '<div class="cardTop"><span class="loginHead">🔐 SIGN IN TO RANK</span>'+
         '<span class="loginSub dim">optional</span></div>'+
       '<button class="btn wallet-login" id="loginOpen">◆ SIGN IN</button>'+
-      '<div class="loginSub dim">Guests can always play — sign in only to post scores</div>';
+      // Keep the multiplier discoverable from the start screen now that the wallet button
+      // has moved into the sheet — otherwise the reward is buried behind a click.
+      '<div class="loginSub dim">Post scores to the board · wallet login pays up to <b class="gold">×2 score</b></div>';
     $("loginOpen").onclick = openLoginPanel;
   }
 
@@ -1214,7 +1216,12 @@ window._adsPayload = "WwogIHsKICAgICJpZCI6ICJ4emlsbGEtaG9tZSIsCiAgICAidGV4dCI6IC
       '<h2 class="pnl-title">SIGN IN TO RANK</h2>'+
       '<div class="loginSub" style="text-align:left">Guests can always play — signing in only posts your scores to the global leaderboard.</div>'+
       '<button class="btn wallet-login" id="loginWallet">◆ SIGN IN WITH WALLET</button>'+
-      '<div class="loginSub dim">Free signature · no transaction · sets your holder tier</div>'+
+      // ONE wallet route. The same connect that signs you in also reads your $XZILLA
+      // balance (XZWallet.onChange -> applyWalletToEcon), so an empty wallet is a perfectly
+      // good login and a funded one additionally sets the holder tier. Saying so removes
+      // the old worry that "connect wallet" was about to cost something.
+      '<div class="loginPerk">Empty wallet? Still works. Holding $XZILLA also sets your score multiplier — up to ×2</div>'+
+      '<div class="loginSub dim">Free signature · no transaction · nothing leaves your wallet</div>'+
       (window.__GOOGLE_CLIENT_ID ? '<div class="loginOr">or</div><div id="gsiButton"></div>' : '')+
       (turnstileEnabled() ? '<div id="tsWidget" class="tsWidget"></div>' : '')+
       '<button class="btn secondary small pbtn" id="loginCancel">CLOSE</button>';
