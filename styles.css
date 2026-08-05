@@ -100,6 +100,48 @@
   /* Telegram-blue CTA — join the community group */
   .btn.tg{ background:linear-gradient(135deg,#2aabee,#229ed9); color:#fff;
     box-shadow:0 0 20px rgba(42,171,238,.5), inset 0 -4px 0 rgba(0,0,0,.22); }
+  /* ===== compact menu utility row =====
+     Replaces three stacked full-width buttons (connect / invite / telegram) whose
+     sentence-long labels dominated the start screen. Same actions, same IDs, one row. */
+  .menuRow{ display:flex; gap:8px; margin-top:18px; width:100%; max-width:340px; justify-content:center; }
+  .mbtn{ flex:1 1 0; min-width:0; display:flex; flex-direction:column; align-items:center; gap:6px;
+    font-family:'Press Start 2P'; font-size:7px; line-height:1.6; letter-spacing:.5px; cursor:pointer;
+    pointer-events:auto; color:var(--cyan); background:rgba(20,10,40,.7); border:2px solid #2a2150;
+    border-radius:10px; padding:10px 4px; transition:transform .08s ease, border-color .12s, box-shadow .12s; }
+  .mbtn:hover{ border-color:var(--cyan); box-shadow:0 0 14px rgba(33,230,255,.35); }
+  .mbtn:active{ transform:translateY(2px) scale(.98); }
+  .mbtn-ic{ font-size:17px; line-height:1; }
+  .mbtn-lb{ opacity:.92; }
+  .mbtn.gold{ color:var(--gold); } .mbtn.gold:hover{ border-color:var(--gold); box-shadow:0 0 14px rgba(255,210,63,.35); }
+  .mbtn.tg{ color:#5ec6f5; } .mbtn.tg:hover{ border-color:#2aabee; box-shadow:0 0 14px rgba(42,171,238,.35); }
+
+  /* ===== HOW TO PLAY panel =====
+     The shared .overlay backdrop (.55 -> .86 alpha) is tuned for sparse screens like
+     PAUSED; behind a dense reference panel the whole start menu shows through it and
+     the text becomes unreadable. This one gets a near-solid backdrop of its own. */
+  #howtoPanel{ background:rgba(5,2,16,.965); backdrop-filter:blur(3px); }
+  .htLead{ font-size:10px; line-height:1.7; color:#cfe3f2; text-align:left; margin-bottom:4px; }
+  .htLead b{ color:var(--toxic); }
+  .htHead{ font-family:'Press Start 2P'; font-size:9px; letter-spacing:1px; text-align:left;
+    margin:12px 0 2px; color:#9fb6c9; }
+  .htHead.good{ color:var(--toxic); } .htHead.bad{ color:var(--danger); }
+  .htRow{ display:flex; align-items:center; gap:12px; text-align:left;
+    border:2px solid #2a2150; border-radius:10px; padding:8px 10px; background:rgba(20,10,40,.55); }
+  /* contain: the art is every shape from a tall truck to a square jar */
+  .htPic{ flex:0 0 auto; width:46px; height:46px; border-radius:9px; border:2px solid #2a2150;
+    background:#140a28 center/contain no-repeat; }
+  /* bossDriving_sheet.webp is a 2x1 strip (two tread frames) — show only the first */
+  .htPic.sheet2{ background-size:200% 100%; background-position:left center; }
+  .htTxt{ display:flex; flex-direction:column; gap:3px; min-width:0; }
+  .htTxt b{ font-family:'Press Start 2P'; font-size:9px; letter-spacing:.5px; color:#fff; }
+  .htTxt span{ font-size:10px; line-height:1.5; color:#9fb6c9; }
+  .htChips{ display:flex; flex-wrap:wrap; gap:6px; }
+  .htChip{ font-size:9px; letter-spacing:.5px; padding:6px 9px; border-radius:999px;
+    color:var(--c); border:1px solid var(--c); background:rgba(20,10,40,.6); opacity:.95; }
+  .htRule{ margin-top:14px; font-size:10px; line-height:1.7; text-align:left; color:#cfe3f2;
+    border-left:4px solid var(--gold); padding:8px 10px; background:rgba(255,210,63,.07); border-radius:0 8px 8px 0; }
+  .htRule b{ color:var(--gold); }
+
   .wallet{ margin-top:18px; font-size:10px; letter-spacing:1px; min-height:16px; color:var(--cyan); opacity:.9; word-break:break-all; max-width:300px; }
   .status-line{ margin-top:8px; font-size:10px; color:var(--gold); min-height:14px; }
   .go-title{ font-family:'Press Start 2P'; font-size:24px; color:var(--danger); text-shadow:0 0 16px var(--danger); margin-bottom:14px; }

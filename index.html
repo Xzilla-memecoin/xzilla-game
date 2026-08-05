@@ -16,7 +16,7 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@500;700;900&family=Press+Start+2P&display=swap" rel="stylesheet">
 
-<link rel="stylesheet" href="styles.css?v=38">
+<link rel="stylesheet" href="styles.css?v=40">
 </head>
 <body>
   <div id="game"></div>
@@ -84,12 +84,18 @@
       <!-- Sign-in for players outside Telegram. Hidden inside Telegram (initData already
            identifies them) and while already signed in. Guests can always play. -->
       <div id="loginCard" class="loginCard" style="display:none"></div>
-      <button id="connectBtn" class="btn secondary small" style="margin-top:18px;">CONNECT YOUR XZILLA HODL WALLET FOR SCORE MULTIPLIERS</button>
+      <!-- Compact utility row. These were three stacked full-width buttons with long
+           sentence labels (plus two hint lines) that made the menu tall and busy; the
+           actions are identical and the IDs are unchanged, so every existing handler in
+           index.html/game.js still binds. #connectBtn is still shown/hidden by class. -->
+      <div class="menuRow">
+        <button id="howToBtn" class="mbtn"><span class="mbtn-ic">❓</span><span class="mbtn-lb">HOW TO<br>PLAY</span></button>
+        <button id="connectBtn" class="mbtn"><span class="mbtn-ic">👛</span><span class="mbtn-lb">HODL<br>WALLET</span></button>
+        <button id="mainInvite" class="mbtn gold"><span class="mbtn-ic">🦖</span><span class="mbtn-lb">INVITE<br>+3000 XP</span></button>
+        <button id="joinTgBtn" class="mbtn tg"><span class="mbtn-ic">💬</span><span class="mbtn-lb">TELE<br>GRAM</span></button>
+      </div>
       <div id="walletInfo" class="wallet">Wallet not connected</div>
       <div id="vipStatus" class="status-line"></div>
-      <button id="mainInvite" class="btn invite small" style="margin-top:16px;">🦖 INVITE FRIENDS · +3000 XP EACH</button>
-      <div class="invite-hint">You and your friend both earn XP</div>
-      <button id="joinTgBtn" class="btn tg small" style="margin-top:16px;">💬 JOIN THE XZILLA TELEGRAM</button>
     </div>
   </div>
 
@@ -104,6 +110,12 @@
   </div>
   <!-- Full-screen rank-up celebration flash (driven by game.js milestone crossing). -->
   <div id="rankFlash" class="hidden"><span id="rankFlashTxt"></span></div>
+
+  <!-- HOW TO PLAY. Filled by buildHowTo() below rather than written out here, so the
+       character art comes from the SAME constants the game renders from (SCAMMERS[].url,
+       HOLDER_IMAGE_URL, XZILLA_SPRITES) and can never drift out of sync with the sprites
+       a player actually meets in a run. -->
+  <div id="howtoPanel" class="overlay panel hidden"><div class="panelInner" id="howtoInner"></div></div>
 
   <div id="walletPanel" class="overlay panel hidden"><div class="panelInner" id="walletInner"></div></div>
   <div id="missionsPanel" class="overlay panel hidden"><div class="panelInner" id="missionsInner"></div></div>
@@ -975,6 +987,64 @@ const SCAMMERS=[
   {label:"FUDSTER", c1:"#ff3b5c",c2:"#ff9a3a",eye:"#5a0010",horns:true, url:ASSET_BASE+"fudster.webp"},
 ];
 const matScammers=SCAMMERS.map(cfg=>matURLorDraw(cfg.url,(x,S)=>drawScammer(x,S,cfg)));
+
+/* ===================== HOW TO PLAY =====================================
+ * A picture of every character next to what it actually DOES, because the
+ * names are actively misleading: you COLLECT the scammers (they are the
+ * score) and you DODGE the friendly-sounding HODLER. Art is pulled from the
+ * same constants the renderer uses, so it cannot drift from the real sprites.
+ * Built on first open and reused; the panel markup lives near the others. */
+(function howToPlay(){
+  const SPR = window.XZILLA_SPRITES || {};
+  const pic = (url, sheetCols) =>
+    '<i class="htPic' + (sheetCols ? ' sheet' + sheetCols : '') + '" style="background-image:url(' + url + ')"></i>';
+  const row = (art, name, desc) =>
+    '<div class="htRow">' + art + '<div class="htTxt"><b>' + name + '</b><span>' + desc + '</span></div></div>';
+
+  function build(){
+    const smash = SCAMMERS.map(s => row(pic(s.url), s.label, "Ride into it — scores points and grows your combo")).join("");
+    const dodge =
+      row(pic(HOLDER_IMAGE_URL), "HODLER", "Costs a life. A shield eats the hit if you have one") +
+      row(pic(SPR.honeypot || ""), "HONEYPOT", "Looks grabbable. It is not — costs a life") +
+      row(pic(SPR.fakedrop || ""), "FAKE DROP", "Harmless to your health, but it WIPES your combo") +
+      row(pic(SPR.rugboss || "", 2), "RUG BOSS", "Never ram it. Your auto-cannon does the work — just survive the red candles");
+    const grab =
+      '<div class="htChips">' +
+      '<span class="htChip" style="--c:#39ff7a">SHIELD · eats one hit</span>' +
+      '<span class="htChip" style="--c:#ff3b5c">HEART · +1 life</span>' +
+      '<span class="htChip" style="--c:#ffd23f">BOMB · clears every scammer</span>' +
+      '<span class="htChip" style="--c:#ffd23f">×2 · double score</span>' +
+      '<span class="htChip" style="--c:#7df9ff">SLOW-MO</span>' +
+      '<span class="htChip" style="--c:#ff2bd6">MAGNET</span>' +
+      '<span class="htChip" style="--c:#c0ff3a">TRI-CANNON</span>' +
+      '<span class="htChip" style="--c:#ff8a3a">ROCKETS</span>' +
+      '</div>';
+
+    document.getElementById("howtoInner").innerHTML =
+      '<h2 class="pnl-title">HOW TO PLAY</h2>' +
+      '<div class="htLead">You are <b>XRIDER</b>. Smash the scams, dodge everything that sounds friendly.</div>' +
+      row('<i class="htPic" style="background-image:url(' + XZILLA_BACK_IMAGE_URL + ')"></i>', "YOU",
+          "Mouse or swipe to steer. On phone you can tap TILT and lean instead") +
+      '<div class="htHead good">SMASH THESE</div>' + smash +
+      '<div class="htHead bad">DODGE THESE</div>' + dodge +
+      '<div class="htHead">GRAB THESE</div>' + grab +
+      '<div class="htRule">⚡ <b>COMBO IS EVERYTHING.</b> Every point you score is multiplied by your combo. ' +
+      'It breaks only when you whiff — a scammer slips past, or you touch a FAKE DROP or an EMPTY PROMISE bubble.</div>' +
+      '<button class="btn secondary small pbtn" id="howtoClose">CLOSE</button>';
+    document.getElementById("howtoClose").onclick = close;
+  }
+
+  let built = false;
+  const panel = document.getElementById("howtoPanel");
+  if(!panel) return;   // never let a missing node take down the rest of this script
+  function open(){ if(!built){ build(); built = true; } panel.classList.remove("hidden"); }
+  function close(){ panel.classList.add("hidden"); }
+
+  const btn = document.getElementById("howToBtn");
+  if(btn) btn.addEventListener("click", open);
+  panel.addEventListener("click", e => { if(e.target === panel) close(); });
+  window.__howToPlay = open;   // so the first-run tutorial can link straight here
+})();
 const matHolder=matURLorDraw(HOLDER_IMAGE_URL, drawHolder);
 const matShield=matFromDraw(drawShield);
 const matBomb=matFromDraw(drawBomb);
