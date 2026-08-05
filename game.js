@@ -1184,32 +1184,51 @@ window._adsPayload = "WwogIHsKICAgICJpZCI6ICJ4emlsbGEtaG9tZSIsCiAgICAidGV4dCI6IC
     if(!lbApi()){ host.style.display="none"; return; }
     host.style.display="";
     if(auth.token && auth.name){
+      closeLoginPanel();            // just signed in — get the sheet out of the way
       host.innerHTML =
-        '<div class="loginHead">✔ SIGNED IN</div>'+
+        '<div class="cardTop"><span class="loginHead">✔ SIGNED IN</span>'+
+          '<span class="loginSub dim">scores post to the board</span></div>'+
         '<div class="loginWho">'+escapeHtml(auth.name)+'<span> · '+escapeHtml(auth.provider||"")+'</span></div>'+
-        '<div class="loginSub dim">Your scores post to the global board.</div>'+
         '<button class="btn secondary small" id="loginOut">SIGN OUT</button>';
       $("loginOut").onclick = logout;
       return;
     }
-    // Compact: the two-line "play as a guest" explainer folds into the heading row, and
-    // the wallet reassurance drops to the essentials. Keeping "free signature · no
-    // transaction" is not optional — it is what makes players willing to sign at all.
+    // Signed out: the card is now just a trigger. The options themselves (wallet button,
+    // Google button, Turnstile widget) are ~150px of controls before a word of text, so
+    // inline they dominated the start screen; they live in #loginPanel instead.
     host.innerHTML =
       '<div class="cardTop"><span class="loginHead">🔐 SIGN IN TO RANK</span>'+
         '<span class="loginSub dim">optional</span></div>'+
-      '<div class="loginSub">Guests can always play — sign in to post scores to the global board.</div>'+
+      '<button class="btn wallet-login" id="loginOpen">◆ SIGN IN</button>'+
+      '<div class="loginSub dim">Guests can always play — sign in only to post scores</div>';
+    $("loginOpen").onclick = openLoginPanel;
+  }
+
+  /* The sign-in sheet. Rebuilt on every open rather than once, because Turnstile tokens
+   * are single-use and expire (~300s) — a widget mounted at page load and left sitting
+   * behind a closed panel would hand back a stale token. mountTurnstile() already drops
+   * the previous widget id, so re-rendering here is the intended path. */
+  function renderLoginPanel(){
+    const host = $("loginInner"); if(!host) return;
+    host.innerHTML =
+      '<h2 class="pnl-title">SIGN IN TO RANK</h2>'+
+      '<div class="loginSub" style="text-align:left">Guests can always play — signing in only posts your scores to the global leaderboard.</div>'+
       '<button class="btn wallet-login" id="loginWallet">◆ SIGN IN WITH WALLET</button>'+
       '<div class="loginSub dim">Free signature · no transaction · sets your holder tier</div>'+
       (window.__GOOGLE_CLIENT_ID ? '<div class="loginOr">or</div><div id="gsiButton"></div>' : '')+
-      (turnstileEnabled() ? '<div id="tsWidget" class="tsWidget"></div>' : '');
+      (turnstileEnabled() ? '<div id="tsWidget" class="tsWidget"></div>' : '')+
+      '<button class="btn secondary small pbtn" id="loginCancel">CLOSE</button>';
     $("loginWallet").onclick = async (ev) => {
       const b = ev.currentTarget; b.disabled = true; b.textContent = "OPENING WALLET…";
       try{ await loginWithWallet(); } finally { if(b.isConnected){ b.disabled=false; b.textContent="◆ SIGN IN WITH WALLET"; } }
     };
+    $("loginCancel").onclick = closeLoginPanel;
     mountGoogleButton();
     mountTurnstile();
   }
+  function openLoginPanel(){ const p=$("loginPanel"); if(!p) return; renderLoginPanel(); p.classList.remove("hidden"); }
+  function closeLoginPanel(){ const p=$("loginPanel"); if(p) p.classList.add("hidden"); }
+  { const p=$("loginPanel"); if(p) p.addEventListener("click", e=>{ if(e.target===p) closeLoginPanel(); }); }
 
   /* Google Identity Services renders its own button; it must be re-rendered every time
    * the card is rebuilt, and the library may still be loading on first paint. */

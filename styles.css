@@ -122,7 +122,10 @@
      The shared .overlay backdrop (.55 -> .86 alpha) is tuned for sparse screens like
      PAUSED; behind a dense reference panel the whole start menu shows through it and
      the text becomes unreadable. This one gets a near-solid backdrop of its own. */
-  #howtoPanel{ background:rgba(5,2,16,.965); backdrop-filter:blur(3px); }
+  #howtoPanel, #loginPanel{ background:rgba(5,2,16,.965); backdrop-filter:blur(3px); }
+  /* the sign-in sheet is short — centre it instead of pinning it to the top like the tall panels */
+  #loginPanel{ justify-content:safe center; padding-top:calc(74px + env(safe-area-inset-top)); }
+  #loginPanel .panelInner{ max-width:340px; align-items:center; text-align:center; }
   .htLead{ font-size:10px; line-height:1.7; color:#cfe3f2; text-align:left; margin-bottom:4px; }
   .htLead b{ color:var(--toxic); }
   .htHead{ font-family:'Press Start 2P'; font-size:9px; letter-spacing:1px; text-align:left;

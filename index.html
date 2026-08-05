@@ -16,7 +16,7 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@500;700;900&family=Press+Start+2P&display=swap" rel="stylesheet">
 
-<link rel="stylesheet" href="styles.css?v=43">
+<link rel="stylesheet" href="styles.css?v=44">
 </head>
 <body>
   <div id="game"></div>
@@ -119,6 +119,11 @@
        HOLDER_IMAGE_URL, XZILLA_SPRITES) and can never drift out of sync with the sprites
        a player actually meets in a run. -->
   <div id="howtoPanel" class="overlay panel hidden"><div class="panelInner" id="howtoInner"></div></div>
+
+  <!-- Sign-in options live here rather than inline on the start screen: the wallet button,
+       the Google button and the Turnstile widget are ~150px of controls before any text,
+       which is what actually made the menu tall. Filled by renderLoginPanel() in game.js. -->
+  <div id="loginPanel" class="overlay panel hidden"><div class="panelInner" id="loginInner"></div></div>
 
   <div id="walletPanel" class="overlay panel hidden"><div class="panelInner" id="walletInner"></div></div>
   <div id="missionsPanel" class="overlay panel hidden"><div class="panelInner" id="missionsInner"></div></div>
@@ -1665,6 +1670,6 @@ document.addEventListener("visibilitychange",()=>{ if(document.hidden&&state.run
 
 document.getElementById("bestScore").textContent=state.best;
 </script>
-<script src="game.js?v=124"></script>
+<script src="game.js?v=125"></script>
 </body>
 </html>
