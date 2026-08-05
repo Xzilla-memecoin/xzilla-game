@@ -294,7 +294,10 @@ window._adsPayload = "WwogIHsKICAgICJpZCI6ICJ4emlsbGEtaG9tZSIsCiAgICAidGV4dCI6IC
    * grant isn't wiped by a late cloud/server restore. */
   function refLink(){
     const id = (typeof tg!=="undefined" && tg && tg.initDataUnsafe && tg.initDataUnsafe.user && tg.initDataUnsafe.user.id);
-    return id ? ("https://t.me/RugSmasher_bot/play?startapp="+id) : (window.__BOT_SHARE_URL || "https://t.me/RugSmasher_bot/play");
+    // Telegram players keep the t.me/?startapp= form — that is the ONLY link whose id
+    // survives into tg.initDataUnsafe.start_param, i.e. the only one that credits a
+    // referral. Everyone else gets the website.
+    return id ? ("https://t.me/RugSmasher_bot/play?startapp="+id) : (window.__BOT_SHARE_URL || "https://xzilla.io/play/");
   }
   // Shared invite action — used by the main-screen button AND the RANKS panel button.
   function inviteFriends(){
@@ -4276,13 +4279,16 @@ window._adsPayload = "WwogIHsKICAgICJpZCI6ICJ4emlsbGEtaG9tZSIsCiAgICAidGV4dCI6IC
     // x.com/intent/post is the current canonical composer; twitter.com/intent/tweet still
     // works but takes an extra redirect, which is one more thing to fail on a phone.
     function xIntentUrl(text){ return "https://x.com/intent/post?text="+encodeURIComponent(text); }
+    // Mac users do not press Ctrl. Getting this wrong is the difference between the hint
+    // helping and it reading as instructions for somebody else's computer.
+    const PASTE_KEY = /Mac|iPhone|iPad|iPod/.test(navigator.platform || navigator.userAgent) ? "⌘V" : "Ctrl+V";
 
     function offerXLink(text){
       const wrap=document.querySelector("#cardPreview .cardBtns"); if(!wrap) return;
       let a=$("cardXOpen");
       if(!a){ a=document.createElement("a"); a.id="cardXOpen"; a.className="btn"; a.target="_blank"; a.rel="noopener"; wrap.prepend(a); }
       a.href=xIntentUrl(text); a.textContent="𝕏 OPEN X — THEN PASTE";
-      toast("Card copied — open X and press Ctrl+V", CYAN);
+      toast("Card copied — open X and press "+PASTE_KEY, CYAN);
     }
 
     let _postingX=false;
@@ -4298,7 +4304,7 @@ window._adsPayload = "WwogIHsKICAgICJpZCI6ICJ4emlsbGEtaG9tZSIsCiAgICAidGV4dCI6IC
         const blobP=new Promise((res,rej)=>canvas.toBlob(b=>b?res(b):rej(new Error("no blob")),"image/png"));
         await navigator.clipboard.write([new ClipboardItem({"image/png":blobP})]);
         const w=window.open(xIntentUrl(text),"_blank","noopener");
-        if(w) toast("Card copied — press Ctrl+V in the post ✅", TEAL);
+        if(w) toast("Card copied — press "+PASTE_KEY+" in the post ✅", TEAL);
         else offerXLink(text);
       }catch(e){
         // no clipboard-image support (older Firefox), denied permission, or an
@@ -4322,10 +4328,15 @@ window._adsPayload = "WwogIHsKICAgICJpZCI6ICJ4emlsbGEtaG9tZSIsCiAgICAidGV4dCI6IC
         const canSheet = !!(navigator.canShare && navigator.canShare({files:[new File([new Blob()],"x.png",{type:"image/png"})]}) && navigator.share);
         ov.innerHTML='<div class="cardWrap"><img id="cardImg" alt="Your XZILLA score card"/>'+
           '<div class="cardBtns">'+
+            // The hint rides ON the button: by the time the composer opens, the player is
+            // looking at X, not at this screen, and a card sitting unpasted on the
+            // clipboard is invisible. Say what to press before they leave.
             (canSheet
               ? '<button class="btn" id="cardShare">📣 SHARE THIS CARD</button>'+
-                '<button class="btn secondary small" id="cardX">𝕏 POST ON X</button>'
-              : '<button class="btn" id="cardX">𝕏 POST ON X</button>'+
+                '<button class="btn secondary small" id="cardX">𝕏 POST ON X'+
+                  '<span class="btnHint">copies the card — press '+PASTE_KEY+' in the post</span></button>'
+              : '<button class="btn" id="cardX">𝕏 POST ON X'+
+                  '<span class="btnHint">copies the card — press '+PASTE_KEY+' in the post</span></button>'+
                 '<button class="btn secondary small" id="cardShare">💾 SAVE PNG</button>')+
             '<button class="btn secondary small" id="cardClose">CLOSE</button>'+
           '</div></div>';
