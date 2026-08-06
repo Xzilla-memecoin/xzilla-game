@@ -1166,15 +1166,15 @@ window._adsPayload = "WwogIHsKICAgICJpZCI6ICJ4emlsbGEtaG9tZSIsCiAgICAidGV4dCI6IC
    * under our sid. We poll for it. That is the same bridge the Phantom connect uses,
    * and it keeps the session token out of the URL — it is a bearer credential, and a
    * query string ends up in history, Referer headers and any analytics on the page. */
-  let _discordEnabled = null;                       // null = not asked yet
-  async function discordAvailable(){
-    if(_discordEnabled !== null) return _discordEnabled;
-    const api = lbApi(); if(!api){ _discordEnabled = false; return false; }
-    try{
-      const r = await fetch(api+"/auth/providers",{cache:"no-store"}).then(r=>r.json());
-      _discordEnabled = !!(r && r.discord);
-    }catch(_){ _discordEnabled = false; }
-    return _discordEnabled;
+  /* What the Worker can actually offer. Asked once and cached: the sheet uses it to
+   * show only the tiles that can work, rather than one that fails after the click. */
+  let _providers = null;
+  async function providers(){
+    if(_providers) return _providers;
+    const api = lbApi(); if(!api) return (_providers = {});
+    try{ _providers = (await fetch(api+"/auth/providers",{cache:"no-store"}).then(r=>r.json())) || {}; }
+    catch(_){ _providers = {}; }
+    return _providers;
   }
 
   let _discordPoll = null;
@@ -1224,6 +1224,60 @@ window._adsPayload = "WwogIHsKICAgICJpZCI6ICJ4emlsbGEtaG9tZSIsCiAgICAidGV4dCI6IC
   // Google Identity Services calls this from its own callback.
   window.__xzGoogleCredential = c => loginWithGoogle(c && c.credential);
 
+  /* Telegram (web players) — the Login Widget, not initData. telegram-widget.js is
+   * loaded LAZILY and only out here on the web, for two reasons: inside the Mini App
+   * this whole card is hidden anyway, and the widget script also claims the global
+   * `window.Telegram` — so WebApp is snapshotted and put back if it gets clobbered.
+   * Requires the site's domain to be registered with @BotFather via /setdomain;
+   * without that oauth.telegram.org rejects the popup with "Bot domain invalid". */
+  let _tgWidget = null;
+  function tgLoginReady(){ try{ return !!(window.Telegram && window.Telegram.Login && window.Telegram.Login.auth); }catch(_){ return false; } }
+  function loadTelegramWidget(){
+    if(tgLoginReady()) return Promise.resolve(true);
+    if(_tgWidget) return _tgWidget;
+    _tgWidget = new Promise(resolve => {
+      const webApp = (window.Telegram && window.Telegram.WebApp) || null;
+      const s = document.createElement("script");
+      s.src = "https://telegram.org/js/telegram-widget.js?22"; s.async = true;
+      s.onload = () => {
+        if(webApp && window.Telegram && !window.Telegram.WebApp) window.Telegram.WebApp = webApp;
+        resolve(tgLoginReady());
+      };
+      s.onerror = () => resolve(false);
+      document.head.appendChild(s);
+    });
+    return _tgWidget;
+  }
+  async function loginWithTelegram(botId){
+    const api = lbApi(); if(!api || !botId){ toast("Backend not connected", RED); return false; }
+    if(!(await loadTelegramWidget())){ toast("Telegram login unavailable right now", RED); return false; }
+    // auth() opens a popup, so it must stay inside the click's activation window —
+    // nothing slow (Turnstile wait, network) may run before this line. The widget only
+    // watches for the popup to close, so a BLOCKED popup never calls back at all: the
+    // timeout is what stops the tile sitting disabled forever in that case.
+    const data = await new Promise(resolve => {
+      let done = false;
+      const finish = u => { if(!done){ done = true; resolve(u || null); } };
+      const timer = setTimeout(() => { if(!done){ toast("Allow pop-ups to sign in with Telegram", GOLD); finish(null); } }, 180000);
+      try{ window.Telegram.Login.auth({ bot_id:parseInt(botId,10), request_access:false }, u => { clearTimeout(timer); finish(u); }); }
+      catch(_){ clearTimeout(timer); finish(null); }
+    });
+    if(!data || !data.hash){ toast("Telegram sign-in cancelled", GOLD); return false; }
+    try{
+      if(!(await ensureTurnstile())) return false;
+      const res = await fetch(api+"/auth/telegram",{ method:"POST", headers:{"content-type":"application/json"},
+        body: JSON.stringify({ user:data, turnstile: window.__turnstileToken||"" }) }).then(r=>r.json());
+      if(!res || !res.ok){ toast("Telegram sign-in failed: "+((res&&res.error)||"unknown"), RED); return false; }
+      setAuth(res, "tg");         // "tg" — the SAME provider the Mini App resolves to
+      toast("Signed in as "+res.name+" 🦖", TEAL);
+      onAuthChanged();
+      return true;
+    }catch(e){ toast("Telegram sign-in failed", RED); return false; }
+    finally{ resetTurnstile(); }
+  }
+  // The server calls the provider "tg"; players call it Telegram.
+  function providerLabel(p){ return p === "tg" ? "telegram" : (p || ""); }
+
   /* Start-screen sign-in card. Hidden entirely inside Telegram (initData already
    * identifies the player) and while signed in on web. Guests are never blocked from
    * playing — this only appears as the route to POSTING a score. */
@@ -1237,7 +1291,7 @@ window._adsPayload = "WwogIHsKICAgICJpZCI6ICJ4emlsbGEtaG9tZSIsCiAgICAidGV4dCI6IC
       host.innerHTML =
         '<div class="cardTop"><span class="loginHead">✔ SIGNED IN</span>'+
           '<span class="loginSub dim">scores post to the board</span></div>'+
-        '<div class="loginWho">'+escapeHtml(auth.name)+'<span> · '+escapeHtml(auth.provider||"")+'</span></div>'+
+        '<div class="loginWho">'+escapeHtml(auth.name)+'<span> · '+escapeHtml(providerLabel(auth.provider))+'</span></div>'+
         '<button class="btn secondary small" id="loginOut">SIGN OUT</button>';
       $("loginOut").onclick = logout;
       return;
@@ -1259,44 +1313,72 @@ window._adsPayload = "WwogIHsKICAgICJpZCI6ICJ4emlsbGEtaG9tZSIsCiAgICAidGV4dCI6IC
    * are single-use and expire (~300s) — a widget mounted at page load and left sitting
    * behind a closed panel would hand back a stale token. mountTurnstile() already drops
    * the previous widget id, so re-rendering here is the intended path. */
+  /* Provider marks. Brand glyphs, drawn inline so the sheet needs no image requests
+   * and each one inherits the tile's colour. */
+  const ICON_WALLET =
+    '<svg viewBox="0 0 24 24" width="26" height="26" aria-hidden="true">'+
+    '<path fill="currentColor" d="M3 7a3 3 0 0 1 3-3h11a2 2 0 0 1 0 4H6a3 3 0 0 0-3 3V7Zm0 4.5A2.5 2.5 0 0 1 5.5 9H19a2 2 0 0 1 2 2v6a3 3 0 0 1-3 3H6a3 3 0 0 1-3-3v-5.5ZM16.5 15.5a1.5 1.5 0 1 0 0-3 1.5 1.5 0 0 0 0 3Z"/></svg>';
+  const ICON_DISCORD =
+    '<svg viewBox="0 0 24 18" width="27" height="20" aria-hidden="true">'+
+    '<path fill="currentColor" d="M20.3 1.5A19.8 19.8 0 0 0 15.4 0l-.25.5a18.3 18.3 0 0 1 4.3 1.4A17.6 17.6 0 0 0 12 .8a17.6 17.6 0 0 0-7.45 1.1A18.3 18.3 0 0 1 8.85.5L8.6 0A19.8 19.8 0 0 0 3.7 1.5C.6 6.1-.25 10.6.17 15a19.9 19.9 0 0 0 6.05 3l.8-1.35a13 13 0 0 1-2-1l.4-.3a14.2 14.2 0 0 0 12.16 0l.4.3a13 13 0 0 1-2 1L16.8 18a19.9 19.9 0 0 0 6.05-3c.5-5.1-.85-9.55-2.55-13.5ZM8.02 12.3c-1.18 0-2.15-1.08-2.15-2.4S6.82 7.5 8.02 7.5s2.17 1.08 2.15 2.4c0 1.32-.95 2.4-2.15 2.4Zm7.96 0c-1.18 0-2.15-1.08-2.15-2.4s.95-2.4 2.15-2.4 2.17 1.08 2.15 2.4c0 1.32-.95 2.4-2.15 2.4Z"/></svg>';
+  const ICON_TELEGRAM =
+    '<svg viewBox="0 0 24 24" width="26" height="26" aria-hidden="true">'+
+    '<path fill="currentColor" d="M21.6 3.3 2.9 10.5c-1.1.4-1.1 1.1-.2 1.4l4.7 1.5 1.8 5.5c.2.6.4.8.8.8.4 0 .6-.2.9-.5l2.3-2.2 4.7 3.5c.9.5 1.5.2 1.7-.8l3.1-14.6c.3-1.2-.4-1.8-1.1-1.5ZM18 6.8 9.3 14.5l-.3 3.4-1.5-4.6L18 6.8Z"/></svg>';
+
   function renderLoginPanel(){
     const host = $("loginInner"); if(!host) return;
+    // Tile markup. Everything starts hidden and /auth/providers reveals what works —
+    // an option that always fails is worse than no option.
+    const tile = (id, cls, icon, label, badge) =>
+      '<button class="ltile '+cls+'" id="'+id+'" style="display:none">'+
+        (badge ? '<span class="lbadge">'+badge+'</span>' : '')+
+        '<span class="lico">'+icon+'</span><span class="llab">'+label+'</span></button>';
     host.innerHTML =
       '<h2 class="pnl-title">SIGN IN TO RANK</h2>'+
-      '<div class="loginSub" style="text-align:left">Guests can always play — signing in only posts your scores to the global leaderboard.</div>'+
-      '<button class="btn wallet-login" id="loginWallet">◆ SIGN IN WITH WALLET</button>'+
+      '<div class="loginSub" style="text-align:left">Guests can always play — signing in only posts your scores to the global leaderboard. Pick one:</div>'+
+      '<div class="loginGrid">'+
+        tile("loginWallet",   "tl-wallet",   ICON_WALLET,   "WALLET",   "×2")+
+        tile("loginDiscord",  "tl-discord",  ICON_DISCORD,  "DISCORD")+
+        tile("loginTelegram", "tl-telegram", ICON_TELEGRAM, "TELEGRAM")+
+        // Google renders its OWN button (its terms require it), so its tile is a frame
+        // around the real GIS icon button rather than one of ours.
+        '<div class="ltile tl-google" id="loginGoogle" style="display:none">'+
+          '<span class="lico"><span id="gsiButton"></span></span><span class="llab">GOOGLE</span></div>'+
+      '</div>'+
       // ONE wallet route. The same connect that signs you in also reads your $XZILLA
       // balance (XZWallet.onChange -> applyWalletToEcon), so an empty wallet is a perfectly
       // good login and a funded one additionally sets the holder tier. Saying so removes
       // the old worry that "connect wallet" was about to cost something.
       '<div class="loginPerk">Empty wallet? Still works. Holding $XZILLA also sets your score multiplier — up to ×2</div>'+
       '<div class="loginSub dim">Free signature · no transaction · nothing leaves your wallet</div>'+
-      '<div class="loginOr" id="loginOr" style="display:none">or</div>'+
-      '<button class="btn discord-login" id="loginDiscord" style="display:none">'+
-        '<svg viewBox="0 0 24 18" width="20" height="15" aria-hidden="true" style="vertical-align:-2px;margin-right:8px">'+
-        '<path fill="currentColor" d="M20.3 1.5A19.8 19.8 0 0 0 15.4 0l-.25.5a18.3 18.3 0 0 1 4.3 1.4A17.6 17.6 0 0 0 12 .8a17.6 17.6 0 0 0-7.45 1.1A18.3 18.3 0 0 1 8.85.5L8.6 0A19.8 19.8 0 0 0 3.7 1.5C.6 6.1-.25 10.6.17 15a19.9 19.9 0 0 0 6.05 3l.8-1.35a13 13 0 0 1-2-1l.4-.3a14.2 14.2 0 0 0 12.16 0l.4.3a13 13 0 0 1-2 1L16.8 18a19.9 19.9 0 0 0 6.05-3c.5-5.1-.85-9.55-2.55-13.5ZM8.02 12.3c-1.18 0-2.15-1.08-2.15-2.4S6.82 7.5 8.02 7.5s2.17 1.08 2.15 2.4c0 1.32-.95 2.4-2.15 2.4Zm7.96 0c-1.18 0-2.15-1.08-2.15-2.4s.95-2.4 2.15-2.4 2.17 1.08 2.15 2.4c0 1.32-.95 2.4-2.15 2.4Z"/></svg>'+
-        'SIGN IN WITH DISCORD</button>'+
-      (window.__GOOGLE_CLIENT_ID ? '<div class="loginOr">or</div><div id="gsiButton"></div>' : '')+
       (turnstileEnabled() ? '<div id="tsWidget" class="tsWidget"></div>' : '')+
       '<button class="btn secondary small pbtn" id="loginCancel">CLOSE</button>';
-    // Revealed only once the Worker confirms it holds Discord credentials — a button
-    // that always fails is worse than no button.
-    discordAvailable().then(on => {
-      const b=$("loginDiscord"), o=$("loginOr");
-      if(!b || !on) return;
-      b.style.display=""; if(o) o.style.display="";
-      b.onclick = async (ev) => {
-        const t=ev.currentTarget; t.disabled=true;
-        try{ await loginWithDiscord(); } finally { if(t.isConnected) t.disabled=false; }
-      };
-    });
-    $("loginWallet").onclick = async (ev) => {
-      const b = ev.currentTarget; b.disabled = true; b.textContent = "OPENING WALLET…";
-      try{ await loginWithWallet(); } finally { if(b.isConnected){ b.disabled=false; b.textContent="◆ SIGN IN WITH WALLET"; } }
-    };
     $("loginCancel").onclick = closeLoginPanel;
-    mountGoogleButton();
     mountTurnstile();
+
+    // One handler shape for every tile: disable while the flow runs so a second tap
+    // can't open two popups.
+    const wire = (id, run) => {
+      const b = $(id); if(!b) return;
+      b.style.display = "";
+      b.onclick = async (ev) => {
+        const t = ev.currentTarget; t.classList.add("busy"); t.disabled = true;
+        try{ await run(); } finally { if(t.isConnected){ t.disabled = false; t.classList.remove("busy"); } }
+      };
+    };
+    providers().then(p => {
+      if(!$("loginWallet")) return;                      // sheet closed while we asked
+      if(p.wallet !== false) wire("loginWallet", loginWithWallet);
+      if(p.discord)          wire("loginDiscord", loginWithDiscord);
+      if(p.telegram){
+        loadTelegramWidget();                            // preload, so the click can pop straight up
+        wire("loginTelegram", () => loginWithTelegram(p.telegram));
+      }
+      if(window.__GOOGLE_CLIENT_ID && p.google !== false){
+        const g = $("loginGoogle"); if(g) g.style.display = "";
+        mountGoogleButton();
+      }
+    });
   }
   function openLoginPanel(){ const p=$("loginPanel"); if(!p) return; renderLoginPanel(); p.classList.remove("hidden"); }
   function closeLoginPanel(){ const p=$("loginPanel"); if(p) p.classList.add("hidden"); }
@@ -1372,7 +1454,9 @@ window._adsPayload = "WwogIHsKICAgICJpZCI6ICJ4emlsbGEtaG9tZSIsCiAgICAidGV4dCI6IC
         g.initialize({ client_id: window.__GOOGLE_CLIENT_ID, callback: window.__xzGoogleCredential });
         _gsiInited = true;
       }
-      g.renderButton(el, { theme:"filled_black", size:"large", shape:"pill", text:"signin_with", width:240 });
+      // Icon-only, to sit in the provider grid next to the wallet/Discord/Telegram tiles.
+      // GIS must render its own button — this is the closest it offers to a plain icon.
+      g.renderButton(el, { type:"icon", theme:"filled_black", size:"large", shape:"circle" });
     }catch(_){}
   }
 

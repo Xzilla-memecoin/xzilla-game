@@ -10,7 +10,8 @@
      GET  /auth/nonce   -> { nonce, message }                  wallet login challenge
      POST /auth/wallet  -> { ok, token, pid }   body: { address, nonce, signature }
      POST /auth/google  -> { ok, token, pid }   body: { credential }
-     GET  /auth/me      -> { ok, pid, name, provider }         Authorization: Bearer <token>
+     POST /auth/telegram-> { ok, token, pid }   body: { user }   Login Widget payload
+     GET  /auth/me     -> { ok, pid, name, provider }         Authorization: Bearer <token>
 
    Identity
      Players are keyed by `pid`, not by a login provider. Telegram, wallet and Google
@@ -92,6 +93,39 @@ async function verifyInitData(initData, botToken){
     const user = JSON.parse(params.get("user") || "null");
     return (user && user.id) ? user : null;
   }catch(_){ return null; }
+}
+
+/* Validate a Telegram LOGIN WIDGET payload (web players, oauth.telegram.org).
+   Same bot token, DIFFERENT key derivation from initData: the widget signs with
+   SHA256(bot_token) as the key, while the Mini App uses HMAC("WebAppData", token).
+   Getting these two crossed is the classic way to end up with a login that always
+   fails, so they stay as separate functions. Returns the user fields or null. */
+async function verifyTelegramLogin(data, botToken){
+  if(!botToken || !data || !data.hash) return null;
+  const hash = String(data.hash);
+  if(!/^[a-f0-9]{64}$/.test(hash)) return null;
+  const dcs = Object.keys(data)
+    .filter(k => k !== "hash" && data[k] !== undefined && data[k] !== null)
+    .sort()
+    .map(k => k + "=" + String(data[k]))
+    .join("\n");
+  const enc = new TextEncoder();
+  const secret = await crypto.subtle.digest("SHA-256", enc.encode(botToken));   // key = SHA256(token)
+  const sig = toHex(await hmac(new Uint8Array(secret), enc.encode(dcs)));
+  if(sig !== hash) return null;
+  const authDate = parseInt(data.auth_date || "0", 10);
+  // The widget payload is a bearer credential until it is exchanged; 1 day matches
+  // the initData rule and Telegram's own guidance.
+  if(!authDate || (Date.now() / 1000 - authDate) > 86400) return null;
+  if(!data.id || !/^\d{1,20}$/.test(String(data.id))) return null;
+  return data;
+}
+// The bot id is the part of the token before the colon. It is PUBLIC — it travels in
+// every Login Widget URL — so deriving it here saves configuring it twice.
+function telegramBotId(env){
+  const t = env.BOT_TOKEN || "";
+  const id = t.split(":")[0];
+  return /^\d{4,20}$/.test(id) ? id : "";
 }
 
 /* ===================== holder tiers (server-authoritative) ==================
@@ -532,6 +566,24 @@ export default {
       return json({ ok: true, token, pid: who.pid, name: who.name, tag: await shortTag(who.pid) }, 200, origin);
     }
 
+    /* Telegram Login Widget — the web counterpart of initData. Resolves to provider
+       "tg" with the raw Telegram id, exactly like the Mini App path, so a player who
+       plays in Telegram and then signs in on the web lands on ONE account, one XP
+       balance, one leaderboard row. Requires the game's domain to be registered with
+       @BotFather (/setdomain), or oauth.telegram.org refuses to issue the payload. */
+    if(req.method === "POST" && url.pathname === "/auth/telegram"){
+      if(!env.SESSION_SECRET) return json({ error: "login_unconfigured" }, 503, origin);
+      if(!env.BOT_TOKEN)      return json({ error: "telegram_unconfigured" }, 503, origin);
+      let body; try{ body = await req.json(); }catch(_){ return json({ error: "bad json" }, 400, origin); }
+      if(!(await turnstileOk(env, body.turnstile, req.headers.get("CF-Connecting-IP")))) return json({ error: "captcha_failed" }, 403, origin);
+      const u = await verifyTelegramLogin(body.user || null, env.BOT_TOKEN);
+      if(!u) return json({ error: "bad_signature" }, 401, origin);
+      const nm = (u.username ? "@" + u.username : (u.first_name || "Player")).slice(0, 24);
+      const who = await resolvePid(env, "tg", u.id, nm);
+      const token = await issueSession(env, who.pid, who.name, "tg");
+      return json({ ok: true, token, pid: who.pid, name: who.name, tag: await shortTag(who.pid) }, 200, origin);
+    }
+
     /* ===================== DISCORD OAUTH2 ==================================
        Authorization Code grant (docs.discord.com/developers/topics/oauth2).
        The token exchange needs the client SECRET, so it has to happen here, never
@@ -556,7 +608,14 @@ export default {
     // What the game can offer. Lets the sign-in sheet hide buttons that cannot work
     // rather than showing one that fails only after the player clicks it.
     if(req.method === "GET" && url.pathname === "/auth/providers"){
-      return json({ discord: discordOn(), google: !!env.GOOGLE_CLIENT_ID, wallet: !!env.SESSION_SECRET }, 200, origin);
+      return json({
+        discord: discordOn(),
+        google: !!env.GOOGLE_CLIENT_ID,
+        wallet: !!env.SESSION_SECRET,
+        // Public bot id, or "" when no BOT_TOKEN is set — the game needs it to open the
+        // Login Widget and uses "" as "hide the Telegram tile".
+        telegram: env.SESSION_SECRET ? telegramBotId(env) : "",
+      }, 200, origin);
     }
 
     // Step 1 — send the player to Discord. `state` is the sid, and it is recorded in KV

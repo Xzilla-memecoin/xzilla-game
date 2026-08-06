@@ -447,13 +447,35 @@
   .loginWho span{ font-size:9px; color:#9fb6c9; }
   .btn.wallet-login{ background:linear-gradient(135deg,#ff2bd6,#8b2bff); color:#fff; font-size:10px; padding:14px 18px;
     box-shadow:0 0 22px rgba(255,43,214,.5), inset 0 -4px 0 rgba(0,0,0,.22); }
-  /* Discord blurple — the brand colour is the fastest way for a player to recognise it */
-  .btn.discord-login{ background:#5865F2; color:#fff; font-size:10px; padding:14px 18px;
-    box-shadow:0 0 22px rgba(88,101,242,.5), inset 0 -4px 0 rgba(0,0,0,.22); }
   /* second line inside a .btn — the what-happens-next note under a button's label */
   .btnHint{ display:block; font-family:'Orbitron',sans-serif; font-size:8px; letter-spacing:.4px;
     line-height:1.5; margin-top:6px; opacity:.82; text-transform:none; }
-  .loginOr{ font-family:'Orbitron',sans-serif; font-size:9px; color:#9fb6c9; opacity:.7; letter-spacing:2px; }
+  /* ---- provider picker: one icon tile per login method --------------------
+     Four stacked full-width buttons pushed the sheet past the fold on a phone in
+     landscape; as icons the whole choice fits on one row and reads at a glance. */
+  .loginGrid{ display:flex; flex-wrap:wrap; justify-content:center; gap:9px; width:100%; margin:2px 0 2px; }
+  .ltile{ position:relative; width:70px; min-height:74px; padding:9px 4px 7px; border-radius:12px; cursor:pointer;
+    display:flex; flex-direction:column; align-items:center; justify-content:center; gap:6px;
+    border:1px solid rgba(255,255,255,.16); background:rgba(255,255,255,.05); color:#fff;
+    transition:transform .12s ease, box-shadow .12s ease, border-color .12s ease; }
+  .ltile:hover{ transform:translateY(-2px); }
+  .ltile:active{ transform:translateY(0) scale(.97); }
+  .ltile[disabled]{ opacity:.55; cursor:default; transform:none; }
+  .ltile.busy .lico{ animation:ltilePulse .9s ease-in-out infinite; }
+  @keyframes ltilePulse{ 50%{ opacity:.35; } }
+  .lico{ display:flex; align-items:center; justify-content:center; height:28px; }
+  .llab{ font-family:'Press Start 2P'; font-size:6.5px; letter-spacing:.5px; color:#dfeaf5; line-height:1; }
+  /* the wallet's ×2 payoff, marked on the tile itself */
+  .lbadge{ position:absolute; top:-6px; right:-4px; font-family:'Press Start 2P'; font-size:7px; padding:3px 4px;
+    border-radius:6px; background:var(--gold); color:#1a1206; box-shadow:0 0 10px rgba(255,210,63,.55); }
+  .tl-wallet{ border-color:rgba(255,43,214,.75); background:linear-gradient(150deg,rgba(255,43,214,.28),rgba(139,43,255,.22));
+    box-shadow:0 0 16px rgba(255,43,214,.32); }
+  .tl-discord{ border-color:rgba(88,101,242,.8); background:rgba(88,101,242,.22); box-shadow:0 0 14px rgba(88,101,242,.28); }
+  .tl-telegram{ border-color:rgba(34,158,217,.85); background:rgba(34,158,217,.22); box-shadow:0 0 14px rgba(34,158,217,.28); }
+  .tl-google{ border-color:rgba(255,255,255,.35); background:rgba(255,255,255,.09); }
+  .tl-google .lico{ overflow:hidden; }
+  /* GIS ships a 40px circle; nudge it down to match the other tiles' 28px glyphs. */
+  .tl-google #gsiButton{ transform:scale(.78); transform-origin:center; }
   /* the wallet's payoff, stated where the wallet button actually is */
   .loginPerk{ font-family:'Orbitron',sans-serif; font-size:9px; line-height:1.6; letter-spacing:.3px;
     color:var(--gold); border:1px solid rgba(255,210,63,.45); background:rgba(255,210,63,.08);
