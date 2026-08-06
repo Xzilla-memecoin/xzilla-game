@@ -200,9 +200,13 @@ const NONCE_TTL      = 300;       // seconds a login nonce stays valid
 const SESSION_DAYS   = 30;
 
 // Default pid for a provider identity. Telegram keeps its raw id for back-compat.
+// Each provider gets its own prefix so ids from different providers can never collide
+// in the pid namespace. Existing prefixes are frozen — changing one orphans live accounts.
 function defaultPid(provider, id){
   if(provider === "tg") return String(id);
-  return (provider === "wallet" ? "w_" : "g_") + String(id);
+  if(provider === "wallet")  return "w_" + String(id);
+  if(provider === "discord") return "d_" + String(id);
+  return "g_" + String(id);
 }
 
 /* Resolve a provider identity to a pid, creating the link + profile on first sight.
@@ -526,6 +530,116 @@ export default {
       const who = await resolvePid(env, "google", payload.sub, nm);
       const token = await issueSession(env, who.pid, who.name, "google");
       return json({ ok: true, token, pid: who.pid, name: who.name, tag: await shortTag(who.pid) }, 200, origin);
+    }
+
+    /* ===================== DISCORD OAUTH2 ==================================
+       Authorization Code grant (docs.discord.com/developers/topics/oauth2).
+       The token exchange needs the client SECRET, so it has to happen here, never
+       in the game.
+
+       The session token is handed back the same way the Phantom bridge does it:
+       the callback stores the result in KV under a client-generated sid and the
+       game polls for it. Redirecting back to the game with the token in the query
+       string would leak it into browser history, the Referer header, and any
+       analytics on the page — a session token is a bearer credential.
+
+       Both halves are switchable: no DISCORD_CLIENT_ID/SECRET means the endpoints
+       report discord_unconfigured and the game hides the button, exactly like the
+       existing google_unconfigured path. ====================================== */
+    const DSID_RE  = /^[a-f0-9]{16,64}$/;
+    const DPEND    = "dpend:";     // dpend:<sid> -> "1"        (state, proves we started it)
+    const DRES     = "dres:";      // dres:<sid>  -> {token,...} (result, one-time read)
+    const DTTL     = 600;          // 10 min to complete a login
+    const discordOn = () => !!(env.DISCORD_CLIENT_ID && env.DISCORD_CLIENT_SECRET);
+    const discordRedirect = () => (env.DISCORD_REDIRECT_URI || (url.origin + "/auth/discord/callback"));
+
+    // What the game can offer. Lets the sign-in sheet hide buttons that cannot work
+    // rather than showing one that fails only after the player clicks it.
+    if(req.method === "GET" && url.pathname === "/auth/providers"){
+      return json({ discord: discordOn(), google: !!env.GOOGLE_CLIENT_ID, wallet: !!env.SESSION_SECRET }, 200, origin);
+    }
+
+    // Step 1 — send the player to Discord. `state` is the sid, and it is recorded in KV
+    // first so the callback can prove the flow started here (CSRF guard).
+    if(req.method === "GET" && url.pathname === "/auth/discord/start"){
+      if(!env.SESSION_SECRET) return json({ error: "login_unconfigured" }, 503, origin);
+      if(!discordOn())        return json({ error: "discord_unconfigured" }, 503, origin);
+      const sid = (url.searchParams.get("sid") || "").trim();
+      if(!DSID_RE.test(sid)) return json({ error: "bad_sid" }, 400, origin);
+      await env.LB.put(DPEND + sid, "1", { expirationTtl: DTTL });
+      const auth = "https://discord.com/oauth2/authorize"
+        + "?client_id=" + encodeURIComponent(env.DISCORD_CLIENT_ID)
+        + "&redirect_uri=" + encodeURIComponent(discordRedirect())
+        + "&response_type=code"
+        + "&scope=" + encodeURIComponent("identify")     // identify only — no email, no guilds
+        + "&state=" + encodeURIComponent(sid)
+        + "&prompt=none";                                 // skip re-consent for returning players
+      return Response.redirect(auth, 302);
+    }
+
+    // Step 2 — Discord sends the player back here with ?code=&state=
+    if(req.method === "GET" && url.pathname === "/auth/discord/callback"){
+      const done = (msg, ok) => new Response(
+        `<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">`+
+        `<body style="background:#0b0f1a;color:#e8f6ff;font-family:system-ui,sans-serif;display:flex;align-items:center;`+
+        `justify-content:center;min-height:100vh;margin:0;text-align:center">`+
+        `<div style="padding:24px;max-width:340px"><div style="font-size:46px">${ok?"🦖":"⚠"}</div>`+
+        `<h2 style="color:${ok?"#39ff7a":"#ff3b5c"};margin:.3em 0">${msg}</h2>`+
+        `<p style="opacity:.75">${ok?"You can close this tab and return to the game.":"Close this tab and try again."}</p></div>`+
+        `<script>setTimeout(function(){try{window.close()}catch(e){}},${ok?1200:4000})</script>`,
+        { status: 200, headers: { "content-type": "text/html; charset=utf-8", "Cache-Control": "no-store" } });
+
+      if(!discordOn()) return done("Discord login is not configured", false);
+      const code  = (url.searchParams.get("code")  || "").trim();
+      const state = (url.searchParams.get("state") || "").trim();
+      if(!code || !DSID_RE.test(state)) return done("Login link was invalid", false);
+      // Burn the state first: it is single-use, so a replayed callback cannot mint a
+      // second session even if the URL is captured.
+      if(!(await env.LB.get(DPEND + state))) return done("Login expired — start again", false);
+      await env.LB.delete(DPEND + state);
+
+      try{
+        const tok = await fetch("https://discord.com/api/oauth2/token", {
+          method: "POST",
+          headers: { "content-type": "application/x-www-form-urlencoded" },
+          body: new URLSearchParams({
+            client_id: env.DISCORD_CLIENT_ID,
+            client_secret: env.DISCORD_CLIENT_SECRET,
+            grant_type: "authorization_code",
+            code,
+            redirect_uri: discordRedirect(),
+          }),
+        }).then(r => r.json());
+        if(!tok || !tok.access_token) return done("Discord rejected the login", false);
+
+        const me = await fetch("https://discord.com/api/users/@me", {
+          headers: { Authorization: "Bearer " + tok.access_token },
+        }).then(r => r.json());
+        if(!me || !me.id) return done("Could not read your Discord profile", false);
+
+        // The handle, not the display name: username is unique account-wide, while
+        // global_name is a free-text nickname two people can share.
+        const nm  = String(me.username || me.global_name || "Player").slice(0, 24);
+        const who = await resolvePid(env, "discord", me.id, nm);
+        const token = await issueSession(env, who.pid, who.name, "discord");
+        await env.LB.put(DRES + state, JSON.stringify({
+          ok: true, token, pid: who.pid, name: who.name, tag: await shortTag(who.pid),
+        }), { expirationTtl: DTTL });
+        return done("Signed in as " + who.name, true);
+      }catch(e){
+        return done("Discord login failed", false);
+      }
+    }
+
+    // Step 3 — the game polls this until the callback lands. One-time read.
+    if(req.method === "GET" && url.pathname === "/auth/discord/result"){
+      const sid = (url.searchParams.get("sid") || "").trim();
+      if(!DSID_RE.test(sid)) return json({ error: "bad_sid" }, 400, origin);
+      const v = await env.LB.get(DRES + sid);
+      if(!v) return json({ ready: false }, 200, origin);
+      await env.LB.delete(DRES + sid);
+      let rec; try{ rec = JSON.parse(v); }catch(_){ rec = {}; }
+      return json({ ready: true, ...rec }, 200, origin);
     }
 
     if(req.method === "GET" && url.pathname === "/auth/me"){

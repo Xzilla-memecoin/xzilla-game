@@ -447,6 +447,9 @@
   .loginWho span{ font-size:9px; color:#9fb6c9; }
   .btn.wallet-login{ background:linear-gradient(135deg,#ff2bd6,#8b2bff); color:#fff; font-size:10px; padding:14px 18px;
     box-shadow:0 0 22px rgba(255,43,214,.5), inset 0 -4px 0 rgba(0,0,0,.22); }
+  /* Discord blurple — the brand colour is the fastest way for a player to recognise it */
+  .btn.discord-login{ background:#5865F2; color:#fff; font-size:10px; padding:14px 18px;
+    box-shadow:0 0 22px rgba(88,101,242,.5), inset 0 -4px 0 rgba(0,0,0,.22); }
   /* second line inside a .btn — the what-happens-next note under a button's label */
   .btnHint{ display:block; font-family:'Orbitron',sans-serif; font-size:8px; letter-spacing:.4px;
     line-height:1.5; margin-top:6px; opacity:.82; text-transform:none; }

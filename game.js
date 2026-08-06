@@ -1160,6 +1160,52 @@ window._adsPayload = "WwogIHsKICAgICJpZCI6ICJ4emlsbGEtaG9tZSIsCiAgICAidGV4dCI6IC
     finally{ resetTurnstile(); }   // tokens are single-use — never resend a spent one
   }
 
+  /* Discord — Authorization Code grant. The exchange needs the client secret, so the
+   * game never sees it: we open the Worker's /auth/discord/start, Discord bounces the
+   * player to /auth/discord/callback, and the Worker parks the finished session in KV
+   * under our sid. We poll for it. That is the same bridge the Phantom connect uses,
+   * and it keeps the session token out of the URL — it is a bearer credential, and a
+   * query string ends up in history, Referer headers and any analytics on the page. */
+  let _discordEnabled = null;                       // null = not asked yet
+  async function discordAvailable(){
+    if(_discordEnabled !== null) return _discordEnabled;
+    const api = lbApi(); if(!api){ _discordEnabled = false; return false; }
+    try{
+      const r = await fetch(api+"/auth/providers",{cache:"no-store"}).then(r=>r.json());
+      _discordEnabled = !!(r && r.discord);
+    }catch(_){ _discordEnabled = false; }
+    return _discordEnabled;
+  }
+
+  let _discordPoll = null;
+  async function loginWithDiscord(){
+    const api = lbApi(); if(!api){ toast("Backend not connected", RED); return false; }
+    const sid = [...crypto.getRandomValues(new Uint8Array(16))].map(b=>b.toString(16).padStart(2,"0")).join("");
+    // Open the window inside the click gesture, or the popup blocker eats it.
+    const w = window.open(api+"/auth/discord/start?sid="+sid, "_blank");
+    if(!w){ toast("Allow pop-ups to sign in with Discord", GOLD); return false; }
+    toast("Finish in the Discord tab…", CYAN);
+
+    clearInterval(_discordPoll);
+    const started = Date.now();
+    return await new Promise(resolve => {
+      _discordPoll = setInterval(async () => {
+        if(Date.now() - started > 180000){          // give up after 3 min
+          clearInterval(_discordPoll); toast("Discord sign-in timed out", RED); resolve(false); return;
+        }
+        let r=null;
+        try{ r = await fetch(api+"/auth/discord/result?sid="+sid,{cache:"no-store"}).then(r=>r.json()); }catch(_){ return; }
+        if(!r || !r.ready) return;                  // still waiting
+        clearInterval(_discordPoll);
+        if(!r.ok || !r.token){ toast("Discord sign-in failed", RED); resolve(false); return; }
+        setAuth(r, "discord");
+        toast("Signed in as "+r.name+" 🦖", TEAL);
+        onAuthChanged();
+        resolve(true);
+      }, 1500);
+    });
+  }
+
   /* Google — the ID token is verified server-side against Google's keys. */
   async function loginWithGoogle(credential){
     const api = lbApi(); if(!api) return false;
@@ -1225,9 +1271,25 @@ window._adsPayload = "WwogIHsKICAgICJpZCI6ICJ4emlsbGEtaG9tZSIsCiAgICAidGV4dCI6IC
       // the old worry that "connect wallet" was about to cost something.
       '<div class="loginPerk">Empty wallet? Still works. Holding $XZILLA also sets your score multiplier — up to ×2</div>'+
       '<div class="loginSub dim">Free signature · no transaction · nothing leaves your wallet</div>'+
+      '<div class="loginOr" id="loginOr" style="display:none">or</div>'+
+      '<button class="btn discord-login" id="loginDiscord" style="display:none">'+
+        '<svg viewBox="0 0 24 18" width="20" height="15" aria-hidden="true" style="vertical-align:-2px;margin-right:8px">'+
+        '<path fill="currentColor" d="M20.3 1.5A19.8 19.8 0 0 0 15.4 0l-.25.5a18.3 18.3 0 0 1 4.3 1.4A17.6 17.6 0 0 0 12 .8a17.6 17.6 0 0 0-7.45 1.1A18.3 18.3 0 0 1 8.85.5L8.6 0A19.8 19.8 0 0 0 3.7 1.5C.6 6.1-.25 10.6.17 15a19.9 19.9 0 0 0 6.05 3l.8-1.35a13 13 0 0 1-2-1l.4-.3a14.2 14.2 0 0 0 12.16 0l.4.3a13 13 0 0 1-2 1L16.8 18a19.9 19.9 0 0 0 6.05-3c.5-5.1-.85-9.55-2.55-13.5ZM8.02 12.3c-1.18 0-2.15-1.08-2.15-2.4S6.82 7.5 8.02 7.5s2.17 1.08 2.15 2.4c0 1.32-.95 2.4-2.15 2.4Zm7.96 0c-1.18 0-2.15-1.08-2.15-2.4s.95-2.4 2.15-2.4 2.17 1.08 2.15 2.4c0 1.32-.95 2.4-2.15 2.4Z"/></svg>'+
+        'SIGN IN WITH DISCORD</button>'+
       (window.__GOOGLE_CLIENT_ID ? '<div class="loginOr">or</div><div id="gsiButton"></div>' : '')+
       (turnstileEnabled() ? '<div id="tsWidget" class="tsWidget"></div>' : '')+
       '<button class="btn secondary small pbtn" id="loginCancel">CLOSE</button>';
+    // Revealed only once the Worker confirms it holds Discord credentials — a button
+    // that always fails is worse than no button.
+    discordAvailable().then(on => {
+      const b=$("loginDiscord"), o=$("loginOr");
+      if(!b || !on) return;
+      b.style.display=""; if(o) o.style.display="";
+      b.onclick = async (ev) => {
+        const t=ev.currentTarget; t.disabled=true;
+        try{ await loginWithDiscord(); } finally { if(t.isConnected) t.disabled=false; }
+      };
+    });
     $("loginWallet").onclick = async (ev) => {
       const b = ev.currentTarget; b.disabled = true; b.textContent = "OPENING WALLET…";
       try{ await loginWithWallet(); } finally { if(b.isConnected){ b.disabled=false; b.textContent="◆ SIGN IN WITH WALLET"; } }
