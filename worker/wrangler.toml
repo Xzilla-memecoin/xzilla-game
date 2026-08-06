@@ -14,6 +14,12 @@ kv_namespaces = [
 # against Google's public keys. Must match GOOGLE_CLIENT_ID in index.html.
 [vars]
 GOOGLE_CLIENT_ID = "812393204247-o0cgfueu8qa2dei79m78mv9hd85op41d.apps.googleusercontent.com"
+# Discord Sign-In. The client id is NOT a secret — it travels in the authorize URL that
+# every player's browser follows. The matching DISCORD_CLIENT_SECRET is a secret and must
+# be set with `npx wrangler secret put DISCORD_CLIENT_SECRET`, never written here.
+# The redirect registered in the Discord app must match byte-for-byte:
+#   https://xzilla-leaderboard.kombainain.workers.dev/auth/discord/callback
+DISCORD_CLIENT_ID = "1534847719171031091"
 
 # SESSION_SECRET is a SECRET — signs web session tokens. Set it with:
 #   npx wrangler secret put SESSION_SECRET
