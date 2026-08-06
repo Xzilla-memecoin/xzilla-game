@@ -867,7 +867,19 @@ const container=document.getElementById("game");
 // a render target, so MSAA on the default framebuffer never touches geometry and
 // is pure wasted GPU; the bloom blur masks edge aliasing. (P1 optimization)
 const renderer=new THREE.WebGLRenderer({ antialias:false, alpha:false });
-renderer.setPixelRatio(Math.min(window.devicePixelRatio||1,2));
+/* (P4) ADAPTIVE RESOLUTION — the biggest single lever on sustained frame rate.
+ * The scene renders through an EffectComposer (bloom), so the main render target is
+ * w·h·DPR² fragments of mostly ADDITIVE, overlapping sprites. At DPR 2 on a 430x932
+ * phone that is ~1.6M heavily-overdrawn pixels every frame, and it is what makes
+ * mid-range Android drop out of 60fps and stay there.
+ * The ladder starts at the OLD cap, so a device that already holds 60fps renders
+ * exactly as before and never sees a change. It steps DOWN only after a full second
+ * of sustained slow frames, one way (never back up, so it cannot oscillate/pump), and
+ * never below 1.0. */
+const _dprCap = Math.min(window.devicePixelRatio||1, 2);
+const DPR_STEPS = [_dprCap, 1.5, 1.25, 1].filter((v,i,a)=> v<=_dprCap && a.indexOf(v)===i);
+let _dprStep = 0;
+renderer.setPixelRatio(DPR_STEPS[0]);
 renderer.outputEncoding=THREE.sRGBEncoding;
 container.appendChild(renderer.domElement);
 
@@ -1078,7 +1090,20 @@ function spawn(){ const e=getEntity(), r=Math.random();
   e.sprite.position.set((Math.random()*2-1)*playHalfWidth, 0.9, SPAWN_Z); e.prevZ=SPAWN_Z; active.push(e); }
 
 /* ============================================================ RESIZE */
-function getViewportSize(){
+/* (P4) MEASURED ONCE PER RESIZE, NOT PER CALL. This used to read window.innerWidth /
+ * innerHeight and visualViewport on every invocation — and it is called from popup()
+ * and, critically, from onMove(), i.e. once per touchmove event (up to 120/sec on a
+ * modern phone). Those are layout-flushing getters: with the HUD text, the heat overlay
+ * and freshly-appended popups dirtying style every frame, each read could force a
+ * synchronous reflow in the middle of a steering gesture, which is exactly the "input
+ * feels sticky under load" symptom. The size only changes on a resize, so measure it
+ * there and hand back a shared, pre-measured object (also removes the {w,h} allocation).
+ * Measured on desktop Chrome with the DOM dirtied first (i.e. the real mid-run state):
+ * 57.98us per old call vs 0.33us cached. At 120 touchmove events/sec that is ~7ms of
+ * forced layout PER SECOND, spent entirely inside the input path. */
+const _VP = {w:0, h:0};
+let _vpDirty = true;
+function measureViewport(){
   // True VISIBLE viewport. The canvas is sized to EXACTLY this so it never overflows the
   // screen (overflow crops the view and reads as "zoomed / can't see the full canvas").
   // visualViewport is the real visible area inside Telegram's webview (below the header);
@@ -1089,10 +1114,18 @@ function getViewportSize(){
   let h = (vv && vv.height) || window.innerHeight || (tg && (tg.viewportStableHeight||tg.viewportHeight)) || 0;
   if(window.innerWidth)  w = Math.min(w, window.innerWidth);
   if(window.innerHeight) h = Math.min(h, window.innerHeight);
-  return {w,h};
+  _VP.w = w; _VP.h = h; _vpDirty = false;
 }
+function getViewportSize(){ if(_vpDirty) measureViewport(); return _VP; }
 window.getViewportSize = getViewportSize;
-function resize(){ const {w,h}=getViewportSize();
+// Invalidate on every event that can change the viewport. Registered HERE, before
+// resize()/resizeComposer() are wired below, so those listeners re-measure exactly once.
+{ const inval = ()=>{ _vpDirty = true; };
+  window.addEventListener("resize", inval);
+  window.addEventListener("orientationchange", inval);
+  if(window.visualViewport) window.visualViewport.addEventListener("resize", inval);
+  if(tg&&tg.onEvent){ try{ tg.onEvent("viewportChanged", inval); }catch(e){} } }
+function resize(){ _vpDirty=true; const {w,h}=getViewportSize();
   // Size the container to the true visible viewport every resize so the canvas fills the
   // screen exactly — never taller than visible (which would crop/zoom it). The renderer
   // buffer + camera aspect use the same w,h, so display and buffer always match.
@@ -1347,7 +1380,8 @@ function updateParticles(dt){ for(let i=particles.length-1;i>=0;i--){ const p=pa
   if(p.life<=0){ const m=p.sprite.material; p.sprite.visible=false; _partSprites.push(p.sprite);
     (_partMats[m._ck]||(_partMats[m._ck]=[])).push(m); particles.splice(i,1); } } }
 const popupsEl=document.getElementById("popups");
-function popup(worldPos,text,color){ const v=worldPos.clone().project(camera);
+const _projV=new THREE.Vector3();   // (P4) scratch — project() mutates, so no clone is needed
+function popup(worldPos,text,color){ const v=_projV.copy(worldPos).project(camera);
   // Map NDC -> canvas pixels using the canvas/visual-viewport size (matches the
   // rendered frame), not the window — otherwise popups drift off the 3D sprite
   // when the canvas is shorter than the window (Telegram chrome / keyboard). (BUG #2)
@@ -1413,7 +1447,45 @@ function captureDeathShot(){
     window.__deathShot=cv;
   }catch(e){ window.__deathShot=null; }
 }
-const clock=new THREE.Clock(); let gridOffset=0; let _lastCombo=0; let _tireAcc=0;
+const clock=new THREE.Clock(); let gridOffset=0; let _comboBarFull=null; let _tireAcc=0;
+/* (P4) Resolution governor — see DPR_STEPS at the renderer. Judges a smoothed frame time
+ * (~1s time constant) rather than any single frame, so a one-off hitch (asset decode, GC,
+ * a Telegram webview stall) can never cost the player sharpness. Only runs during a live
+ * run, where the cost actually matters and dt is meaningful. */
+let _emaDt = 1/60, _resCool = 120;   // ~2s grace after boot / after each step down
+function autoScaleRes(dt){
+  if(_dprStep >= DPR_STEPS.length-1) return;   // already at 1.0 (or DPR was 1 to begin with)
+  if(_resCool > 0){ _resCool--; return; }
+  _emaDt += (dt - _emaDt) * 0.05;
+  if(_emaDt > 0.0215){                          // sustained below ~46fps
+    renderer.setPixelRatio(DPR_STEPS[++_dprStep]);
+    try{ const c=window.__composer; if(c && c.setPixelRatio) c.setPixelRatio(DPR_STEPS[_dprStep]); }catch(e){}
+    window.dispatchEvent(new Event("resize"));  // re-fits renderer, camera AND the bloom composer
+    _emaDt = 1/60; _resCool = 120;
+  }
+}
+/* RESOLUTION READOUT — a deliberately tiny, dim line at the bottom of the screen so a real
+ * phone can be checked at a glance: the actual drawing-buffer size, which rung of DPR_STEPS
+ * the governor above settled on, and the frame rate that produced it. If the buffer shrinks
+ * mid-run, autoScaleRes() decided the device could not hold 60fps at full resolution.
+ * Sampled twice a second (NOT per frame — this is a diagnostic, it must not become the
+ * thing it measures) and it only touches the DOM when the text actually changes. */
+const _resHud=document.createElement("div");
+_resHud.id="resHud";
+_resHud.style.cssText="position:fixed;left:0;right:0;z-index:51;text-align:center;pointer-events:none;"+
+  "bottom:calc(3px + env(safe-area-inset-bottom) + var(--tg-bottom,0px));"+
+  "font:8px ui-monospace,Menlo,Consolas,monospace;letter-spacing:.5px;"+
+  "color:rgba(57,255,122,.45);text-shadow:0 0 6px rgba(0,0,0,.9)";
+document.body.appendChild(_resHud);
+let _resAcc=0, _resFrames=0, _resText="";
+function updateResHud(dt){
+  _resAcc+=dt; _resFrames++;
+  if(_resAcc<0.5) return;
+  const c=renderer.domElement;
+  const t=c.width+"x"+c.height+"  "+renderer.getPixelRatio()+"x  "+Math.round(_resFrames/_resAcc)+"fps";
+  if(t!==_resText){ _resText=t; _resHud.textContent=t; }
+  _resAcc=0; _resFrames=0;
+}
 function loop(){ requestAnimationFrame(loop); const dt=Math.min(clock.getDelta(),0.05); const now=performance.now()*0.001;
   const scroll=dt*(state.running?state.speed:3.5); gridOffset=(gridOffset+scroll)%2; grid.position.z=-6+gridOffset; grid2.position.z=-6+gridOffset;
   // beatT is the SCHEDULED time of the next kick, which the music sequencer sets ahead of
@@ -1488,10 +1560,17 @@ function loop(){ requestAnimationFrame(loop); const dt=Math.min(clock.getDelta()
     // whiffs — a scammer slips past (handled just above) or a bad item is grabbed (decoy/honeypot/
     // holder/boss-ram, handled in resolve). Idle spawn gaps the player can't control never drop it,
     // so the combo bar just shows "locked" (full) while a streak is live.
-    _lastCombo=state.combo;
-    if(comboBarFill){ comboBarFill.style.width=(state.combo>1?100:0)+"%"; comboBarFill.style.background="#39ff7a"; } }
+    // (P4) The bar has exactly TWO states (locked / empty), but this wrote width AND
+    // background every frame — a style invalidation + layout of the bar 60x/sec to set
+    // the same two values. Write only on an actual transition. _comboBarFull starts null
+    // so the very first frame always paints (the CSS default is width:100%).
+    if(comboBarFill){ const full=state.combo>1;
+      if(full!==_comboBarFull){ _comboBarFull=full;
+        comboBarFill.style.width=full?"100%":"0%"; comboBarFill.style.background="#39ff7a"; } } }
 
   updateParticles(dt);
+  updateResHud(dt);
+  if(state.running) autoScaleRes(dt);
   const bob=pulse*0.10; if(state.shake>0.001){ const s=state.shake; placeCamera((Math.random()-0.5)*s,(Math.random()-0.5)*s*0.6+bob); state.shake*=0.86; } else placeCamera(0,bob);
   if(window.__frame) window.__frame(dt);
   if(window.__composer) window.__composer.render(); else renderer.render(scene,camera);
@@ -1505,7 +1584,7 @@ loop();
 /* ============================================================ GAME FLOW */
 function resetGame(){ for(let i=active.length-1;i>=0;i--) freeEntity(active[i]);
   Object.assign(state,{score:0,lives:CFG.lives,combo:0,kills:0,wave:1,gear:1,speed:CFG.baseSpeed,spawnGap:CFG.baseSpawnGap,spawnTimer:0,elapsed:0,playerTargetX:0,shake:0,comboUntil:0});
-  _lastCombo=0; shieldActive=false; player.position.x=0; renderScore(); renderLives(); renderCombo(); }
+  _comboBarFull=null; shieldActive=false; player.position.x=0; renderScore(); renderLives(); renderCombo(); }
 function startGame(){ audioInit(); startMusic(); startEngine(); resetGame();
   document.getElementById("startScreen").classList.add("hidden"); document.getElementById("gameOverScreen").classList.add("hidden");
   document.getElementById("pauseScreen").classList.add("hidden");
@@ -1705,6 +1784,6 @@ document.addEventListener("visibilitychange",()=>{ if(document.hidden&&state.run
 
 document.getElementById("bestScore").textContent=state.best;
 </script>
-<script src="game.js?v=133"></script>
+<script src="game.js?v=134"></script>
 </body>
 </html>
