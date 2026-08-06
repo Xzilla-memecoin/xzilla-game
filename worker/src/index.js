@@ -572,8 +572,10 @@ export default {
         + "&redirect_uri=" + encodeURIComponent(discordRedirect())
         + "&response_type=code"
         + "&scope=" + encodeURIComponent("identify")     // identify only — no email, no guilds
-        + "&state=" + encodeURIComponent(sid)
-        + "&prompt=none";                                 // skip re-consent for returning players
+        + "&state=" + encodeURIComponent(sid);
+        // NO prompt=none. It only skips the screen for someone who has ALREADY authorised
+        // this app, and errors out when interaction is required — which is every player's
+        // first login. The saved re-consent click was never worth risking that.
       return Response.redirect(auth, 302);
     }
 
