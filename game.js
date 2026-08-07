@@ -1734,7 +1734,7 @@ window._adsPayload = "WwogIHsKICAgICJpZCI6ICJ4emlsbGEtaG9tZSIsCiAgICAidGV4dCI6IC
       // bottom: progress toward the next milestone, painted in the band the player is
       // CURRENTLY in \u2014 so the bar changes colour the moment a rank-up moves them a band up.
       (next
-        ? '<div class="mrow" style="margin-top:12px;border-color:'+curColor+'">'+
+        ? '<div class="mrow" data-band="'+curColor+'" style="margin-top:12px;border-color:'+curColor+'">'+
             '<div class="mtop"><span>NEXT \u00b7 '+next.name+'</span><b style="color:'+curColor+'">'+fmt(next.score)+'</b></div>'+
             // Fill runs from the band you are in into the band the NEXT rank belongs to, so
             // the leading edge shows the colour you are climbing toward. Inside a band both
@@ -1743,7 +1743,7 @@ window._adsPayload = "WwogIHsKICAgICJpZCI6ICJ4emlsbGEtaG9tZSIsCiAgICAidGV4dCI6IC
               'background:linear-gradient(90deg,'+curColor+','+rankColor(next)+');'+
               'box-shadow:0 0 10px '+rankColor(next)+'80"></i></div>'+
             '<div class="msub">'+fmt(best)+' / '+fmt(next.score)+' \u00b7 '+fmt(next.score-best)+' to go</div></div>'
-        : '<div class="mrow done" style="margin-top:12px;border-color:'+TEAL+'"><div class="mtop"><span>MAX RANK REACHED \u2605</span><b style="color:'+TEAL+'">XZILLA LEGEND</b></div></div>');
+        : '<div class="mrow done" data-band="'+TEAL+'" style="margin-top:12px;border-color:'+TEAL+'"><div class="mtop"><span>MAX RANK REACHED \u2605</span><b style="color:'+TEAL+'">XZILLA LEGEND</b></div></div>');
   }
 
   /* ===================================================================== *
@@ -1762,6 +1762,8 @@ window._adsPayload = "WwogIHsKICAgICJpZCI6ICJ4emlsbGEtaG9tZSIsCiAgICAidGV4dCI6IC
     thumb.className = "rankThumb";
     panel.appendChild(thumb);
     const H = 34;                      // fixed short thumb, in px
+    const BRIDGE = 26;                 // px of gap between bands to carry the colour across
+    const NEUTRAL = "#4a4270";         // beside content that carries no band at all
 
     /* Colour of the band level with a VIEWPORT y, compared in screen coordinates.
        Deliberately NOT offsetTop/scrollTop arithmetic: offsetTop is measured from the
@@ -1774,11 +1776,15 @@ window._adsPayload = "WwogIHsKICAgICJpZCI6ICJ4emlsbGEtaG9tZSIsCiAgICAidGV4dCI6IC
       let pick=null, bd=Infinity;
       for(const r of rows){
         const b = r.getBoundingClientRect();
-        if(y >= b.top && y <= b.bottom) return r.getAttribute("data-band");   // exact hit wins
-        const d = Math.abs((b.top + b.bottom)/2 - y);                          // else nearest
+        if(y >= b.top && y <= b.bottom) return r.getAttribute("data-band");   // level with it
+        const d = y < b.top ? b.top - y : y - b.bottom;                        // gap to its edge
         if(d < bd){ bd = d; pick = r; }
       }
-      return pick && pick.getAttribute("data-band");
+      // Bridge the few px between rows so the colour doesn't flicker in the gaps, but do NOT
+      // reach for a far-off row: beside the global boards or the NEXT card there is genuinely
+      // no band, and answering "nearest" there is what turned the thumb gold at the bottom of
+      // the list when nothing gold was next to it.
+      return (pick && bd <= BRIDGE) ? pick.getAttribute("data-band") : NEUTRAL;
     }
     function update(){
       const max = sc.scrollHeight - sc.clientHeight;
