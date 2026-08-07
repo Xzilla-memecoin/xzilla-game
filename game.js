@@ -1763,14 +1763,19 @@ window._adsPayload = "WwogIHsKICAgICJpZCI6ICJ4emlsbGEtaG9tZSIsCiAgICAidGV4dCI6IC
     panel.appendChild(thumb);
     const H = 34;                      // fixed short thumb, in px
 
-    // Colour of the band nearest a CONTENT y. Nearest rather than strictly-containing, so
-    // the gaps between bands and the non-milestone blocks above the ladder still resolve
-    // to something sensible.
-    function bandAt(centerY){
+    /* Colour of the band level with a VIEWPORT y, compared in screen coordinates.
+       Deliberately NOT offsetTop/scrollTop arithmetic: offsetTop is measured from the
+       nearest POSITIONED ancestor, and #leaderboardInner is static, so the offsetParent
+       is #leaderboardPanel — whose ~100px of top padding silently shifted every lookup by
+       about two rows. getBoundingClientRect puts the thumb and the rows in the one space
+       the player actually sees, so "level with" cannot drift. */
+    function bandAtScreenY(y){
       const rows = sc.querySelectorAll("[data-band]");
       let pick=null, bd=Infinity;
       for(const r of rows){
-        const d = Math.abs((r.offsetTop + r.offsetHeight/2) - centerY);
+        const b = r.getBoundingClientRect();
+        if(y >= b.top && y <= b.bottom) return r.getAttribute("data-band");   // exact hit wins
+        const d = Math.abs((b.top + b.bottom)/2 - y);                          // else nearest
         if(d < bd){ bd = d; pick = r; }
       }
       return pick && pick.getAttribute("data-band");
@@ -1785,12 +1790,9 @@ window._adsPayload = "WwogIHsKICAgICJpZCI6ICJ4emlsbGEtaG9tZSIsCiAgICAidGV4dCI6IC
       thumb.style.height  = H + "px";
       thumb.style.top     = (r.top + travel) + "px";
       thumb.style.left    = (r.right - 7) + "px";
-      // Colour must come from the row the thumb is LEVEL WITH, not from the middle of the
-      // viewport — those are different points, and using the latter made the thumb show a
-      // colour from halfway down the panel while sitting at the top of the track.
-      // Screen y of the thumb's centre is r.top + travel + H/2; subtract r.top to get the
-      // offset into the visible area, then add scrollTop to land in content coordinates.
-      const c = bandAt(sc.scrollTop + travel + H/2);
+      // Colour comes from whatever row sits at the thumb's own screen height — the same
+      // pixel row the player is comparing it against.
+      const c = bandAtScreenY(r.top + travel + H/2);
       if(c){ thumb.style.background = c; thumb.style.boxShadow = "0 0 10px " + c; }
     }
     sc.addEventListener("scroll", update, { passive:true });
