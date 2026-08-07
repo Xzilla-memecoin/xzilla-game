@@ -1321,9 +1321,16 @@ window._adsPayload = "WwogIHsKICAgICJpZCI6ICJ4emlsbGEtaG9tZSIsCiAgICAidGV4dCI6IC
   const ICON_DISCORD =
     '<svg viewBox="0 0 24 18" width="27" height="20" aria-hidden="true">'+
     '<path fill="currentColor" d="M20.3 1.5A19.8 19.8 0 0 0 15.4 0l-.25.5a18.3 18.3 0 0 1 4.3 1.4A17.6 17.6 0 0 0 12 .8a17.6 17.6 0 0 0-7.45 1.1A18.3 18.3 0 0 1 8.85.5L8.6 0A19.8 19.8 0 0 0 3.7 1.5C.6 6.1-.25 10.6.17 15a19.9 19.9 0 0 0 6.05 3l.8-1.35a13 13 0 0 1-2-1l.4-.3a14.2 14.2 0 0 0 12.16 0l.4.3a13 13 0 0 1-2 1L16.8 18a19.9 19.9 0 0 0 6.05-3c.5-5.1-.85-9.55-2.55-13.5ZM8.02 12.3c-1.18 0-2.15-1.08-2.15-2.4S6.82 7.5 8.02 7.5s2.17 1.08 2.15 2.4c0 1.32-.95 2.4-2.15 2.4Zm7.96 0c-1.18 0-2.15-1.08-2.15-2.4s.95-2.4 2.15-2.4 2.17 1.08 2.15 2.4c0 1.32-.95 2.4-2.15 2.4Z"/></svg>';
+  // Telegram's official roundel rather than a monochrome glyph: this is the mark players
+  // recognise, and the brand blue reads instantly in a grid of four options. Gradient id is
+  // namespaced (xzTgG) because this SVG is injected into the live DOM alongside other inline
+  // SVGs — a bare id like "a" would be a collision waiting to happen.
   const ICON_TELEGRAM =
-    '<svg viewBox="0 0 24 24" width="26" height="26" aria-hidden="true">'+
-    '<path fill="currentColor" d="M21.6 3.3 2.9 10.5c-1.1.4-1.1 1.1-.2 1.4l4.7 1.5 1.8 5.5c.2.6.4.8.8.8.4 0 .6-.2.9-.5l2.3-2.2 4.7 3.5c.9.5 1.5.2 1.7-.8l3.1-14.6c.3-1.2-.4-1.8-1.1-1.5ZM18 6.8 9.3 14.5l-.3 3.4-1.5-4.6L18 6.8Z"/></svg>';
+    '<svg viewBox="0 0 240 240" width="26" height="26" aria-hidden="true">'+
+    '<defs><linearGradient id="xzTgG" x1="120" y1="0" x2="120" y2="240" gradientUnits="userSpaceOnUse">'+
+    '<stop offset="0" stop-color="#2aabee"/><stop offset="1" stop-color="#229ed9"/></linearGradient></defs>'+
+    '<circle cx="120" cy="120" r="120" fill="url(#xzTgG)"/>'+
+    '<path fill="#fff" d="M54.3 118.8c35-15.2 58.3-25.3 70-30.2 33.3-13.9 40.3-16.3 44.8-16.4 1 0 3.2.2 4.7 1.4 1.2 1 1.5 2.3 1.7 3.3.2 1 .4 3.1.2 4.8-1.8 19-9.6 65.1-13.6 86.4-1.7 9-5 12-8.2 12.3-7 .6-12.3-4.6-19-9-10.6-6.9-16.5-11.2-26.8-18-11.9-7.8-4.2-12.1 2.6-19.1 1.8-1.8 32.6-29.9 33.2-32.4.1-.3.1-1.5-.6-2.1-.7-.6-1.7-.4-2.5-.2-1.1.2-18 11.4-50.8 33.6-4.8 3.3-9.2 4.9-13.1 4.8-4.3-.1-12.6-2.4-18.8-4.4-7.6-2.5-13.6-3.8-13.1-8 .3-2.2 3.3-4.4 9.3-6.8Z"/></svg>';
 
   function renderLoginPanel(){
     const host = $("loginInner"); if(!host) return;
