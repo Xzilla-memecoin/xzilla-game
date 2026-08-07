@@ -676,6 +676,13 @@ window._adsPayload = "WwogIHsKICAgICJpZCI6ICJ4emlsbGEtaG9tZSIsCiAgICAidGV4dCI6IC
   // "top tier" to anyone glancing at the bar.
   const RANK_UNRANKED_COLOR = "#9fb6c9";
   function rankColor(title){ return (title && title.c) || RANK_UNRANKED_COLOR; }
+  // The five bands, derived from the table rather than restated — add or recolour a title
+  // and the strip below follows automatically instead of silently disagreeing.
+  const RANK_BANDS = (function(){
+    const b=[];
+    for(const t of SCORE_TITLES){ if(!b.length || b[b.length-1].c!==t.c) b.push({c:t.c, from:t.score}); }
+    return b;
+  })();
   function titleForScore(score){
     // Highest tier whose threshold the score actually clears. Scans every entry and
     // keeps the max-threshold match, so it can never over-rank (e.g. award APEX
@@ -1693,25 +1700,47 @@ window._adsPayload = "WwogIHsKICAgICJpZCI6ICJ4emlsbGEtaG9tZSIsCiAgICAidGV4dCI6IC
       '<h2 class="pnl-title" style="border-color:'+GOLD+';margin-top:4px;">RANK MILESTONES</h2>'+
       '<div class="wcard" style="margin-bottom:10px;display:flex;justify-content:space-between;align-items:center;">'+
         '<span class="hud-label">\u26a1 YOUR XP</span><b style="color:'+TEAL+';font-size:22px">'+fmt(econ.tokens)+'</b></div>'+
-      '<div class="sub" style="margin-bottom:8px;">Best score: '+fmt(best)+' pts \u00b7 <span style="color:'+curColor+'">'+(cur?cur.name:"UNRANKED")+'</span></div>'+
-      SCORE_TITLES.map(t=>{
-        // A reached row wears its OWN band colour, so the five bands are visible as you
-        // scroll and the bar below has something on screen to refer to.
-        const reached = best>=t.score;
-        const col = reached ? t.c : "#9fb6c9";
-        // "14" is the alpha byte of an 8-digit hex (~8%) — the band tint the gold rows used
-        // to get from a hardcoded rgba(255,210,63,.08), now derived from the band colour.
-        return '<div class="lrow" style="'+(reached?'border-color:'+col+';background:'+col+'14;':'opacity:.55;')+'">'+
-          '<span class="lrank" style="color:'+col+'">'+(reached?"\u2605":"\u2022")+'</span>'+
-          '<span class="lname">'+t.name+'</span>'+
-          '<b style="color:'+col+'">'+fmt(t.score)+'</b></div>';
-      }).join("")+
+      '<div class="sub" style="margin-bottom:4px;">Best score: '+fmt(best)+' pts \u00b7 <span style="color:'+curColor+';font-weight:900">'+(cur?cur.name:"UNRANKED")+'</span></div>'+
+      // Band strip: the whole five-colour ramp at a glance, the one you are standing in
+      // lit and the rest knocked back. Without it the bands stay invisible until you have
+      // actually climbed them, which is the state most players are in.
+      '<div style="display:flex;gap:4px;align-items:center;margin-bottom:8px;">'+
+        RANK_BANDS.map(b=>{
+          const on = b.c===curColor;
+          return '<i style="flex:1;border-radius:3px;background:'+b.c+';height:'+(on?"9px":"5px")+';'+
+            'opacity:'+(on?"1":".3")+';'+(on?"box-shadow:0 0 10px "+b.c+";":"")+'"></i>';
+        }).join("")+
+      '</div>'+
+      (function(){
+        // Every row wears its band colour whether or not it is reached: reached rows are
+        // filled and lit, unreached ones keep a dim edge stripe so the ramp still reads.
+        // A gap opens wherever the colour changes, which is what makes the pairs group.
+        let prev=null;
+        return SCORE_TITLES.map(t=>{
+          const reached = best>=t.score, col = t.c;
+          const bandStart = col!==prev; prev = col;
+          // 8-digit hex alpha: 26 ~ 15% fill, 40 ~ 25% glow, 4d ~ 30% edge when unreached.
+          const style = (bandStart?'margin-top:7px;':'')+
+            (reached ? 'border-color:'+col+';background:'+col+'26;box-shadow:0 0 12px '+col+'40;'
+                     : 'border-color:'+col+'4d;opacity:.5;')+
+            'border-left:5px solid '+col+';';      // last, so it wins the left edge either way
+          return '<div class="lrow" style="'+style+'">'+
+            '<span class="lrank" style="color:'+col+'">'+(reached?"\u2605":"\u2022")+'</span>'+
+            '<span class="lname" style="color:'+col+'">'+t.name+'</span>'+
+            '<b style="color:'+col+'">'+fmt(t.score)+'</b></div>';
+        }).join("");
+      })()+
       // bottom: progress toward the next milestone, painted in the band the player is
       // CURRENTLY in \u2014 so the bar changes colour the moment a rank-up moves them a band up.
       (next
         ? '<div class="mrow" style="margin-top:12px;border-color:'+curColor+'">'+
             '<div class="mtop"><span>NEXT \u00b7 '+next.name+'</span><b style="color:'+curColor+'">'+fmt(next.score)+'</b></div>'+
-            '<div class="mbar"><i style="width:'+progPct.toFixed(0)+'%;background:'+curColor+'"></i></div>'+
+            // Fill runs from the band you are in into the band the NEXT rank belongs to, so
+            // the leading edge shows the colour you are climbing toward. Inside a band both
+            // ends are the same colour and it reads as a flat bar, which is the honest signal.
+            '<div class="mbar"><i style="width:'+progPct.toFixed(0)+'%;'+
+              'background:linear-gradient(90deg,'+curColor+','+rankColor(next)+');'+
+              'box-shadow:0 0 10px '+rankColor(next)+'80"></i></div>'+
             '<div class="msub">'+fmt(best)+' / '+fmt(next.score)+' \u00b7 '+fmt(next.score-best)+' to go</div></div>'
         : '<div class="mrow done" style="margin-top:12px;border-color:'+TEAL+'"><div class="mtop"><span>MAX RANK REACHED \u2605</span><b style="color:'+TEAL+'">XZILLA LEGEND</b></div></div>');
   }
