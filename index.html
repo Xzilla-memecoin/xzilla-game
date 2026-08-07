@@ -1020,6 +1020,20 @@ const matScammers=SCAMMERS.map(cfg=>matURLorDraw(cfg.url,(x,S)=>drawScammer(x,S,
   const SPR = window.XZILLA_SPRITES || {};
   const pic = (url, sheetCols) =>
     '<i class="htPic' + (sheetCols ? ' sheet' + sheetCols : '') + '" style="background-image:url(' + url + ')"></i>';
+  // pic() emits an UNQUOTED css url(...), whose token may not contain ' " ( ) or whitespace.
+  // encodeURIComponent leaves ' ( ) alone, so finish the job by hand or the whole
+  // background-image declaration is dropped and the tile renders empty.
+  const svgURI = svg => 'data:image/svg+xml,' + encodeURIComponent(svg)
+    .replace(/'/g, "%27").replace(/\(/g, "%28").replace(/\)/g, "%29");
+  // The rugger "empty promise" bubble is the one dodge-list entry with no image file —
+  // game.js paints it onto a canvas inside a closure we can't reach from here, so this SVG
+  // restates it. Keep the palette in step with promoMats() in game.js if it ever moves.
+  const PROMO_PIC = svgURI(
+    "<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'>" +
+    "<rect x='4' y='11' width='56' height='33' rx='9' fill='#0e0924' stroke='#8b5cff' stroke-width='4'/>" +
+    "<path d='M24 42 L32 55 L40 42 Z' fill='#0e0924'/>" +
+    "<text x='32' y='29' text-anchor='middle' font-family='sans-serif' font-size='15'" +
+    " font-weight='bold' fill='#cdb6ff'>SOON</text></svg>");
   const row = (art, name, desc) =>
     '<div class="htRow">' + art + '<div class="htTxt"><b>' + name + '</b><span>' + desc + '</span></div></div>';
 
@@ -1029,7 +1043,12 @@ const matScammers=SCAMMERS.map(cfg=>matURLorDraw(cfg.url,(x,S)=>drawScammer(x,S,
       row(pic(HOLDER_IMAGE_URL), "HODLER", "Costs a life. A shield eats the hit if you have one") +
       row(pic(SPR.honeypot || ""), "HONEYPOT", "Looks grabbable. It is not — costs a life") +
       row(pic(SPR.fakedrop || ""), "FAKE DROP", "Harmless to your health, but it WIPES your combo") +
-      row(pic(SPR.rugboss || "", 2), "RUG BOSS", "Never ram it. Your auto-cannon does the work — just survive the red candles");
+      row(pic(SPR.rugboss || "", 2), "RUG BOSS", "Never ram it. Your auto-cannon does the work — just survive the red candles") +
+      // Thrown at you rather than driven into you, so they sit after the enemies that throw them.
+      row(pic("images/redcandle.webp"), "RED CANDLE",
+          "The RUG BOSS rains these down. Costs a life — a shield eats one. Your cannon CANNOT shoot them, so steer") +
+      row(pic(PROMO_PIC), "EMPTY PROMISE",
+          "Buzzword bubbles lobbed by ruggers. No damage, but they WIPE your combo. Your cannon can pop these");
     const grab =
       '<div class="htChips">' +
       '<span class="htChip" style="--c:#39ff7a">SHIELD · eats one hit</span>' +
@@ -1784,6 +1803,6 @@ document.addEventListener("visibilitychange",()=>{ if(document.hidden&&state.run
 
 document.getElementById("bestScore").textContent=state.best;
 </script>
-<script src="game.js?v=134"></script>
+<script src="game.js?v=135"></script>
 </body>
 </html>
