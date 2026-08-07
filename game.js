@@ -1724,7 +1724,8 @@ window._adsPayload = "WwogIHsKICAgICJpZCI6ICJ4emlsbGEtaG9tZSIsCiAgICAidGV4dCI6IC
             (reached ? 'border-color:'+col+';background:'+col+'26;box-shadow:0 0 12px '+col+'40;'
                      : 'border-color:'+col+'4d;opacity:.5;')+
             'border-left:5px solid '+col+';';      // last, so it wins the left edge either way
-          return '<div class="lrow" style="'+style+'">'+
+          // data-band is what the panel's scroll thumb reads to recolour itself.
+          return '<div class="lrow" data-band="'+col+'" style="'+style+'">'+
             '<span class="lrank" style="color:'+col+'">'+(reached?"\u2605":"\u2022")+'</span>'+
             '<span class="lname" style="color:'+col+'">'+t.name+'</span>'+
             '<b style="color:'+col+'">'+fmt(t.score)+'</b></div>';
@@ -1744,6 +1745,57 @@ window._adsPayload = "WwogIHsKICAgICJpZCI6ICJ4emlsbGEtaG9tZSIsCiAgICAidGV4dCI6IC
             '<div class="msub">'+fmt(best)+' / '+fmt(next.score)+' \u00b7 '+fmt(next.score-best)+' to go</div></div>'
         : '<div class="mrow done" style="margin-top:12px;border-color:'+TEAL+'"><div class="mtop"><span>MAX RANK REACHED \u2605</span><b style="color:'+TEAL+'">XZILLA LEGEND</b></div></div>');
   }
+
+  /* ===================================================================== *
+   *  RANK PANEL SCROLL THUMB                                              *
+   *  The native scrollbar is hidden (styles.css) and replaced with a SHORT *
+   *  fixed-height thumb that takes the colour of the milestone band it is  *
+   *  currently sitting over. A native thumb can't do either: its length is *
+   *  forced proportional to content, and it can't recolour as you scroll.  *
+   *  pointer-events:none \u2014 this is an indicator, not a drag handle, so     *
+   *  touch scrolling and momentum are untouched.                           *
+   * ===================================================================== */
+  (function rankScrollThumb(){
+    const sc = $("leaderboardInner"), panel = $("leaderboardPanel");
+    if(!sc || !panel || typeof MutationObserver === "undefined") return;
+    const thumb = document.createElement("i");
+    thumb.className = "rankThumb";
+    panel.appendChild(thumb);
+    const H = 34;                      // fixed short thumb, in px
+
+    // Colour of the band nearest the middle of what you're looking at. Nearest rather
+    // than strictly-containing, so the gaps between bands and the non-milestone blocks
+    // above the ladder still resolve to something sensible.
+    function bandAt(centerY){
+      const rows = sc.querySelectorAll("[data-band]");
+      let pick=null, bd=Infinity;
+      for(const r of rows){
+        const d = Math.abs((r.offsetTop + r.offsetHeight/2) - centerY);
+        if(d < bd){ bd = d; pick = r; }
+      }
+      return pick && pick.getAttribute("data-band");
+    }
+    function update(){
+      const max = sc.scrollHeight - sc.clientHeight;
+      if(panel.classList.contains("hidden") || max <= 4){ thumb.style.opacity = "0"; return; }
+      const r = sc.getBoundingClientRect();
+      const p = Math.min(1, Math.max(0, sc.scrollTop / max));
+      thumb.style.opacity = "1";
+      thumb.style.height  = H + "px";
+      thumb.style.top     = (r.top + p * (r.height - H)) + "px";
+      thumb.style.left    = (r.right - 7) + "px";
+      const c = bandAt(sc.scrollTop + sc.clientHeight/2);
+      if(c){ thumb.style.background = c; thumb.style.boxShadow = "0 0 10px " + c; }
+    }
+    sc.addEventListener("scroll", update, { passive:true });
+    panel.addEventListener("scroll", update, { passive:true });   // overlay can scroll on short screens
+    window.addEventListener("resize", update);
+    // The panel re-renders on open and grows again when the async TOP 10 / TOP INVITERS
+    // fetches land, so measuring once is never enough.
+    new MutationObserver(update).observe(sc, { childList:true, subtree:true });
+    window.__rankThumbUpdate = update;
+  })();
+
   function renderSkins(){
     $("skinsInner").innerHTML =
       '<h2 class="pnl-title" style="border-color:'+TEAL+'">SKIN SHOP · '+fmt(econ.tokens)+' XP</h2>'+
