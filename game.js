@@ -1763,9 +1763,9 @@ window._adsPayload = "WwogIHsKICAgICJpZCI6ICJ4emlsbGEtaG9tZSIsCiAgICAidGV4dCI6IC
     panel.appendChild(thumb);
     const H = 34;                      // fixed short thumb, in px
 
-    // Colour of the band nearest the middle of what you're looking at. Nearest rather
-    // than strictly-containing, so the gaps between bands and the non-milestone blocks
-    // above the ladder still resolve to something sensible.
+    // Colour of the band nearest a CONTENT y. Nearest rather than strictly-containing, so
+    // the gaps between bands and the non-milestone blocks above the ladder still resolve
+    // to something sensible.
     function bandAt(centerY){
       const rows = sc.querySelectorAll("[data-band]");
       let pick=null, bd=Infinity;
@@ -1780,11 +1780,17 @@ window._adsPayload = "WwogIHsKICAgICJpZCI6ICJ4emlsbGEtaG9tZSIsCiAgICAidGV4dCI6IC
       if(panel.classList.contains("hidden") || max <= 4){ thumb.style.opacity = "0"; return; }
       const r = sc.getBoundingClientRect();
       const p = Math.min(1, Math.max(0, sc.scrollTop / max));
+      const travel = p * (r.height - H);            // thumb offset down the track, in px
       thumb.style.opacity = "1";
       thumb.style.height  = H + "px";
-      thumb.style.top     = (r.top + p * (r.height - H)) + "px";
+      thumb.style.top     = (r.top + travel) + "px";
       thumb.style.left    = (r.right - 7) + "px";
-      const c = bandAt(sc.scrollTop + sc.clientHeight/2);
+      // Colour must come from the row the thumb is LEVEL WITH, not from the middle of the
+      // viewport — those are different points, and using the latter made the thumb show a
+      // colour from halfway down the panel while sitting at the top of the track.
+      // Screen y of the thumb's centre is r.top + travel + H/2; subtract r.top to get the
+      // offset into the visible area, then add scrollTop to land in content coordinates.
+      const c = bandAt(sc.scrollTop + travel + H/2);
       if(c){ thumb.style.background = c; thumb.style.boxShadow = "0 0 10px " + c; }
     }
     sc.addEventListener("scroll", update, { passive:true });
