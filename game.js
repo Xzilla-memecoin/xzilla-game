@@ -654,18 +654,28 @@ window._adsPayload = "WwogIHsKICAgICJpZCI6ICJ4emlsbGEtaG9tZSIsCiAgICAidGV4dCI6IC
   // OVERCLOCK, faster gears) inflated scores — the old top rank (18k) was trivial once a
   // player had upgrades. Early ranks stay gentle for newcomers; the top end stretches so
   // XZILLA LEGEND (100k) is a real endgame achievement again.
+  /* `c` groups the ten titles into five colour bands, two ranks each, on the SAME
+     grey -> teal -> cyan -> magenta -> gold ramp the holder TIERS table uses. One ramp for
+     "how far up are you" across the whole game, so a colour means the same thing in the
+     rank panel as it does on a leaderboard badge. Purely additive — every other consumer
+     of this table reads only .name/.score. */
   const SCORE_TITLES = [
-    {score:300,    name:"SCAM SPOTTER"},
-    {score:900,    name:"RUG DODGER"},
-    {score:2000,   name:"FUD SLAYER"},
-    {score:4500,   name:"KOL CRUSHER"},
-    {score:9000,   name:"DEGEN DESTROYER"},
-    {score:16000,  name:"WHALE WRECKER"},
-    {score:28000,  name:"CHAIN GUARDIAN"},
-    {score:45000,  name:"KAIJU AWAKENED"},
-    {score:68000,  name:"APEX PREDATOR"},
-    {score:100000, name:"XZILLA LEGEND"}
+    {score:300,    name:"SCAM SPOTTER",    c:"#9fb6c9"},
+    {score:900,    name:"RUG DODGER",      c:"#9fb6c9"},
+    {score:2000,   name:"FUD SLAYER",      c:TEAL},
+    {score:4500,   name:"KOL CRUSHER",     c:TEAL},
+    {score:9000,   name:"DEGEN DESTROYER", c:CYAN},
+    {score:16000,  name:"WHALE WRECKER",   c:CYAN},
+    {score:28000,  name:"CHAIN GUARDIAN",  c:MAG},
+    {score:45000,  name:"KAIJU AWAKENED",  c:MAG},
+    {score:68000,  name:"APEX PREDATOR",   c:GOLD},
+    {score:100000, name:"XZILLA LEGEND",   c:GOLD}
   ];
+  // Colour of the band the player is standing in. Unranked (below the first milestone)
+  // sits in the bottom grey band rather than falling back to gold, which would read as
+  // "top tier" to anyone glancing at the bar.
+  const RANK_UNRANKED_COLOR = "#9fb6c9";
+  function rankColor(title){ return (title && title.c) || RANK_UNRANKED_COLOR; }
   function titleForScore(score){
     // Highest tier whose threshold the score actually clears. Scans every entry and
     // keeps the max-threshold match, so it can never over-rank (e.g. award APEX
@@ -1678,23 +1688,30 @@ window._adsPayload = "WwogIHsKICAgICJpZCI6ICJ4emlsbGEtaG9tZSIsCiAgICAidGV4dCI6IC
     }
     const floor = cur ? cur.score : 0;
     const progPct = next ? Math.max(0, Math.min(100, ((best-floor)/(next.score-floor))*100)) : 100;
+    const curColor = rankColor(cur);          // band the player is standing in (grey when unranked)
     $("leaderboardInner").innerHTML =
       '<h2 class="pnl-title" style="border-color:'+GOLD+';margin-top:4px;">RANK MILESTONES</h2>'+
       '<div class="wcard" style="margin-bottom:10px;display:flex;justify-content:space-between;align-items:center;">'+
         '<span class="hud-label">\u26a1 YOUR XP</span><b style="color:'+TEAL+';font-size:22px">'+fmt(econ.tokens)+'</b></div>'+
-      '<div class="sub" style="margin-bottom:8px;">Best score: '+fmt(best)+' pts \u00b7 <span style="color:'+GOLD+'">'+(cur?cur.name:"UNRANKED")+'</span></div>'+
+      '<div class="sub" style="margin-bottom:8px;">Best score: '+fmt(best)+' pts \u00b7 <span style="color:'+curColor+'">'+(cur?cur.name:"UNRANKED")+'</span></div>'+
       SCORE_TITLES.map(t=>{
+        // A reached row wears its OWN band colour, so the five bands are visible as you
+        // scroll and the bar below has something on screen to refer to.
         const reached = best>=t.score;
-        return '<div class="lrow" style="'+(reached?'border-color:'+GOLD+';background:rgba(255,210,63,.08);':'opacity:.55;')+'">'+
-          '<span class="lrank" style="color:'+(reached?GOLD:'#9fb6c9')+'">'+(reached?"\u2605":"\u2022")+'</span>'+
+        const col = reached ? t.c : "#9fb6c9";
+        // "14" is the alpha byte of an 8-digit hex (~8%) — the band tint the gold rows used
+        // to get from a hardcoded rgba(255,210,63,.08), now derived from the band colour.
+        return '<div class="lrow" style="'+(reached?'border-color:'+col+';background:'+col+'14;':'opacity:.55;')+'">'+
+          '<span class="lrank" style="color:'+col+'">'+(reached?"\u2605":"\u2022")+'</span>'+
           '<span class="lname">'+t.name+'</span>'+
-          '<b style="color:'+(reached?GOLD:'#9fb6c9')+'">'+fmt(t.score)+'</b></div>';
+          '<b style="color:'+col+'">'+fmt(t.score)+'</b></div>';
       }).join("")+
-      // bottom: progress toward the next milestone
+      // bottom: progress toward the next milestone, painted in the band the player is
+      // CURRENTLY in \u2014 so the bar changes colour the moment a rank-up moves them a band up.
       (next
-        ? '<div class="mrow" style="margin-top:12px;border-color:'+GOLD+'">'+
-            '<div class="mtop"><span>NEXT \u00b7 '+next.name+'</span><b style="color:'+GOLD+'">'+fmt(next.score)+'</b></div>'+
-            '<div class="mbar"><i style="width:'+progPct.toFixed(0)+'%;background:'+GOLD+'"></i></div>'+
+        ? '<div class="mrow" style="margin-top:12px;border-color:'+curColor+'">'+
+            '<div class="mtop"><span>NEXT \u00b7 '+next.name+'</span><b style="color:'+curColor+'">'+fmt(next.score)+'</b></div>'+
+            '<div class="mbar"><i style="width:'+progPct.toFixed(0)+'%;background:'+curColor+'"></i></div>'+
             '<div class="msub">'+fmt(best)+' / '+fmt(next.score)+' \u00b7 '+fmt(next.score-best)+' to go</div></div>'
         : '<div class="mrow done" style="margin-top:12px;border-color:'+TEAL+'"><div class="mtop"><span>MAX RANK REACHED \u2605</span><b style="color:'+TEAL+'">XZILLA LEGEND</b></div></div>');
   }
