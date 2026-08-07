@@ -1664,14 +1664,14 @@ window._adsPayload = "WwogIHsKICAgICJpZCI6ICJ4emlsbGEtaG9tZSIsCiAgICAidGV4dCI6IC
     const dailyHtml =
       '<h2 class="pnl-title" style="border-color:'+GOLD+'">DAILY CHALLENGE</h2>'+
       '<div class="dailyTop">🔥 STREAK <b>'+(econ.streak||0)+' day'+((econ.streak||0)===1?'':'s')+'</b></div>'+
-      '<div class="mrow'+(daily.done?' done':'')+'" style="border-color:'+(daily.done?TEAL:GOLD)+'">'+
+      '<div class="mrow'+(daily.done?' done':'')+'" data-band="'+(daily.done?TEAL:GOLD)+'" style="border-color:'+(daily.done?TEAL:GOLD)+'">'+
         '<div class="mtop"><span>'+daily.text+'</span><b style="color:'+(daily.done?TEAL:GOLD)+'">+'+fmt(daily.reward)+' XP'+(daily.done?' ✓':'')+'</b></div>'+
         '<div class="mbar"><i style="width:'+dpct+'%;background:'+(daily.done?TEAL:GOLD)+'"></i></div>'+
         '<div class="msub">'+fmt(Math.min(daily.prog,daily.goal))+' / '+fmt(daily.goal)+' · '+(daily.done?'claimed · ':'')+'resets daily</div></div>';
     const wpct=Math.min(100,(weekly.prog/weekly.goal)*100);
     const weeklyHtml =
       '<h2 class="pnl-title" style="border-color:'+MAG+';margin-top:16px;">WEEKLY CHALLENGE</h2>'+
-      '<div class="mrow'+(weekly.done?' done':'')+'" style="border-color:'+(weekly.done?TEAL:MAG)+'">'+
+      '<div class="mrow'+(weekly.done?' done':'')+'" data-band="'+(weekly.done?TEAL:MAG)+'" style="border-color:'+(weekly.done?TEAL:MAG)+'">'+
         '<div class="mtop"><span>'+weekly.text+'</span><b style="color:'+(weekly.done?TEAL:MAG)+'">+'+fmt(weekly.reward)+' XP'+(weekly.done?' ✓':'')+'</b></div>'+
         '<div class="mbar"><i style="width:'+wpct+'%;background:'+(weekly.done?TEAL:MAG)+'"></i></div>'+
         '<div class="msub">'+fmt(Math.min(weekly.prog,weekly.goal))+' / '+fmt(weekly.goal)+' · '+(weekly.done?'claimed · ':'')+'resets weekly</div></div>';
@@ -1680,7 +1680,7 @@ window._adsPayload = "WwogIHsKICAgICJpZCI6ICJ4emlsbGEtaG9tZSIsCiAgICAidGV4dCI6IC
       '<h2 class="pnl-title" style="border-color:'+TEAL+';margin-top:16px;">BOUNTIES</h2>'+
       missions.map(m=>{
         const pct=Math.min(100,(m.prog/m.goal)*100);
-        return '<div class="mrow'+(m.done?' done':'')+'">'+
+        return '<div class="mrow'+(m.done?' done':'')+'" data-band="'+(m.done?TEAL:GOLD)+'">'+
           '<div class="mtop"><span>'+m.text+'</span><b style="color:'+(m.done?TEAL:GOLD)+'">+'+fmt(m.reward)+' XP'+(m.done?' ✓':'')+'</b></div>'+
           '<div class="mbar"><i style="width:'+pct+'%;background:'+(m.done?TEAL:MAG)+'"></i></div>'+
           '<div class="msub">'+fmt(Math.min(m.prog,m.goal))+' / '+fmt(m.goal)+(m.done?' · claimed':'')+'</div></div>';
@@ -1747,30 +1747,31 @@ window._adsPayload = "WwogIHsKICAgICJpZCI6ICJ4emlsbGEtaG9tZSIsCiAgICAidGV4dCI6IC
   }
 
   /* ===================================================================== *
-   *  RANK PANEL SCROLL THUMB                                              *
-   *  The native scrollbar is hidden (styles.css) and replaced with a SHORT *
-   *  fixed-height thumb that takes the colour of the milestone band it is  *
-   *  currently sitting over. A native thumb can't do either: its length is *
-   *  forced proportional to content, and it can't recolour as you scroll.  *
-   *  pointer-events:none \u2014 this is an indicator, not a drag handle, so     *
-   *  touch scrolling and momentum are untouched.                           *
+   *  PANEL SCROLL THUMBS                                                   *
+   *  Every menu panel hides its native scrollbar (styles.css) and gets a    *
+   *  SHORT fixed-height thumb that takes the colour of whatever [data-band] *
+   *  block it is level with. A native thumb can do neither: its length is   *
+   *  forced proportional to content, and it cannot recolour as you scroll.  *
+   *  pointer-events:none — an indicator, not a drag handle, so touch        *
+   *  scrolling and momentum are untouched.                                  *
    * ===================================================================== */
-  (function rankScrollThumb(){
-    const sc = $("leaderboardInner"), panel = $("leaderboardPanel");
-    if(!sc || !panel || typeof MutationObserver === "undefined") return;
+  const THUMB_H = 34;                // fixed short thumb, in px
+  const THUMB_BRIDGE = 26;           // px of gap between blocks to carry a colour across
+  const THUMB_NEUTRAL = "#4a4270";   // beside content that carries no band at all
+
+  function attachScrollThumb(panelId, innerId){
+    const sc = $(innerId), panel = $(panelId);
+    if(!sc || !panel || typeof MutationObserver === "undefined") return null;
     const thumb = document.createElement("i");
     thumb.className = "rankThumb";
     panel.appendChild(thumb);
-    const H = 34;                      // fixed short thumb, in px
-    const BRIDGE = 26;                 // px of gap between bands to carry the colour across
-    const NEUTRAL = "#4a4270";         // beside content that carries no band at all
 
-    /* Colour of the band level with a VIEWPORT y, compared in screen coordinates.
+    /* Colour of the block level with a VIEWPORT y, compared in screen coordinates.
        Deliberately NOT offsetTop/scrollTop arithmetic: offsetTop is measured from the
-       nearest POSITIONED ancestor, and #leaderboardInner is static, so the offsetParent
-       is #leaderboardPanel — whose ~100px of top padding silently shifted every lookup by
-       about two rows. getBoundingClientRect puts the thumb and the rows in the one space
-       the player actually sees, so "level with" cannot drift. */
+       nearest POSITIONED ancestor, and .panelInner is static, so the offsetParent is the
+       .overlay — whose ~100px of top padding silently shifted every lookup by about two
+       rows. getBoundingClientRect puts the thumb and the blocks in the one space the
+       player actually sees, so "level with" cannot drift. */
     function bandAtScreenY(y){
       const rows = sc.querySelectorAll("[data-band]");
       let pick=null, bd=Infinity;
@@ -1780,35 +1781,47 @@ window._adsPayload = "WwogIHsKICAgICJpZCI6ICJ4emlsbGEtaG9tZSIsCiAgICAidGV4dCI6IC
         const d = y < b.top ? b.top - y : y - b.bottom;                        // gap to its edge
         if(d < bd){ bd = d; pick = r; }
       }
-      // Bridge the few px between rows so the colour doesn't flicker in the gaps, but do NOT
-      // reach for a far-off row: beside the global boards or the NEXT card there is genuinely
-      // no band, and answering "nearest" there is what turned the thumb gold at the bottom of
+      // Bridge the few px between blocks so the colour doesn't flicker in the gaps, but do
+      // NOT reach for a far-off one: beside an untagged block there is genuinely no band,
+      // and answering "nearest" there is what turned the rank thumb gold at the bottom of
       // the list when nothing gold was next to it.
-      return (pick && bd <= BRIDGE) ? pick.getAttribute("data-band") : NEUTRAL;
+      return (pick && bd <= THUMB_BRIDGE) ? pick.getAttribute("data-band") : THUMB_NEUTRAL;
     }
     function update(){
       const max = sc.scrollHeight - sc.clientHeight;
       if(panel.classList.contains("hidden") || max <= 4){ thumb.style.opacity = "0"; return; }
       const r = sc.getBoundingClientRect();
       const p = Math.min(1, Math.max(0, sc.scrollTop / max));
-      const travel = p * (r.height - H);            // thumb offset down the track, in px
+      const travel = p * (r.height - THUMB_H);      // thumb offset down the track, in px
       thumb.style.opacity = "1";
-      thumb.style.height  = H + "px";
+      thumb.style.height  = THUMB_H + "px";
       thumb.style.top     = (r.top + travel) + "px";
       thumb.style.left    = (r.right - 7) + "px";
-      // Colour comes from whatever row sits at the thumb's own screen height — the same
+      // Colour comes from whatever block sits at the thumb's own screen height — the same
       // pixel row the player is comparing it against.
-      const c = bandAtScreenY(r.top + travel + H/2);
+      const c = bandAtScreenY(r.top + travel + THUMB_H/2);
       if(c){ thumb.style.background = c; thumb.style.boxShadow = "0 0 10px " + c; }
     }
     sc.addEventListener("scroll", update, { passive:true });
-    panel.addEventListener("scroll", update, { passive:true });   // overlay can scroll on short screens
+    panel.addEventListener("scroll", update, { passive:true });   // overlay scrolls on short screens
     window.addEventListener("resize", update);
-    // The panel re-renders on open and grows again when the async TOP 10 / TOP INVITERS
-    // fetches land, so measuring once is never enough.
+    // Panels re-render on open and grow again when async fetches land, so measuring once
+    // is never enough.
     new MutationObserver(update).observe(sc, { childList:true, subtree:true });
-    window.__rankThumbUpdate = update;
-  })();
+    return update;
+  }
+
+  // Every scrollable menu panel. Untagged content simply leaves the thumb neutral.
+  const THUMB_PANELS = [
+    ["leaderboardPanel","leaderboardInner"], ["missionsPanel","missionsInner"],
+    ["skinsPanel","skinsInner"], ["howtoPanel","howtoInner"],
+    ["walletPanel","walletInner"], ["loginPanel","loginInner"],
+  ];
+  window.__thumbUpdates = THUMB_PANELS.map(p => attachScrollThumb(p[0], p[1])).filter(Boolean);
+  // The UPGRADES panel is built at runtime (ensureUpgradeTab) and does not exist yet, so it
+  // attaches itself there rather than appearing in the table above.
+  window.__attachScrollThumb = attachScrollThumb;
+  window.__rankThumbUpdate = window.__thumbUpdates[0];   // kept: the rank panel's own updater
 
   function renderSkins(){
     $("skinsInner").innerHTML =
@@ -1820,7 +1833,10 @@ window._adsPayload = "WwogIHsKICAgICJpZCI6ICJ4emlsbGEtaG9tZSIsCiAgICAidGV4dCI6IC
         const tint=s.tint||"#39ff7a";
         const label = eq?"EQUIPPED" : owned?"EQUIP" : rankLocked?("🔒 "+s.rankName) : s.cost===0?"FREE":fmt(s.cost);
         const bcol  = eq?TEAL : owned?MAG : rankLocked?GOLD : can?TEAL:"#444";
-        return '<div class="scard'+(eq?' eq':'')+(rankLocked?' locked':'')+'" style="border-color:'+(eq?TEAL:rankLocked?"rgba(255,210,63,.4)":"#2a2150")+'">'+
+        // data-band feeds the panel's scroll thumb. The grid is two columns, so a row of
+        // cards has two tints; the thumb takes whichever card it is level with first, i.e.
+        // the left one — predictable, and there is no single "correct" colour for a row.
+        return '<div class="scard'+(eq?' eq':'')+(rankLocked?' locked':'')+'" data-band="'+tint+'" style="border-color:'+(eq?TEAL:rankLocked?"rgba(255,210,63,.4)":"#2a2150")+'">'+
           '<div class="sprev" style="filter:drop-shadow(0 0 12px '+tint+')'+(rankLocked?';opacity:.5':'')+'">🦖</div>'+
           '<div class="sname">'+s.name+'</div>'+
           '<button class="sbuy" data-skin="'+s.id+'" '+(!owned&&!can&&!rankLocked?"disabled":"")+
@@ -3261,6 +3277,10 @@ window._adsPayload = "WwogIHsKICAgICJpZCI6ICJ4emlsbGEtaG9tZSIsCiAgICAidGV4dCI6IC
         document.body.appendChild(pan);
       }
       PANELS.UPGRADES = "upgradesPanel";
+      // Built after the static panel table ran, so wire its scroll thumb here — otherwise
+      // UPGRADE is the one menu left with no slider at all.
+      try{ const u = window.__attachScrollThumb && window.__attachScrollThumb("upgradesPanel","upgradesInner");
+           if(u) window.__thumbUpdates.push(u); }catch(_){}
     })();
 
     // hook showTab so UPGRADES renders (wrap the in-scope showTab)
@@ -3299,7 +3319,7 @@ window._adsPayload = "WwogIHsKICAgICJpZCI6ICJ4emlsbGEtaG9tZSIsCiAgICAidGV4dCI6IC
           const pips = Array.from({length:u.max},(_,k)=>
             '<span style="display:inline-block;width:14px;height:8px;margin-right:3px;border-radius:3px;'+
             'background:'+(k<cur?accent:"#2a2150")+'"></span>').join("");
-          return head + '<div class="mrow'+(maxed?' done':'')+(u.elite?'" style="border-color:'+(maxed?TEAL:MAG):'')+'">'+
+          return head + '<div class="mrow'+(maxed?' done':'')+'" data-band="'+(maxed?TEAL:accent)+(u.elite?'" style="border-color:'+(maxed?TEAL:MAG):'')+'">'+
             '<div class="mtop"><span>'+(u.elite?'⚡ ':'')+u.name+'</span><b style="color:'+(maxed?TEAL:accent)+'">'+
               (maxed?"MAX":fmt(cost)+" XP")+'</b></div>'+
             '<div class="msub" style="text-align:left">'+u.desc+'</div>'+
@@ -3347,7 +3367,9 @@ window._adsPayload = "WwogIHsKICAgICJpZCI6ICJ4emlsbGEtaG9tZSIsCiAgICAidGV4dCI6IC
           const dupes = dupeNamesIn(list);
           el.className=""; el.innerHTML=list.map((e,i)=>{
             const t  = titleForScore(e.score);   // each player's rank milestone, derived from their score
-            return '<div class="lrow'+(isMe(e)?' you':'')+'">'+
+            // Each board row wears its own rank-milestone band, so the thumb keeps changing
+            // colour through the global board instead of sitting neutral for half the panel.
+            return '<div class="lrow'+(isMe(e)?' you':'')+'" data-band="'+(t?t.c:"#9fb6c9")+'">'+
               '<span class="lrank">#'+(i+1)+'</span>'+
               '<span class="lname">'+boardName(e,dupes)+holderBadge(e)+
                 (t?' · <span style="color:'+GOLD+'">'+t.name+'</span>':'')+'</span>'+

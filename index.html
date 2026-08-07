@@ -16,7 +16,7 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@500;700;900&family=Press+Start+2P&display=swap" rel="stylesheet">
 
-<link rel="stylesheet" href="styles.css?v=49">
+<link rel="stylesheet" href="styles.css?v=50">
 </head>
 <body>
   <div id="game"></div>
@@ -1034,38 +1034,48 @@ const matScammers=SCAMMERS.map(cfg=>matURLorDraw(cfg.url,(x,S)=>drawScammer(x,S,
     "<path d='M24 42 L32 55 L40 42 Z' fill='#0e0924'/>" +
     "<text x='32' y='29' text-anchor='middle' font-family='sans-serif' font-size='15'" +
     " font-weight='bold' fill='#cdb6ff'>SOON</text></svg>");
-  const row = (art, name, desc) =>
-    '<div class="htRow">' + art + '<div class="htTxt"><b>' + name + '</b><span>' + desc + '</span></div></div>';
+  // `band` feeds the panel's scroll thumb (attachScrollThumb in game.js): the thumb takes
+  // the colour of whichever block it is level with, so the section you are scrolled to is
+  // readable from the scrollbar alone. Green = smash, red = dodge, cyan = you.
+  // One colour PER ROW rather than per section: with a whole section sharing a colour the
+  // scroll thumb barely changed, which is what made this panel feel dead next to QUESTS.
+  // Smash rows reuse each scammer's own c1, so the thumb matches the art beside it.
+  const YOU_C = "#21e6ff";
+  const DODGE_C = { HODLER:"#21e6ff", HONEYPOT:"#ffd23f", "FAKE DROP":"#ff2bd6",
+                    "RUG BOSS":"#ff3b5c", "RED CANDLE":"#ff6480", "EMPTY PROMISE":"#8b5cff" };
+  const row = (art, name, desc, band) =>
+    '<div class="htRow"' + (band ? ' data-band="' + band + '"' : '') + '>' +
+    art + '<div class="htTxt"><b>' + name + '</b><span>' + desc + '</span></div></div>';
 
   function build(){
-    const smash = SCAMMERS.map(s => row(pic(s.url), s.label, "Ride into it — scores points and grows your combo")).join("");
+    const smash = SCAMMERS.map(s => row(pic(s.url), s.label, "Ride into it — scores points and grows your combo", s.c1)).join("");
     const dodge =
-      row(pic(HOLDER_IMAGE_URL), "HODLER", "Costs a life. A shield eats the hit if you have one") +
-      row(pic(SPR.honeypot || ""), "HONEYPOT", "Looks grabbable. It is not — costs a life") +
-      row(pic(SPR.fakedrop || ""), "FAKE DROP", "Harmless to your health, but it WIPES your combo") +
-      row(pic(SPR.rugboss || "", 2), "RUG BOSS", "Never ram it. Your auto-cannon does the work — just survive the red candles") +
+      row(pic(HOLDER_IMAGE_URL), "HODLER", "Costs a life. A shield eats the hit if you have one", DODGE_C["HODLER"]) +
+      row(pic(SPR.honeypot || ""), "HONEYPOT", "Looks grabbable. It is not — costs a life", DODGE_C["HONEYPOT"]) +
+      row(pic(SPR.fakedrop || ""), "FAKE DROP", "Harmless to your health, but it WIPES your combo", DODGE_C["FAKE DROP"]) +
+      row(pic(SPR.rugboss || "", 2), "RUG BOSS", "Never ram it. Your auto-cannon does the work — just survive the red candles", DODGE_C["RUG BOSS"]) +
       // Thrown at you rather than driven into you, so they sit after the enemies that throw them.
       row(pic("images/redcandle.webp"), "RED CANDLE",
-          "The RUG BOSS rains these down. Costs a life — a shield eats one. Your cannon CANNOT shoot them, so steer") +
+          "The RUG BOSS rains these down. Costs a life — a shield eats one. Your cannon CANNOT shoot them, so steer", DODGE_C["RED CANDLE"]) +
       row(pic(PROMO_PIC), "EMPTY PROMISE",
-          "Buzzword bubbles lobbed by ruggers. No damage, but they WIPE your combo. Your cannon can pop these");
+          "Buzzword bubbles lobbed by ruggers. No damage, but they WIPE your combo. Your cannon can pop these", DODGE_C["EMPTY PROMISE"]);
     const grab =
       '<div class="htChips">' +
-      '<span class="htChip" style="--c:#39ff7a">SHIELD · eats one hit</span>' +
-      '<span class="htChip" style="--c:#ff3b5c">HEART · +1 life</span>' +
-      '<span class="htChip" style="--c:#ffd23f">BOMB · clears every scammer</span>' +
-      '<span class="htChip" style="--c:#ffd23f">×2 · double score</span>' +
-      '<span class="htChip" style="--c:#7df9ff">SLOW-MO</span>' +
-      '<span class="htChip" style="--c:#ff2bd6">MAGNET</span>' +
-      '<span class="htChip" style="--c:#c0ff3a">TRI-CANNON</span>' +
-      '<span class="htChip" style="--c:#ff8a3a">ROCKETS</span>' +
+      '<span class="htChip" data-band="#39ff7a" style="--c:#39ff7a">SHIELD · eats one hit</span>' +
+      '<span class="htChip" data-band="#ff3b5c" style="--c:#ff3b5c">HEART · +1 life</span>' +
+      '<span class="htChip" data-band="#ffd23f" style="--c:#ffd23f">BOMB · clears every scammer</span>' +
+      '<span class="htChip" data-band="#ffd23f" style="--c:#ffd23f">×2 · double score</span>' +
+      '<span class="htChip" data-band="#7df9ff" style="--c:#7df9ff">SLOW-MO</span>' +
+      '<span class="htChip" data-band="#ff2bd6" style="--c:#ff2bd6">MAGNET</span>' +
+      '<span class="htChip" data-band="#c0ff3a" style="--c:#c0ff3a">TRI-CANNON</span>' +
+      '<span class="htChip" data-band="#ff8a3a" style="--c:#ff8a3a">ROCKETS</span>' +
       '</div>';
 
     document.getElementById("howtoInner").innerHTML =
       '<h2 class="pnl-title">HOW TO PLAY</h2>' +
       '<div class="htLead">You are <b>XRIDER</b>. Smash the scams, dodge everything that sounds friendly.</div>' +
       row('<i class="htPic" style="background-image:url(' + XZILLA_BACK_IMAGE_URL + ')"></i>', "YOU",
-          "Mouse or swipe to steer. On phone you can tap TILT and lean instead") +
+          "Mouse or swipe to steer. On phone you can tap TILT and lean instead", YOU_C) +
       '<div class="htHead good">SMASH THESE</div>' + smash +
       '<div class="htHead bad">DODGE THESE</div>' + dodge +
       '<div class="htHead">GRAB THESE</div>' + grab +
@@ -1803,6 +1813,6 @@ document.addEventListener("visibilitychange",()=>{ if(document.hidden&&state.run
 
 document.getElementById("bestScore").textContent=state.best;
 </script>
-<script src="game.js?v=141"></script>
+<script src="game.js?v=143"></script>
 </body>
 </html>

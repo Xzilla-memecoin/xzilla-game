@@ -198,11 +198,11 @@
   .panel{ justify-content:flex-start; padding-top:calc(74px + env(safe-area-inset-top)); }
   .panelInner{ width:100%; max-width:420px; display:flex; flex-direction:column; gap:10px;
     max-height:82vh; overflow-y:auto; padding:0 4px 20px; }
-  /* RANK panel only: the native scrollbar is replaced by .rankThumb (see rankScrollThumb in
-     game.js), which is short and takes the colour of the band it is scrolled over. Native
-     thumbs can do neither — length is forced proportional and the colour is static. */
-  #leaderboardInner{ scrollbar-width:none; -ms-overflow-style:none; }
-  #leaderboardInner::-webkit-scrollbar{ width:0; height:0; }
+  /* Every menu panel: the native scrollbar is replaced by .rankThumb (attachScrollThumb in
+     game.js), which is short and takes the colour of the [data-band] block it is scrolled
+     over. Native thumbs can do neither — length is forced proportional and colour is static. */
+  .panelInner{ scrollbar-width:none; -ms-overflow-style:none; }
+  .panelInner::-webkit-scrollbar{ width:0; height:0; }
   .rankThumb{ position:fixed; width:5px; border-radius:3px; background:#9fb6c9; opacity:0;
     pointer-events:none; z-index:60; transition:background .18s ease, opacity .2s ease; }
   .pnl-title{ font-family:'Press Start 2P'; font-size:12px; line-height:1.5; margin:0 0 6px; padding-left:10px;
