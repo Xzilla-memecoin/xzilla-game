@@ -1404,7 +1404,9 @@ window._adsPayload = "WwogIHsKICAgICJpZCI6ICJ4emlsbGEtaG9tZSIsCiAgICAidGV4dCI6IC
       }
     });
   }
-  function openLoginPanel(){ const p=$("loginPanel"); if(!p) return; renderLoginPanel(); p.classList.remove("hidden"); }
+  function openLoginPanel(){ const p=$("loginPanel"); if(!p) return; renderLoginPanel();
+    try{ window.__hideLoosePanels("loginPanel"); }catch(_){ }
+    p.classList.remove("hidden"); }
   function closeLoginPanel(){ const p=$("loginPanel"); if(p) p.classList.add("hidden"); }
   { const p=$("loginPanel"); if(p) p.addEventListener("click", e=>{ if(e.target===p) closeLoginPanel(); }); }
 
@@ -1580,10 +1582,18 @@ window._adsPayload = "WwogIHsKICAgICJpZCI6ICJ4emlsbGEtaG9tZSIsCiAgICAidGV4dCI6IC
   }
 
   const PANELS = {WALLET:"walletPanel", MISSIONS:"missionsPanel", LEADERBOARD:"leaderboardPanel", SKINS:"skinsPanel"};
+  // Overlays opened outside the tab bar (HOW TO PLAY, sign-in, UPGRADES). They are not in
+  // PANELS, so without this they stayed open underneath whatever the player opened next.
+  const LOOSE_PANELS = ["howtoPanel","loginPanel","upgradesPanel"];
+  function hideLoosePanels(except){
+    LOOSE_PANELS.forEach(id=>{ if(id===except) return; const el=$(id); if(el) el.classList.add("hidden"); });
+  }
+  window.__hideLoosePanels = hideLoosePanels;   // index.html's HOW TO PLAY panel uses it too
   function hideAllOverlays(){
     $("startScreen").classList.add("hidden");
     const ps=$("pauseScreen"); if(ps) ps.classList.add("hidden");
     Object.values(PANELS).forEach(id=>$(id).classList.add("hidden"));
+    hideLoosePanels();
   }
   function showTab(name){
     document.querySelectorAll("#tabbar .tab").forEach(b=>b.classList.toggle("on", b.dataset.tab===name));
@@ -3290,6 +3300,7 @@ window._adsPayload = "WwogIHsKICAgICJpZCI6ICJ4emlsbGEtaG9tZSIsCiAgICAidGV4dCI6IC
         document.querySelectorAll("#tabbar .tab").forEach(b=>b.classList.toggle("on", b.dataset.tab===name));
         $("startScreen").classList.add("hidden");
         Object.values(PANELS).forEach(id=>{ const el=$(id); if(el) el.classList.add("hidden"); });
+        hideLoosePanels("upgradesPanel");
         $("gameOverScreen").classList.add("hidden");
         $("upgradesPanel").classList.remove("hidden");
         renderUpgrades();

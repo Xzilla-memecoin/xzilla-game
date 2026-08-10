@@ -1088,7 +1088,10 @@ const matScammers=SCAMMERS.map(cfg=>matURLorDraw(cfg.url,(x,S)=>drawScammer(x,S,
   let built = false;
   const panel = document.getElementById("howtoPanel");
   if(!panel) return;   // never let a missing node take down the rest of this script
-  function open(){ if(!built){ build(); built = true; } panel.classList.remove("hidden"); }
+  // Close any other loose overlay (sign-in, upgrades) first — otherwise two panels stack.
+  function open(){ if(!built){ build(); built = true; }
+    try{ window.__hideLoosePanels("howtoPanel"); }catch(_){ }
+    panel.classList.remove("hidden"); }
   function close(){ panel.classList.add("hidden"); }
 
   const btn = document.getElementById("howToBtn");
@@ -1813,6 +1816,6 @@ document.addEventListener("visibilitychange",()=>{ if(document.hidden&&state.run
 
 document.getElementById("bestScore").textContent=state.best;
 </script>
-<script src="game.js?v=143"></script>
+<script src="game.js?v=144"></script>
 </body>
 </html>
