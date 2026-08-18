@@ -4899,7 +4899,10 @@ window._adsPayload = "WwogIHsKICAgICJpZCI6ICJ4emlsbGEtaG9tZSIsCiAgICAidGV4dCI6IC
         const el=$("dailyClock"); if(!el){ clearInterval(_clockT); return; }
         const ms=msToNextUtcDay();
         // Rolled past midnight UTC while the menu sat open → new seed, new attempt.
-        if(drun.rec && drun.rec.day!==utcDay()){ renderDailyCard(); return; }
+        // Defer the repaint a tick: renderDailyCard() re-enters tickDailyClock(), and since
+        // drun.rec.day is never rewritten here, calling it synchronously recursed forever
+        // and blew the call stack. setTimeout breaks the recursion into separate turns.
+        if(drun.rec && drun.rec.day!==utcDay()){ clearInterval(_clockT); setTimeout(renderDailyCard,0); return; }
         // Short form: the countdown shares a row with the card title now, and "Resets in"
         // wrapped the title onto two lines at 300px. The clock glyph carries the meaning.
         el.textContent="⏱ "+hms(ms);
